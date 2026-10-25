@@ -1,16 +1,12 @@
-// The Parents tab: plan the G1s the uma you're training now should win so that, as a parent,
-// she reaches ◎ affinity with the fewest races (each race costs rating), and check whether her
+// The Parents tab: the ace's family and its affinity (each uma's own too), the fewest G1s the
+// uma you're training now should win for ◎ (each race costs rating), and check whether her
 // rating reaches SS (which doubles her white sparks' 3★ chance) with the best skill purchase.
 // Logic lives in affinity.js and rating.js; this file renders and keeps state.parents.
 (function (root) {
   "use strict";
-  const ROLES = [
-    ["l1", "Her legacy 1", ""],
-    ["l2", "Her legacy 2", ""],
-    ["partner", "Her partner", "optional"],
-    ["pg1", "Partner's legacy 1", "optional"],
-    ["pg2", "Partner's legacy 2", "optional"],
-  ];
+  // The other umas in the ace's family: Parent 1's two parents (this run's legacies), Parent 2
+  // and her two parents.
+  const ROLES = [["l1"], ["l2"], ["partner"], ["pg1"], ["pg2"]];
   const APT_LABELS = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const GRADES = ["S", "A", "B", "C", "D", "E", "F", "G"];
   const STAT_LABELS = ["Speed", "Stamina", "Power", "Guts", "Wit"];
@@ -27,7 +23,7 @@
       const s = ctx.state();
       if (!s.parents) s.parents = {};
       const p = s.parents;
-      const d = { self: null, selfTrainee: null, apt: null, minGrade: "B", target: 151, ace: null, rating: {} };
+      const d = { self: null, selfTrainee: null, selfWins: [], apt: null, minGrade: "B", target: 151, ace: null, rating: {} };
       Object.keys(d).forEach((k) => { if (p[k] === undefined) p[k] = d[k]; });
       ROLES.forEach(([k]) => { if (!p[k]) p[k] = { cid: null, wins: [] }; });
       const r = p.rating;
@@ -39,12 +35,14 @@
       return p;
     }
 
-    // Characters (one entry per character, any version).
-    const chars = new Map(), charByName = new Map();
+    // Characters (one entry per character, any version). The picker offers the ones on Global:
+    // Global's affinity data has no groups for the others, so they'd silently score 0.
+    const chars = new Map(), charByName = new Map(), onGlobal = new Set();
     D.DATA.trainees.forEach((t) => {
       if (!chars.has(t.cid)) chars.set(t.cid, t.n);
-      if (!charByName.has(t.n.toLowerCase())) charByName.set(t.n.toLowerCase(), t.cid);
+      if (D.onGlobal(t)) onGlobal.add(t.cid);
     });
+    chars.forEach((n, cid) => { if (onGlobal.has(cid)) charByName.set(n.toLowerCase(), cid); });
     const charName = (cid) => (cid ? chars.get(+cid) || "#" + cid : "");
     const trainee = (id) => D.DATA.trainees.find((t) => t.id === +id) || null;
     const versions = (cid) => D.DATA.trainees.filter((t) => t.cid === +cid);
@@ -61,47 +59,86 @@
     function lineage(p) {
       return { trainee: p.ace, p1: p.self, p2: p.partner.cid, g11: p.l1.cid, g12: p.l2.cid, g21: p.pg1.cid, g22: p.pg2.cid };
     }
+    // Every win entered so far, Parent 1's own included.
     function knownWins(p) {
-      return { p2: p.partner.wins, g11: p.l1.wins, g12: p.l2.wins, g21: p.pg1.wins, g22: p.pg2.wins };
+      return { p1: p.selfWins, p2: p.partner.wins, g11: p.l1.wins, g12: p.l2.wins, g21: p.pg1.wins, g22: p.pg2.wins };
+    }
+    // Families the game doesn't allow (GameTora's checks), plus picks with no Global data.
+    function problems(p) {
+      const n = charName, out = [];
+      const same = (a, b) => a && b && +a === +b;
+      if (same(p.ace, p.self) || same(p.ace, p.partner.cid)) out.push(`The ace can't be the same character as a parent (${n(p.ace)}).`);
+      if (same(p.self, p.partner.cid)) out.push(`Parent 1 and Parent 2 can't be the same character (${n(p.self)}).`);
+      if (same(p.self, p.l1.cid) || same(p.self, p.l2.cid)) out.push(`${n(p.self)} can't be her own grandparent.`);
+      if (same(p.partner.cid, p.pg1.cid) || same(p.partner.cid, p.pg2.cid)) out.push(`${n(p.partner.cid)} can't be her own grandparent.`);
+      if (same(p.l1.cid, p.l2.cid)) out.push(`${n(p.self) || "Parent 1"}'s two parents can't be the same character (${n(p.l1.cid)}).`);
+      if (same(p.pg1.cid, p.pg2.cid)) out.push(`${n(p.partner.cid) || "Parent 2"}'s two parents can't be the same character (${n(p.pg1.cid)}).`);
+      [p.ace, p.self, p.partner.cid, p.l1.cid, p.l2.cid, p.pg1.cid, p.pg2.cid].forEach((cid) => {
+        if (cid && !onGlobal.has(+cid)) out.push(`${n(cid)} isn't on Global yet, so Global has no affinity data for her: pick another uma.`);
+      });
+      return Array.from(new Set(out));
     }
     function plan(p) {
+      if (problems(p).length) return null;
       const base = A.total(lineage(p), knownWins(p));
       const need = p.ace ? Math.max(0, p.target - base.total) : Infinity;
       const links = [["l1", "grandparent"], ["l2", "grandparent"], ["partner", "parent 2"]]
         .map(([k, role]) => ({ role: charName(p[k].cid) + " (" + role + ")", cid: p[k].cid, wins: p[k].wins }));
-      const out = A.planRaces({ self: p.self, apt: apt(p), minGrade: p.minGrade, links, need });
-      return Object.assign(out, { base, need, after: base.total + out.points });
+      const out = A.planRaces({ self: p.self, apt: apt(p), minGrade: p.minGrade, links, need, won: p.selfWins });
+      // Each uma's own affinity once Parent 1 wins the planned races too.
+      const planned = Object.assign({}, knownWins(p), { p1: p.selfWins.concat(out.agenda.map((r) => r.name)) });
+      return Object.assign(out, { base, need, after: base.total + out.points, own: p.ace ? A.individual(lineage(p), planned) : null });
     }
+    // Parent 2 candidates for this ace and Parent 1: the points each adds (her pairings with both).
+    function partners(p) {
+      if (!p.ace || !p.self) return [];
+      const taken = new Set([+p.ace, +p.self]);
+      return Array.from(onGlobal).filter((cid) => !taken.has(cid))
+        .map((cid) => ({ cid, pts: A.together(p.ace, cid) + A.together(p.self, cid) }))
+        .sort((a, b) => b.pts - a.pts || charName(a.cid).localeCompare(charName(b.cid)));
+    }
+    const affBadge = (n) => `<span class="pp-aff" title="Her own affinity in this family: her sparks fire ${A.sparkMult(n).toFixed(2)}× as often as their base chance">affinity ${n} · sparks ×${A.sparkMult(n).toFixed(2)}</span>`;
 
     function charInput(key, value, placeholder) {
       return `<input data-pp-char="${key}" list="ppChars" value="${esc(charName(value))}" placeholder="${esc(placeholder || "Character")}" autocomplete="off">`;
     }
-    function winsBox(key, wins, who) {
+    function winsBox(key, wins, who, verb) {
       const id = "w-" + key;
-      return `<details class="pp-wins" data-pp-open="${id}"${open.has(id) ? " open" : ""}><summary>Tick ${esc(who)}'s G1 wins · ${wins.length ? wins.length + " ticked: " + esc(wins.slice(0, 3).join(", ")) + (wins.length > 3 ? " +" + (wins.length - 3) : "") : "none yet"}</summary>
+      return `<details class="pp-wins" data-pp-open="${id}"${open.has(id) ? " open" : ""}><summary>Tick the G1s ${esc(who)} ${verb || "won"} · ${wins.length ? wins.length + " ticked: " + esc(wins.slice(0, 3).join(", ")) + (wins.length > 3 ? " +" + (wins.length - 3) : "") : "none yet"}</summary>
         <div class="pp-g1grid">${g1.map((r) => `<label class="pp-g1"><input type="checkbox" data-pp-win="${key}" value="${esc(r.name)}"${wins.indexOf(r.name) !== -1 ? " checked" : ""}> ${esc(r.name)}</label>`).join("")}</div></details>`;
     }
 
-    // ① Who: the uma you're training, her parents, the ace and partner, and their G1 wins.
     // ① Who: the ace's family tree, since affinity is counted on the ace's run. Parent 1 is the
-    // uma you're training now; her grandparents are this run's legacies. Names fill the labels.
+    // uma you're training now; her grandparents are this run's legacies. Names fill the labels,
+    // and once the ace is picked each uma shows her own affinity (what her sparks scale with).
     function whoHTML(p) {
       const vers = p.self ? versions(p.self) : [];
       const a = apt(p);
       const n = (cid, fallback) => (cid ? esc(charName(cid)) : fallback);
       const p1 = n(p.self, "Parent 1"), p2 = n(p.partner.cid, "Parent 2");
-      const box = (k, label, note) => `<div class="pp-link"><label class="field"><span>${label}${note ? ` <i class="mini">${note}</i>` : ""}</span>${charInput(k, p[k].cid)}</label>${p[k].cid ? winsBox(k, p[k].wins, charName(p[k].cid)) : ""}</div>`;
+      const errs = problems(p);
+      const own = p.ace && !errs.length ? A.individual(lineage(p), knownWins(p)) : null;
+      const OWN = { l1: "g11", l2: "g12", partner: "p2", pg1: "g21", pg2: "g22" };
+      const box = (k, label, note) => `<div class="pp-link"><label class="field"><span>${label}${note ? ` <i class="mini">${note}</i>` : ""}</span>${charInput(k, p[k].cid)}</label>${own && p[k].cid ? affBadge(own[OWN[k]]) : ""}${p[k].cid ? winsBox(k, p[k].wins, charName(p[k].cid)) : ""}</div>`;
+      const tot = own ? A.total(lineage(p), knownWins(p)).total : null;
+      const best = partners(p);
+      const cur = best.find((x) => x.cid === +p.partner.cid);
       return `<p class="mini">Affinity is counted on the <b>ace's</b> run, so this is her family tree. Fill in names and they show up in the labels.</p>
+        ${errs.length ? `<div class="pp-errs">${errs.map((e) => `<p class="mini warn">${esc(e)}</p>`).join("")}</div>` : ""}
         <div class="pp-tree">
-          <div class="pp-node"><label class="field"><span>Ace <i class="mini">the uma you'll breed (optional)</i></span>${charInput("ace", p.ace, "The future trainee")}</label></div>
+          <div class="pp-node"><label class="field"><span>Ace <i class="mini">the uma you'll breed</i></span>${charInput("ace", p.ace, "The future trainee")}</label>${tot != null ? `<span class="pp-aff"><b>${A.symbol(tot)} ${tot}</b> with the wins entered</span>` : ""}</div>
           <div class="pp-branch">
             <div class="pp-node"><label class="field"><span>Parent 1 <i class="mini">the uma you're training now (also the coach's trainee)</i></span>${charInput("self", p.self, "Your trainee")}</label>
-              ${vers.length > 1 ? `<label class="field"><span>Version</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}</div>
+              ${vers.length > 1 ? `<label class="field"><span>Version</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}${own ? affBadge(own.p1) : ""}</div>
+            ${p.self ? winsBox("self", p.selfWins, charName(p.self), "already won") : ""}
             ${a ? `<div class="pp-apt"><span class="mini">${p1}'s aptitudes, used to skip races she can't win. If a spark raised one, change it here:</span> ${[0, 1, 2, 3, 4, 5].map((i) => `<label class="pp-aptf"><span>${APT_LABELS[i]}</span><select data-pp-apt="${i}">${GRADES.map((g) => `<option${a[i] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("")}${p.apt ? ' <button type="button" class="btn ghost small" data-pp-act="aptReset">Use her base aptitudes</button>' : ""}</div>` : ""}
             <div class="pp-branch pp-links">${box("l1", "Grandparent", p1 + "'s parent (a legacy in this run)")}${box("l2", "Grandparent", p1 + "'s parent (a legacy in this run)")}</div>
           </div>
           <div class="pp-branch">
             <div class="pp-links">${box("partner", "Parent 2", "the ace's other parent (optional)")}</div>
+            ${best.length ? `<details class="pp-wins pp-partners" data-pp-open="partners"${open.has("partners") ? " open" : ""}><summary>Best Parent 2 for ${n(p.ace)} × ${p1}${cur ? ` · ${esc(charName(cur.cid))} adds ${cur.pts}` : ""}</summary>
+              <p class="mini">The points each one adds from her pairings with the ace and with ${p1}, before any shared wins or her own parents. Higher means fewer races.</p>
+              <div class="row-wrap">${best.slice(0, 10).map((x) => `<button type="button" class="btn ghost small" data-pp-partner="${x.cid}"${x.cid === +p.partner.cid ? ' aria-pressed="true"' : ""}>${esc(charName(x.cid))} +${x.pts}</button>`).join("")}</div></details>` : ""}
             <div class="pp-branch pp-links">${box("pg1", "Grandparent", p2 + "'s parent (optional)")}${box("pg2", "Grandparent", p2 + "'s parent (optional)")}</div>
           </div>
         </div>`;
@@ -117,11 +154,11 @@
           <label class="field"><span>Race only if aptitude is</span><select data-pp="minGrade">${["A", "B", "C"].map((g) => `<option value="${g}"${p.minGrade === g ? " selected" : ""}>${g} or better</option>`).join("")}</select></label>
         </div>
         <details class="pred-help"><summary>How this works</summary><p class="mini">Affinity (◎/○/△ on the legacy screen) raises every spark's chance to fire. Most of it is fixed by which characters you pair, but each G1 that two of them both won adds <b>+3</b>: the two parents, and each parent with her own two parents. So she should win the G1s her own parents won (they'll be her grandparents later) and the ones her future partner won. Career-goal G1s come first (she runs them anyway), then the races shared with the most umas; races outside her aptitudes or on a turn already taken are skipped. G2/G3 wins and titles don't count on Global; over 150 is ◎. Formula: GameTora's compatibility calculator.</p></details>`;
-      if (!res) return out + `<p class="mini">Pick Parent 1 (the uma you're training) in ① to plan her races.</p>`;
+      if (!res) return out + `<p class="mini">${p.self ? "Fix the family in ① first." : "Pick Parent 1 (the uma you're training) in ① to plan her races."}</p>`;
       const b = res.base;
       out += `<div class="pp-result">`;
       if (p.ace) {
-        out += `<p>Affinity in that lineage without her wins: ${sym(b.total)} (pairings ${b.base}, shared wins among the others ${b.racePts}). ${res.need > 0 ? `Needs <b>+${res.need}</b> from her G1s for ${A.symbol(p.target)}.` : `Already ${A.symbol(p.target)}: she only needs her career goals.`}</p>`;
+        out += `<p>Affinity now, with the wins entered: ${sym(b.total)} (pairings ${b.base}, shared wins ${b.racePts}). ${res.need > 0 ? `Needs <b>+${res.need}</b> from her G1s for ${A.symbol(p.target)}.` : `Already ${A.symbol(p.target)}: she only needs her career goals.`}</p>`;
       } else {
         out += `<p class="mini">Pick the ace you'll breed to see how much affinity she still needs. Until then this lists every shared G1 she can run.</p>`;
       }
@@ -129,8 +166,10 @@
       if (!res.candidates.length) out += `<p class="mini">None of the linked umas has a G1 win entered yet. Tick each one's G1 wins above.</p>`;
       else {
         out += `<div class="table-wrap"><table class="plan"><thead><tr><th>Turn</th><th>Race</th><th></th><th>Shared with</th><th>Affinity</th></tr></thead><tbody>${res.agenda.map((r) => `
-          <tr><td class="num">${r.turn}<div class="mini">${esc(ctx.turnText(r.turn))}</div></td><td><b>${esc(r.name)}</b><div class="mini">${r.d}m ${r.s === 2 ? "dirt" : "turf"}${r.aptGrades ? " · aptitude " + r.aptGrades.join("/") : ""}</div></td><td>${r.free ? '<span class="chip">career goal, free</span>' : '<span class="chip warnchip">extra race</span>'}</td><td class="mini">${esc(r.with.join(", "))}</td><td class="num">+${r.points}</td></tr>`).join("")}</tbody></table></div>
+          <tr><td class="num">${r.turn}<div class="mini">${esc(ctx.turnText(r.turn))}</div></td><td><b>${esc(r.name)}</b><div class="mini">${r.d}m ${r.s === 2 ? "dirt" : "turf"}${r.aptGrades ? " · aptitude " + r.aptGrades.join("/") : ""}</div></td><td>${r.free ? (r.goal === "choice" ? `<span class="chip">career goal, free: pick this one</span><div class="mini">of ${esc(r.options.join(" / "))}</div>` : '<span class="chip">career goal, free</span>') : '<span class="chip warnchip">extra race</span>'}</td><td class="mini">${esc(r.with.join(", "))}</td><td class="num">+${r.points}</td></tr>`).join("")}</tbody></table></div>
           <p><b>${extra.length} extra race${extra.length === 1 ? "" : "s"}</b> (plus ${res.agenda.length - extra.length} career goal${res.agenda.length - extra.length === 1 ? "" : "s"}) for <b>+${res.points}</b>${p.ace ? ` → ${sym(res.after)}${res.reached ? "" : ` · still short of ${A.symbol(p.target)}: pair her with umas she shares more with, or raise an aptitude`}` : ""}.</p>`;
+        if (res.own) out += `<p class="mini">After these wins, each uma's own affinity (her sparks fire that many times their base chance): ${[["p1", p.self], ["g11", p.l1.cid], ["g12", p.l2.cid], ["p2", p.partner.cid], ["g21", p.pg1.cid], ["g22", p.pg2.cid]].filter(([, c]) => c).map(([k, c]) => `${esc(charName(c))} ${res.own[k]} (×${A.sparkMult(res.own[k]).toFixed(2)})`).join(" · ")}.</p>`;
+        if (res.alreadyWon.length) out += `<p class="mini">Already won, counted above: ${res.alreadyWon.map(esc).join(", ")}.</p>`;
         if (res.skipped.length) out += `<p class="mini">Clashes with a race already planned on the same turn: ${res.skipped.map((r) => esc(r.name)).join(", ")}.</p>`;
         if (res.unfit.length) out += `<p class="mini">Shared but outside her aptitudes (${esc(p.minGrade)} or better): ${res.unfit.map((r) => `${esc(r.name)} (+${r.points}, ${r.aptGrades.join("/")})`).join(", ")}.</p>`;
         out += `<p class="mini">Win every race listed: only a win counts. Independent Training wins races on distance and surface aptitude alone.</p>`;
@@ -202,32 +241,77 @@
       return out + "</div>";
     }
 
-    const section = (key, title, note, body) => `<details class="panel pp-sec" data-pp-open="${key}"${open.has(key) ? " open" : ""}><summary><h2>${title}</h2><span class="mini">${note}</span></summary>${body}</details>`;
+    const section = (key, title, note, body) => `<details class="panel pp-sec" data-pp-open="${key}"${open.has(key) ? " open" : ""}><summary><h2>${title}</h2><span class="mini" data-pp-note="${key}">${note}</span></summary><div data-pp-body="${key}">${body}</div></details>`;
+
+    // The autocomplete lists don't change, so they're built once, outside the redrawn page.
+    function lists() {
+      if (document.getElementById("ppLists")) return;
+      const box = document.createElement("div");
+      box.id = "ppLists";
+      box.hidden = true;
+      box.innerHTML = `<datalist id="ppChars">${Array.from(charByName.keys()).map((k) => chars.get(charByName.get(k))).sort().map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
+        <datalist id="ppSkills">${ctx.skillNames().map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+      document.body.appendChild(box);
+    }
+
+    // ③ Deck races the G1s ② plans: once the ace is picked and a shared win entered (else the
+    // default agenda). Returns what ③ depends on, to redraw it only when that changes.
+    let deckSig = null;
+    function syncDeck(p) {
+      const res = p.self && p.ace ? plan(p) : null;
+      ctx.setItRaces(res && res.candidates.length ? res.agenda.length : null);
+      return JSON.stringify([res && res.candidates.length ? res.agenda.length : null, p.selfTrainee]);
+    }
+
+    const notes = (p) => ({ who: p.self ? esc(charName(p.self)) : "pick your uma", races: "fewest G1s for affinity", rating: "skills to buy, reach SS" });
+    const bodies = { who: whoHTML, races: racesHTML, rating: ratingHTML };
 
     function render(el) {
       const p = st();
-      // ③ Deck races the G1s ② plans (the default agenda until a win is entered).
-      const res = p.self ? plan(p) : null;
-      ctx.setItRaces(res && res.candidates.length ? res.agenda.length : null);
-      const skillNames = ctx.skillNames();
+      lists();
+      deckSig = syncDeck(p);
+      const nt = notes(p);
       el.innerHTML = `<div class="parents">
-        <datalist id="ppChars">${Array.from(chars.values()).sort().map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
-        <datalist id="ppSkills">${skillNames.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
         <p class="mini pp-intro">Build a parent in order: who she is, which G1s to win, the deck, then the skills to buy at the end so she reaches SS.</p>
-        ${section("who", "① Who", p.self ? esc(charName(p.self)) : "pick your uma", whoHTML(p))}
-        ${section("races", "② Races", "fewest G1s for affinity", racesHTML(p))}
+        ${section("who", "① Who", nt.who, whoHTML(p))}
+        ${section("races", "② Races", nt.races, racesHTML(p))}
         ${section("deck", "③ Deck", "ace or debuffer parent", ctx.deckHTML())}
-        ${section("rating", "④ After the run", "skills to buy, reach SS", ratingHTML(p))}
+        ${section("rating", "④ After the run", nt.rating, ratingHTML(p))}
       </div>`;
     }
 
-    // Re-render after the event: a change fired by blur can't replace its own element mid-event.
+    // Redraw after a change in this tab: only ①, ② and ④, and ③ when its inputs changed (so
+    // what you're typing in ③ stays). Not mid-event: a change fired by blur can't replace its
+    // own element.
     let pending = false;
     function rerender() {
       ctx.save();
       if (pending) return;
       pending = true;
-      setTimeout(() => { pending = false; const el = ctx.container(); if (el && ctx.state().tab === "parents") render(el); }, 0);
+      setTimeout(() => {
+        pending = false;
+        const el = ctx.container();
+        if (!el || ctx.state().tab !== "parents") return;
+        if (!el.querySelector(".parents")) { render(el); return; }
+        const p = st();
+        const sig = syncDeck(p);
+        if (sig !== deckSig) {
+          // ③ shows the race count: redraw it, keeping anything typed in its text boxes.
+          deckSig = sig;
+          const deck = el.querySelector('[data-pp-body="deck"]');
+          if (deck) {
+            const typed = Array.from(deck.querySelectorAll("input[id]")).filter((x) => x.type === "text" || !x.type || x.type === "search").map((x) => [x.id, x.value]);
+            deck.innerHTML = ctx.deckHTML();
+            typed.forEach(([id, v]) => { const x = deck.querySelector("#" + id); if (x && v) x.value = v; });
+          }
+        }
+        const nt = notes(p);
+        Object.keys(bodies).forEach((k) => {
+          const body = el.querySelector(`[data-pp-body="${k}"]`), note = el.querySelector(`[data-pp-note="${k}"]`);
+          if (body) body.innerHTML = bodies[k](p);
+          if (note) note.innerHTML = nt[k];
+        });
+      }, 0);
     }
 
     function onToggle(e) {
@@ -256,6 +340,8 @@
         rerender();
         return true;
       }
+      const pt = t.closest("[data-pp-partner]");
+      if (pt) { const cid = +pt.dataset.ppPartner; if (p.partner.cid !== cid) p.partner = { cid, wins: [] }; p.pg1 = { cid: null, wins: [] }; p.pg2 = { cid: null, wins: [] }; raceCost = null; rerender(); return true; }
       const m = t.closest("[data-pp-must]");
       if (m) { const id = m.dataset.ppMust; const i = r.must.indexOf(id); if (i === -1) r.must.push(id); else r.must.splice(i, 1); rerender(); return true; }
       const sd = t.closest("[data-pp-shop-del]");
@@ -283,12 +369,14 @@
           const keep = vs.find((x) => x.id === +p.selfTrainee);
           p.selfTrainee = keep ? keep.id : vs.length ? vs[0].id : null;
           p.apt = null;
+          p.selfWins = [];
           setTraineeLater(p.selfTrainee);
         } else if (k === "ace") p.ace = cid || null;
-        else { if (p[k].cid !== cid) p[k] = { cid: cid || null, wins: cid ? p[k].wins : [] }; }
+        // Wins belong to the uma: a different uma starts with none ticked.
+        else { if (p[k].cid !== cid) p[k] = { cid: cid || null, wins: [] }; }
         raceCost = null;
       } else if (ds.ppWin != null) {
-        const w = p[ds.ppWin].wins;
+        const w = ds.ppWin === "self" ? p.selfWins : p[ds.ppWin].wins;
         const i = w.indexOf(t.value);
         if (t.checked && i === -1) w.push(t.value);
         if (!t.checked && i !== -1) w.splice(i, 1);

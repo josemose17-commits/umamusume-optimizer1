@@ -14,7 +14,7 @@ function fixture() {
     meFix: 1, fcalFix: 1, strengthFix: 1, caps: {}, sparks: {}, targets: {},
     stats: {speed: 300, stamina: 200, power: 250, guts: 150, wit: 200},
     goals: [], goalsOff: [], goalRace: false, extras: {}, calib: [], fcal: [], log: [],
-    race: '', fans: 0, tab: 'cm', cm: {goal: 'ace', preset: 'cm1', style: 'Senkou', ownedOnly: true, borrow: false, locked: [30101,30052,20033,30078,30111,30054], must: [201322]}, conditions: {}, facLevels: {},
+    race: '', fans: 0, tab: 'parents', cm: {goal: 'ace', preset: 'cm1', style: 'Senkou', ownedOnly: true, borrow: false, locked: [30101,30052,20033,30078,30111,30054], must: [201322]}, conditions: {}, facLevels: {},
     gl: {songs: {}, tokens: [100, 100, 100, 100, 100], lessons: {}, shop: {}, focus: 'songs'},
     deck: {trainee: null, globalOnly: true, slots: [null, null, null, null, null, null]},
     facilities: ['speed', 'stamina', 'power', 'guts', 'wit'].map(stat => ({stat, gain: 20, fail: 0, cards: 0, members: [], hints: [], extra: 0, extras: {}}))
@@ -51,7 +51,7 @@ async function result(ui) {
 }
 
 function stateFor(goal='ace') {
- const s=fixture();s.cm.goal=goal;s.cm.must=[];s.cm.globalSkills=false;return s;
+ const s=fixture();s.cm.goal=goal;s.cm.must=[];s.cm.globalSkills=false;s.tab=goal==='race'?'cm':'parents';return s;
 }
 function chart(w, values={900011:2,910011:1,900031:1,910031:1,91101351:1,901491:1,201322:1,900251:1}) {
  w.localStorage.setItem('uma-skillpaste-v1',JSON.stringify({cm1:{Senkou:values}}));

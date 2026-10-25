@@ -664,3 +664,7 @@ table.pred .over { color: var(--accent); }
 .pp-tree { display: grid; gap: 8px; }
 .pp-branch { display: grid; gap: 8px; margin-left: 18px; padding-left: 12px; border-left: 2px solid var(--line); }
 .pp-node { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.pp-aff { font-size: .78rem; color: var(--muted); align-self: center; }
+.pp-aff b { color: var(--fg); }
+.pp-errs { display: grid; gap: 2px; }
+.pp-partners [aria-pressed="true"] { border-color: var(--accent); }

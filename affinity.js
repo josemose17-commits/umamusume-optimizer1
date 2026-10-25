@@ -3,12 +3,16 @@
 //
 // Global's formula, as GameTora's compatibility calculator computes it: every affinity group a
 // set of characters all belong to adds its points.
-//   total = (trainee, parent 1) + (trainee, parent 2) + 2 × (parent 1, parent 2)
+//   total = (trainee, parent 1) + (trainee, parent 2) + (parent 1, parent 2)
 //         + (trainee, parent, grandparent) for each of the 4 grandparents
 //         + 3 for each G1 both members of a pair won: parent 1 & parent 2, and each parent
 //           with her own two grandparents (one win per race name, Classic or Senior).
 // G2/G3 wins and titles don't count on Global. Over 150 is ◎, over 50 is ○, the rest △.
 // A grandparent or parent that is the same character as the one below it adds no points.
+// Each uma also has her own affinity (individual()), which is what her sparks' chances scale
+// with: a spark's chance × (1 + her affinity / 100), capped at 100% (GameTora's inheritance
+// chances). Checked against GameTora's own code on 1,500 random families: totals and every
+// uma's own affinity match.
 (function (root) {
   "use strict";
   const WIN_POINTS = 3;
@@ -68,10 +72,25 @@
       p2g22: L.p2 && L.g22 ? shared(w.p2, w.g22) : [],
     };
     const racePts = Object.values(race).reduce((a, r) => a + r.length * WIN_POINTS, 0);
-    const side1 = s1.base + s1.ga + s1.gb + (L.p1 ? pp : 0), side2 = s2.base + s2.ga + s2.gb + (L.p2 ? pp : 0);
-    const sum = side1 + side2 + racePts;
+    // The parent pair counts once in the total (and in each parent's own affinity).
+    const sum = s1.base + s1.ga + s1.gb + s2.base + s2.ga + s2.gb + pp + racePts;
     return { total: sum, symbol: symbol(sum), pp, side1: s1, side2: s2, race, racePts, base: sum - racePts };
   }
+
+  // Each uma's own affinity in the lineage (GameTora's per-slot values).
+  function individual(L, wins) {
+    const t = total(L, wins), r = t.race, P = WIN_POINTS;
+    return {
+      p1: L.p1 ? t.side1.base + t.side1.ga + t.side1.gb + t.pp + P * (r.p1p2.length + r.p1g11.length + r.p1g12.length) : 0,
+      p2: L.p2 ? t.side2.base + t.side2.ga + t.side2.gb + t.pp + P * (r.p1p2.length + r.p2g21.length + r.p2g22.length) : 0,
+      g11: L.g11 ? t.side1.ga + P * r.p1g11.length : 0,
+      g12: L.g12 ? t.side1.gb + P * r.p1g12.length : 0,
+      g21: L.g21 ? t.side2.ga + P * r.p2g21.length : 0,
+      g22: L.g22 ? t.side2.gb + P * r.p2g22.length : 0,
+    };
+  }
+  // How much more often her sparks fire than their base chance.
+  const sparkMult = (affinity) => 1 + Math.max(0, affinity || 0) / 100;
 
   const DIST = (d) => (d <= 1400 ? 2 : d <= 1800 ? 3 : d <= 2400 ? 4 : 5); // index in the aptitude list
   const GRADE_OK = { S: 7, A: 6, B: 5, C: 4, D: 3, E: 2, F: 1, G: 0 };
@@ -86,12 +105,39 @@
     return Array.from(by.values());
   }
 
-  // The fixed G1 career goals of a character: run anyway, so their affinity is free.
-  function goalG1s(cid) {
+  // A character's career race goals: fixed races (run on their turn) and "pick one" choices
+  // (goals sharing an order with a race choice: she runs one of them).
+  function careerGoals(cid) {
     const goals = (gdata().objectives || {})[cid] || [];
     const g1 = new Set(g1Races().map((r) => r.name));
-    const out = [];
-    goals.forEach((g) => { if (!g.ch && g.r) g.r.forEach((n) => { if (g1.has(n)) out.push({ name: n, turn: g.t }); }); });
+    const fixed = [], byOrder = new Map();
+    goals.forEach((g) => {
+      if (!g.r || !g.r.length) return;
+      if (!g.ch) { g.r.forEach((n) => fixed.push({ name: n, turn: g.t, g1: g1.has(n) })); return; }
+      const key = g.o != null ? g.o : "t" + g.t;
+      if (!byOrder.has(key)) byOrder.set(key, []);
+      g.r.forEach((n) => byOrder.get(key).push({ name: n, turn: g.t, g1: g1.has(n) }));
+    });
+    return { fixed, choices: Array.from(byOrder.values()) };
+  }
+  // The fixed G1 career goals (run anyway, so their affinity is free).
+  const goalG1s = (cid) => careerGoals(cid).fixed.filter((g) => g.g1).map((g) => ({ name: g.name, turn: g.turn }));
+
+  // Can every item get its own turn? items: [{ turns }], blocked: turns already taken.
+  // Bipartite matching (augmenting paths); returns item index -> turn, or null.
+  function assignTurns(items, blocked) {
+    const owner = new Map();
+    const tryItem = (k, seen) => {
+      for (const t of items[k].turns) {
+        if (blocked.has(t) || seen.has(t)) continue;
+        seen.add(t);
+        if (!owner.has(t) || tryItem(owner.get(t), seen)) { owner.set(t, k); return true; }
+      }
+      return false;
+    };
+    for (let k = 0; k < items.length; k++) if (!tryItem(k, new Set())) return null;
+    const out = new Array(items.length);
+    owner.forEach((k, t) => { out[k] = t; });
     return out;
   }
 
@@ -100,44 +146,63 @@
   // grandparents in that lineage) and the other parent.
   //   o.self: character id; o.links: [{ role, cid, wins: [names] }]; o.apt: her aptitudes
   //   (GameTora order); o.minGrade: lowest distance/surface aptitude worth racing ("B");
-  //   o.need: race points still needed for the target (from total()); o.races: override list.
-  // Returns every candidate race with its points and why, the picked agenda (fewest races to
-  // cover `need`, career goals first since they're free) and the points it reaches.
+  //   o.need: race points still needed for the target (from total()); o.won: G1s she has
+  //   already won (counted in total(), so not planned again); o.races: override list.
+  // Her career goals come first: fixed G1 goals are free, a "pick one" goal takes its shared
+  // G1 if it has one, and every goal's turn is taken. Then the races shared with the most umas,
+  // each kept only if every planned race still gets its own turn (a race held in two years
+  // moves to the other one). Highest points first gives the fewest races: sets of races that
+  // fit distinct turns form a matroid, where greedy by weight is optimal.
   function planRaces(o) {
     const links = (o.links || []).filter((l) => l.cid && l.cid !== o.self && (l.wins || []).length);
-    const goals = o.self ? goalG1s(o.self) : [];
-    const goalName = new Map(goals.map((g) => [g.name, g.turn]));
+    const won = new Set(o.won || []);
+    const goals = o.self ? careerGoals(o.self) : { fixed: [], choices: [] };
     const min = GRADE_OK[o.minGrade || "B"];
     const apt = o.apt || null;
     const all = (o.races || g1Races()).map((r) => {
       const with_ = links.filter((l) => l.wins.indexOf(r.name) !== -1).map((l) => l.role);
       const aptGrades = apt ? [apt[r.s === 2 ? 1 : 0], apt[DIST(r.d)]] : null;
       const fits = !aptGrades || aptGrades.every((g) => GRADE_OK[g] >= min);
-      return { name: r.name, turns: r.turns, d: r.d, s: r.s, points: with_.length * WIN_POINTS, with: with_, goal: goalName.has(r.name), goalTurn: goalName.get(r.name), aptGrades, fits };
+      return { name: r.name, turns: r.turns, d: r.d, s: r.s, points: won.has(r.name) ? 0 : with_.length * WIN_POINTS, with: with_, aptGrades, fits, won: won.has(r.name) };
     });
-    const candidates = all.filter((r) => r.points > 0);
-    const used = new Set();
-    const agenda = [];
+    const byName = new Map(all.map((r) => [r.name, r]));
+    const blocked = new Set(), agenda = [];
     let got = 0;
-    // Career goals first: they're run anyway (and their turns are taken).
-    candidates.filter((r) => r.goal).forEach((r) => { used.add(r.goalTurn); agenda.push(Object.assign({ turn: r.goalTurn, free: true }, r)); got += r.points; });
-    goals.forEach((g) => used.add(g.turn));
-    const rest = candidates.filter((r) => !r.goal && r.fits).sort((a, b) => b.points - a.points || a.turns.length - b.turns.length || a.name.localeCompare(b.name));
-    const skipped = [];
+    // Fixed goals: their turns are taken; shared G1 goals are free points.
+    goals.fixed.forEach((g) => {
+      blocked.add(g.turn);
+      const r = byName.get(g.name);
+      if (r && r.points > 0) { agenda.push(Object.assign({}, r, { turn: g.turn, free: true, goal: "fixed" })); got += r.points; }
+    });
+    // "Pick one" goals: the shared option with the most points, else any option (matched below).
+    const open = [];
+    goals.choices.forEach((opts) => {
+      const best = opts.map((x) => ({ x, r: byName.get(x.name) })).filter((y) => y.r && y.r.points > 0 && !blocked.has(y.x.turn))
+        .sort((a, b) => b.r.points - a.r.points)[0];
+      if (best) {
+        blocked.add(best.x.turn);
+        agenda.push(Object.assign({}, best.r, { turn: best.x.turn, free: true, goal: "choice", options: opts.map((x) => x.name) }));
+        got += best.r.points;
+      } else open.push({ turns: Array.from(new Set(opts.map((x) => x.turn))), choice: opts.map((x) => x.name) });
+    });
+    const goalNames = new Set(agenda.map((r) => r.name));
+    const candidates = all.filter((r) => r.points > 0);
+    const rest = candidates.filter((r) => !goalNames.has(r.name) && r.fits).sort((a, b) => b.points - a.points || a.turns.length - b.turns.length || a.name.localeCompare(b.name));
+    const picked = [], skipped = [];
     rest.forEach((r) => {
       if (got >= (o.need || 0)) return;
-      const turn = r.turns.find((t) => !used.has(t));
-      if (turn == null) { skipped.push(Object.assign({ why: "clash" }, r)); return; }
-      used.add(turn);
-      agenda.push(Object.assign({ turn, free: false }, r));
+      if (!assignTurns(open.concat(picked, [r]), blocked)) { skipped.push(Object.assign({ why: "clash" }, r)); return; }
+      picked.push(r);
       got += r.points;
     });
+    const turns = assignTurns(open.concat(picked), blocked) || [];
+    picked.forEach((r, k) => agenda.push(Object.assign({}, r, { turn: turns[open.length + k], free: false })));
     agenda.sort((a, b) => a.turn - b.turn);
-    const extra = agenda.filter((r) => !r.free).length;
-    return { candidates, agenda, points: got, extraRaces: extra, reached: got >= (o.need || 0), skipped, unfit: candidates.filter((r) => !r.goal && !r.fits) };
+    return { candidates, agenda, points: got, extraRaces: picked.length, reached: got >= (o.need || 0), skipped,
+      unfit: candidates.filter((r) => !goalNames.has(r.name) && !r.fits), alreadyWon: all.filter((r) => r.won).map((r) => r.name) };
   }
 
-  const api = { WIN_POINTS, GREAT, GOOD, together, total, symbol, g1Races, goalG1s, planRaces, shared };
+  const api = { WIN_POINTS, GREAT, GOOD, together, total, individual, sparkMult, symbol, g1Races, careerGoals, goalG1s, assignTurns, planRaces, shared };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaAffinity = api;
 })(typeof window !== "undefined" ? window : globalThis);

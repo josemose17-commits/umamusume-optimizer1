@@ -14,7 +14,7 @@ function fixture() {
     meFix: 1, fcalFix: 1, strengthFix: 1, caps: {}, sparks: {}, targets: {},
     stats: {speed: 300, stamina: 200, power: 250, guts: 150, wit: 200},
     goals: [], goalsOff: [], goalRace: false, extras: {}, calib: [], fcal: [], log: [],
-    race: '', fans: 0, tab: 'cm', cm: {goal: 'ace', preset: 'cm1', style: 'Senkou', ownedOnly: true, borrow: false, locked: [30101,30052,20033,30078,30111,30054], must: [201322]}, conditions: {}, facLevels: {},
+    race: '', fans: 0, tab: 'parents', cm: {goal: 'ace', preset: 'cm1', style: 'Senkou', ownedOnly: true, borrow: false, locked: [30101,30052,20033,30078,30111,30054], must: [201322]}, conditions: {}, facLevels: {},
     gl: {songs: {}, tokens: [100, 100, 100, 100, 100], lessons: {}, shop: {}, focus: 'songs'},
     deck: {trainee: null, globalOnly: true, slots: [null, null, null, null, null, null]},
     facilities: ['speed', 'stamina', 'power', 'guts', 'wit'].map(stat => ({stat, gain: 20, fail: 0, cards: 0, members: [], hints: [], extra: 0, extras: {}}))
@@ -123,6 +123,7 @@ test('parent must-have entry resolves a canonical white even when no card lists 
  try{
   assert.ok([...ui.doc.querySelectorAll('#cmSkillList option')].some(o=>o.value==='Leap Forward'));
   ui.doc.querySelector('#cmMust').value='Leap Forward';ui.doc.querySelector('#cmMustAdd').click();
-  assert.ok(ui.saved().cm.must.includes('202402'));
+  // Parent decks are set up in the Parents tab, saved as pcm.
+  assert.ok(ui.saved().pcm.must.includes('202402'));
  }finally{ui.w.close();}
 });
