@@ -33,9 +33,9 @@
       const r = p.rating;
       const rd = { stats: [null, null, null, null, null], sp: null, uniqueLevel: null, learned: [], shop: {}, must: [] };
       Object.keys(rd).forEach((k) => { if (r[k] === undefined) r[k] = rd[k]; });
-      // Default the uma from the coach's trainee.
+      // She is the coach's trainee (one trainee everywhere): ① sets it, and it follows it.
       const tr = ctx.coachTrainee();
-      if (p.self == null && tr) { p.self = tr.cid; p.selfTrainee = tr.id; }
+      if (tr && (p.self !== tr.cid || p.selfTrainee !== tr.id)) { p.self = tr.cid; p.selfTrainee = tr.id; p.apt = null; }
       return p;
     }
 
@@ -88,7 +88,7 @@
       const a = apt(p);
       return `<p class="mini">The uma you're training now, the two parents she inherits from in this run, and (optional) the ace you'll breed from her and the partner parent she'll be paired with. Tick each one's G1 wins.</p>
         <div class="pp-form">
-          <label class="field"><span>Uma you're training now</span>${charInput("self", p.self, "Your trainee")}</label>
+          <label class="field"><span>Uma you're training now <i class="mini">also the coach's trainee</i></span>${charInput("self", p.self, "Your trainee")}</label>
           ${vers.length > 1 ? `<label class="field"><span>Version (for aptitudes)</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}
           <label class="field"><span>Ace you'll breed from her</span>${charInput("ace", p.ace, "Optional: the future trainee")}</label>
           <label class="field"><span>Target</span><select data-pp="target">${[[151, "◎ (151+)"], [51, "○ (51+)"]].map(([v, l]) => `<option value="${v}"${+p.target === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -124,11 +124,9 @@
       }
       // What the races cost, and the hand-off to Independent Training scoring.
       const g1Count = res.agenda.length;
-      out += `<div class="row-wrap"><button type="button" class="btn ghost small" data-pp-act="cost">Estimate the rating cost per race</button>
-        <button type="button" class="btn ghost small" data-pp-act="itRaces" data-n="${g1Count}">Use ${g1Count} G1 race${g1Count === 1 ? "" : "s"} for Independent Training deck scoring</button></div>`;
+      out += `<div class="row-wrap"><button type="button" class="btn ghost small" data-pp-act="cost">Estimate the rating cost per race</button></div>`;
       if (raceCost) out += raceCost.error ? `<p class="mini warn">${esc(raceCost.error)}</p>` : `<p class="mini">With your coach deck, each optional race costs about <b>${Math.round(raceCost.perRace)} rating</b> (a training turn's stats and skill points, minus what the race gives; skill points at ~${SP_RATING} rating each). ${extra.length} extra races: about <b>${Math.round(raceCost.perRace * extra.length)}</b>. Simulated ${raceCost.runs} careers each at ${raceCost.races.map((n) => n.toFixed(1)).join(" and ")} optional races.</p>`;
-      const it = ctx.itRaces();
-      out += `<p class="mini">Independent Training deck scoring now assumes ${it == null ? "the default G1-heavy agenda (15 G1 + 3 G2/G3)" : `<b>${it} G1 races</b> (from this plan)`}.${it == null ? "" : ' <button type="button" class="linkish" data-pp-act="itReset">Back to the default</button>'}</p>`;
+      out += `<p class="mini">③ Deck counts these ${g1Count} G1 race${g1Count === 1 ? "" : "s"} for Independent Training (Race Bonus and the predicted stats).</p>`;
       return out + "</div>";
     }
 
@@ -156,7 +154,7 @@
       const t = trainee(p.selfTrainee);
       const uLv = r.uniqueLevel != null ? r.uniqueLevel : stars(p);
       const statsIn = STAT_LABELS.map((l, i) => `<label class="field pp-stat"><span>${l}</span><input type="number" inputmode="numeric" min="0" max="2500" data-pp-stat="${i}" value="${r.stats[i] == null ? "" : r.stats[i]}"></label>`).join("");
-      let out = `<p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p>
+      let out = `<p class="mini">Enter her final stats and skill points, add the skills in her shop, and it picks the buy that gets her closest to SS (${R.SS.toLocaleString()}).</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
         <div class="pp-form">${statsIn}
           <label class="field pp-stat"><span>Skill points left</span><input type="number" inputmode="numeric" min="0" data-pp-r="sp" value="${r.sp == null ? "" : r.sp}"></label>
           <label class="field pp-stat"><span>Unique skill level</span><input type="number" inputmode="numeric" min="0" max="10" data-pp-r="uniqueLevel" value="${uLv}"></label>
@@ -195,6 +193,9 @@
 
     function render(el) {
       const p = st();
+      // ③ Deck races the G1s ② plans (the default agenda until a win is entered).
+      const res = p.self ? plan(p) : null;
+      ctx.setItRaces(res && res.candidates.length ? res.agenda.length : null);
       const skillNames = ctx.skillNames();
       el.innerHTML = `<div class="parents">
         <datalist id="ppChars">${Array.from(chars.values()).sort().map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
@@ -230,8 +231,6 @@
         const a = act.dataset.ppAct;
         if (a === "aptReset") p.apt = null;
         if (a === "cost") { raceCost = ctx.raceCost() || { error: "Set your deck in Trainee and deck (on the coach) to simulate the cost." }; }
-        if (a === "itRaces") { ctx.setItRaces(+act.dataset.n); ctx.flash("Independent Training scoring now uses " + act.dataset.n + " G1 races"); }
-        if (a === "itReset") ctx.setItRaces(null);
         if (a === "usePredicted") { const pr = ctx.predicted(); if (pr) { r.stats = pr.stats.slice(); r.sp = pr.sp; } }
         if (a === "addMust") ctx.cmMust().forEach((id) => { id = String(id); if (r.learned.indexOf(id) === -1 && r.shop[id] == null) r.shop[id] = 0; if (r.must.indexOf(id) === -1) r.must.push(id); });
         if (a === "addInnate") { const tr = trainee(p.selfTrainee); if (tr) (tr.is || []).concat(tr.as || []).forEach((id) => { id = String(id); if (r.shop[id] == null && r.learned.indexOf(id) === -1) r.shop[id] = 0; }); }
@@ -253,6 +252,9 @@
       return false;
     }
 
+    // Setting the coach's trainee redraws the page, so not mid-event (see rerender).
+    const setTraineeLater = (id) => setTimeout(() => ctx.setTrainee(id || null), 0);
+
     function change(e) {
       const p = st(), r = p.rating;
       const t = e.target, ds = t.dataset;
@@ -268,6 +270,7 @@
           const keep = vs.find((x) => x.id === +p.selfTrainee);
           p.selfTrainee = keep ? keep.id : vs.length ? vs[0].id : null;
           p.apt = null;
+          setTraineeLater(p.selfTrainee);
         } else if (k === "ace") p.ace = cid || null;
         else { if (p[k].cid !== cid) p[k] = { cid: cid || null, wins: cid ? p[k].wins : [] }; }
         raceCost = null;
@@ -284,7 +287,7 @@
       } else if (ds.pp != null) {
         const k = ds.pp;
         p[k] = k === "target" ? +t.value : k === "selfTrainee" ? +t.value : t.value;
-        if (k === "selfTrainee") p.apt = null;
+        if (k === "selfTrainee") { p.apt = null; setTraineeLater(p.selfTrainee); }
       } else if (ds.ppStat != null) {
         const v = t.value === "" ? null : Math.max(0, Math.min(2500, +t.value || 0));
         r.stats[+ds.ppStat] = v;
