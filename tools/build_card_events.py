@@ -169,8 +169,9 @@ def parse_effects(text):
 def parse_choice(desc):
     """Results always given, then the On Success / On Failure parts."""
     # A later reward can depend on an earlier selected choice. Do not flatten
-    # those alternative rewards into one additive outcome (Nakayama Festa).
-    conditional = re.split(r"(?:'{3})?\s*Selected Choice (\d+) for (\d+)(?:st|nd|rd|th) event(?:\s*\((Success|Failure)\))?\s*(?:'{3})?\s*:\s*(?:'{3})?", desc, flags=re.I)
+    # those alternative rewards into one additive outcome (Nakayama Festa). The wiki may put
+    # the outcome in italics: ''(Success)''.
+    conditional = re.split(r"(?:'{3})?\s*Selected Choice (\d+) for (\d+)(?:st|nd|rd|th) event(?:\s*(?:'{2})?\((Success|Failure)\)(?:'{2})?)?\s*(?:'{3})?\s*:\s*(?:'{3})?", desc, flags=re.I)
     if len(conditional) > 1:
         base = parse_choice(conditional[0])
         groups = {}

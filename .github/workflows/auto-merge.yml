@@ -1,0 +1,52 @@
+# Merges every push to a claude/* branch into main automatically: merge, run the tests on the
+# merged result, and push only if they pass. A merge conflict or a failing test stops it (the
+# run shows red) and main is left as it was.
+name: Auto-merge Claude branches
+
+on:
+  push:
+    branches: ["claude/**"]
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: auto-merge-main
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Some tests run the Python data builders' parsers.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Merge into main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B main origin/main
+          git merge --no-ff "origin/${GITHUB_REF_NAME}" -m "Merge ${GITHUB_REF_NAME} (auto-merge)"
+
+      - name: Run tests
+        run: node --test test/*.test.js
+
+      - name: Push main
+        run: git push origin main
+
+      # Pushes made with the workflow token don't start the usual Pages build, so request one.
+      - name: Rebuild GitHub Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "Pages rebuild request failed; the site updates on the next push."

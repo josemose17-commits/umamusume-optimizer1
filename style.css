@@ -114,6 +114,16 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 
 .example-note { border: 1px dashed var(--gold); background: var(--surface); border-radius: var(--r); padding: 8px 12px; }
 
+/* Turn-by-turn coach: the turn strip, this turn's inputs and the call, foldable as one. */
+.coach > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; list-style: none; }
+.coach > summary::-webkit-details-marker { display: none; }
+.coach > summary h2 { margin: 0; }
+.coach > summary h2::before { content: "▸ "; color: var(--muted); }
+.coach[open] > summary h2::before { content: "▾ "; }
+.coach[open] > summary .mini { display: none; }
+.coach-body { display: grid; gap: 14px; margin-top: 10px; }
+.coach:not([open]) ~ .dock { display: none; }
+
 /* Main grid */
 .grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
@@ -628,3 +638,24 @@ table.pred .over { color: var(--accent); }
 .gl-more[open] { display: grid; gap: 8px; }
 .rc-q.rc-auto { font-size: .85rem; }
 .rc-auto .rc-known { font-weight: 600; }
+
+/* Parents tab: G1 plan for affinity and the SS rating check. */
+.parents { display: grid; gap: 14px; }
+.pp-sec > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; list-style: none; }
+.pp-sec > summary::-webkit-details-marker { display: none; }
+.pp-sec > summary h2 { margin: 0; }
+.pp-sec > summary h2::before { content: "▸ "; color: var(--muted); }
+.pp-sec[open] > summary h2::before { content: "▾ "; }
+.pp-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.pp-form .field { min-width: 0; }
+.pp-stat input { width: 100px; }
+.pp-apt { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: end; }
+.pp-aptf { display: grid; gap: 2px; font-size: .75rem; color: var(--muted); }
+.pp-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.pp-link { display: grid; gap: 6px; align-content: start; }
+.pp-wins summary { cursor: pointer; font-size: .85rem; color: var(--accent); }
+.pp-g1grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 2px 10px; margin-top: 6px; font-size: .82rem; }
+.pp-g1 { display: flex; gap: 6px; align-items: center; }
+.pp-result { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.pp-sym { font-size: 1.1rem; }
+.pp-big { font-family: var(--font-display); font-size: 1.3rem; }

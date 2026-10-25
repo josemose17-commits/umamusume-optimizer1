@@ -194,3 +194,40 @@ test("parent decks with stat targets: 'A little' keeps the skills and still gets
   assert.ok(r.after.short <= r.before.short);
   assert.ok(T.deckSkills(opts, r.cards).value >= 0.9 * T.deckSkills(opts, start).value, "skills mostly kept");
 });
+
+test("Independent Training: no Specialty Priority, manual-career bonuses scaled, initial stats boosted", () => {
+  const e = CARDS.find((c) => c.id === 30028 && c.limit_break === 4);
+  const half = T.itEntry(e, 0.5);
+  assert.strictEqual(half.specialty_rate, 0);
+  assert.strictEqual(half.unique_specialty, 1);
+  assert.ok(Math.abs(half.fs_bonus - (1 + (e.fs_bonus - 1) / 2)) < 1e-12);
+  assert.ok(Math.abs(half.mb - (1 + (e.mb - 1) / 2)) < 1e-12);
+  assert.ok(Math.abs(half.tb - (1 + (e.tb - 1) / 2)) < 1e-12);
+  assert.strictEqual(T.itEntry(e, 1).fs_bonus, e.fs_bonus);
+  const withInit = CARDS.find((c) => c.starting_stats.some((v) => v > 0));
+  assert.deepStrictEqual(T.itEntry(withInit, 0.5).starting_stats, withInit.starting_stats.map((v) => v * T.IT_INITIAL));
+  assert.strictEqual(e.specialty_rate > 0, true, "the source entry is not modified");
+});
+
+test("Independent Training weights skill points more and uses your race count", () => {
+  const manual = T.weightsFor("GM", "speed", {}, null, false);
+  const it = T.weightsFor("GM", "speed", {}, null, [4, 0, 0]);
+  assert.ok(Math.abs(it.stats[5] - manual.stats[5] * T.IT_SP) < 1e-12);
+  assert.deepStrictEqual(it.races.slice(0, 3), [4, 0, 0]);
+  assert.strictEqual(manual.stats[5], T.weightsFor("GM", "speed", {}, null, false).stats[5], "the scenario preset is not modified");
+});
+
+test("Independent Training widens the lead of the biggest initial-stat speed card and reports what it rests on", () => {
+  const speed = allLbs("speed").filter((x) => x.lb === 4);
+  const sum = (x) => { const e = CARDS.find((c) => c.id === x.id && c.limit_break === 4); return e ? e.starting_stats.reduce((a, v) => a + v, 0) : 0; };
+  const top = speed.slice().sort((a, b) => sum(b) - sum(a))[0];
+  // Its score against the average speed card's.
+  const lead = (independent) => {
+    const r = T.rank({ scenario: "GM", skillWeight: 0, independent }, "speed", [], speed);
+    return r.find((x) => x.id === top.id).score / (r.reduce((a, x) => a + x.score, 0) / r.length);
+  };
+  assert.ok(lead(true) > lead(false), `lead ${lead(true)} with Independent Training vs ${lead(false)} without`);
+  const r = T.rank({ scenario: "GM", skillWeight: 0, independent: true }, "speed", [], [top])[0];
+  assert.strictEqual(r.it.initialStats, sum(top));
+  assert.strictEqual(T.rank({ scenario: "GM", skillWeight: 0 }, "speed", [], [top])[0].it, null);
+});

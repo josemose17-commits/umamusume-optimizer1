@@ -44,6 +44,12 @@ jobs:
         continue-on-error: true
         run: python3 tools/build_card_events.py
 
+      # Affinity groups, rank thresholds and skill ratings for the Parents tab. If UmaTools or
+      # GameTora can't be reached, the last data is kept.
+      - name: Rebuild parent planner data (GameTora, UmaTools)
+        continue-on-error: true
+        run: python3 tools/build_parent_data.py
+
       - name: Check for changes
         id: diff
         run: |

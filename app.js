@@ -48,6 +48,8 @@
       facLevels: {},
       db: k.db || null,
       cm: k.cm || null,
+      // The Parents tab's plan spans careers (lineage, G1 wins, rating check).
+      parents: k.parents || null,
       turn: 1,
       energy: 100,
       mood: 2,
@@ -128,6 +130,24 @@
   let owned = {};
   try { owned = JSON.parse(localStorage.getItem(OWN_KEY)) || {}; } catch (e) { owned = {}; }
   function saveOwned() { try { localStorage.setItem(OWN_KEY, JSON.stringify(owned)); } catch (e) { /* ignore */ } }
+  // Cards you've marked as out on Global before the card data has their Global date (saved in
+  // this browser): { id: date marked }. A date from the data always wins.
+  const GL_KEY = "uma-global-v1";
+  let markedGlobal = {};
+  try { markedGlobal = JSON.parse(localStorage.getItem(GL_KEY)) || {}; } catch (e) { markedGlobal = {}; }
+  function applyMarkedGlobal() {
+    if (!HAS_DATA) return;
+    D.DATA.supports.forEach((c) => {
+      if (c.enMarked && !markedGlobal[c.id]) { c.en = null; c.enMarked = false; }
+      if (markedGlobal[c.id] && !c.en) { c.en = markedGlobal[c.id]; c.enMarked = true; }
+    });
+  }
+  applyMarkedGlobal();
+  function toggleMarkedGlobal(id) {
+    if (markedGlobal[id]) delete markedGlobal[id]; else markedGlobal[id] = new Date().toISOString().slice(0, 10);
+    try { localStorage.setItem(GL_KEY, JSON.stringify(markedGlobal)); } catch (e) { /* ignore */ }
+    applyMarkedGlobal();
+  }
   const ownedLb = (id) => (owned[id] != null ? +owned[id] : null);
   const ownedIds = () => Object.keys(owned).map(Number).filter((id) => D && D.card(id));
   const ownedCode = () => D.encodeOwned(owned);
@@ -137,6 +157,9 @@
   const glOpen = {};
   let openRow = null;
   let resetArmed = null;
+  // The turn-by-turn coach can be folded away (say, while using the deck tabs); it stays as you left it.
+  const COACH_KEY = "uma-coach-open-v1";
+  function coachOpen() { try { return localStorage.getItem(COACH_KEY) !== "0"; } catch (e) { return true; } }
 
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
@@ -177,6 +200,9 @@
         </div>
       </header>
 
+      <details class="coach" id="coachPanel"${coachOpen() ? " open" : ""}>
+        <summary><h2>Turn-by-turn coach</h2><span class="mini" id="coachSummary"></span></summary>
+        <div class="coach-body">
       <section class="turnbar" aria-label="Career turns">
         <div class="turn-head">
           <button type="button" id="prev" class="btn ghost square" aria-label="Previous turn" title="Previous turn (←)">◀</button>
@@ -261,6 +287,8 @@
           <div class="panel" id="options"></div>
         </aside>
       </main>
+        </div>
+      </details>
 
       <nav class="tabs" role="tablist">
         <button type="button" role="tab" data-tab="plan">Turn plan</button>
@@ -269,6 +297,7 @@
         <button type="button" role="tab" data-tab="all">All scenarios</button>
         <button type="button" role="tab" data-tab="cm" id="tabCM">CM &amp; decks</button>
         <button type="button" role="tab" data-tab="tiers" id="tabTiers">Tier list</button>
+        <button type="button" role="tab" data-tab="parents" id="tabParents">Parents</button>
         <button type="button" role="tab" data-tab="cards" id="tabCards">Support cards</button>
         <button type="button" role="tab" data-tab="trainees" id="tabTrainees">Trainees</button>
       </nav>
@@ -277,6 +306,9 @@
       <div class="dock" id="dock"><div class="dock-text" id="dockText"></div><button type="button" class="btn" id="dockDone">Done ▶</button></div>
     `;
 
+    $("#coachPanel").addEventListener("toggle", (e) => {
+      try { localStorage.setItem(COACH_KEY, e.target.open ? "1" : "0"); } catch (err) { /* ignore */ }
+    });
     const sel = $("#scenario");
     const groups = [["global", "On Global now"], ["global-soon", "Coming to Global next"], ["jp-current", "JP latest"], ["jp", "JP only (future Global)"], ["announced", "Announced"]];
     sel.innerHTML = groups.map(([st, lab]) => {
@@ -703,6 +735,7 @@
 
     document.querySelector(".tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); } });
     $("#tabBody").addEventListener("click", (e) => {
+      if (state.tab === "parents" && parents() && parents().click(e)) return;
       const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
       const s = e.target.closest("[data-pick]"); if (s) { sel.value = s.dataset.pick; sel.dispatchEvent(new Event("change")); state.tab = "guide"; save(); renderTab(); }
       if (e.target.closest("[data-undo]")) undoTurn();
@@ -746,10 +779,22 @@
       if (use) { setTrainee(+use.dataset.useTrainee); return; }
       const more = e.target.closest("[data-more]");
       if (more) { db().limit += 60; renderDbList(); return; }
+      const mg = e.target.closest("[data-mark-global]");
+      if (mg) {
+        const id = +mg.dataset.markGlobal;
+        toggleMarkedGlobal(id);
+        flash(D.card(id).n + (markedGlobal[id] ? " counts as on Global now" : " no longer counts as on Global"));
+        optResult = null;
+        fillLists();
+        renderDbList();
+        return;
+      }
       const row = e.target.closest("[data-db-row]");
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
+    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
+    $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "parents" && parents()) parents().onToggle(e); }, true);
     $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null || e.target.dataset.cmTarget != null) setTimeout(renderTab, 0); });
     $("#tabBody").addEventListener("input", (e) => {
       if (e.target.dataset.own != null) {
@@ -1541,6 +1586,7 @@
         <label class="field"><span>Limit break</span><select data-db="lb">${opt([["0", "LB0"], ["1", "LB1"], ["2", "LB2"], ["3", "LB3"], ["4", "LB4 (max)"], ["own", "Mine (owned LB)"]], d.lb)}</select></label>
         <label class="field"><span>Sort by</span><select data-db="sort">${opt(SORTS, d.sort)}</select></label>
         <label class="chip-toggle"><input type="checkbox" data-db="global" ${d.global ? "checked" : ""}> Global only</label>
+        <span class="mini">New card out on Global but missing? Untick Global only, open the card and press <b>Mark as out on Global</b>.</span>
       </div><div id="dbList"></div>`;
     }
     return `<div class="db-controls">
@@ -1646,7 +1692,8 @@
         <p class="mini"><b>Events over a career:</b> ${eventText(c)}</p>
         <p class="mini"><b>Hint skills:</b> ${sk(c.hs)}</p>
         <p class="mini"><b>Event skills:</b> ${sk(c.es)}</p>
-        <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) : ", not on Global yet"} · ${esc(c.src || "")}</p>
+        <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) + (c.enMarked ? " (marked by you)" : "") : ", not on Global yet in the card data (" + esc(D.DATA.meta.built) + ")"} · ${esc(c.src || "")}
+          ${!c.en || c.enMarked ? `<button type="button" class="btn ghost small" data-mark-global="${c.id}">${c.enMarked ? "Unmark: not out on Global" : "Mark as out on Global"}</button>` : ""}</p>
       </div>`;
     }
     const own = ownedLb(c.id);
@@ -1993,6 +2040,7 @@
     } else fp.hidden = true;
     $("#dockText").textContent = (a.prefix.length ? a.prefix.join(" → ") + " → " : "") + a.label;
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
+    $("#coachSummary").textContent = "Turn " + state.turn + " / " + sc.totalTurns + " · " + $("#dockText").textContent;
   }
 
   const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", tokens: "Song tokens", songFocus: "Songs first preference", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race", opening: "Opening plan" };
@@ -2066,11 +2114,16 @@
   function cm() {
     if (!state.cm) state.cm = {};
     const c = state.cm;
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, sq: "", sfilter: "all", globalSkills: true, helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
   }
+  // Independent Training's race agenda: the Parents tab's G1 plan when you've sent it over
+  // (c.itRaces G1s), else a G1-heavy default. Optional races then take that share of the
+  // ~60 turns after the debut.
+  const itArg = (c) => (c.independent ? (cm().itRaces != null ? [cm().itRaces, 0, 0] : true) : false);
+  const itShare = (c) => (c.independent ? (cm().itRaces != null ? Math.min(0.5, cm().itRaces / 60) : 0.25) : undefined);
 
   function presetStatus(p) {
     const g = p.global;
@@ -2159,8 +2212,8 @@
   const euOver = () => eu().over[euScen()] || (eu().over[euScen()] = { general: {}, tabs: {} });
   function euOpts(c, p) {
     const sv = skillMap(p.id, c.style);
-    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: !!c.independent, eventSuccessRate: +c.eventSuccessRate };
-    if (c.goal === "ace" || c.goal === "debuff") {
+    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +cm().itManual, eventSuccessRate: +c.eventSuccessRate };
+    if (c.goal === "ace" || c.goal === "debuff" || c.goal === "debuffAce") {
       o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => SV.skills[id] ? SV.skills[id][2] : null), statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY };
       if (c.globalSkills) {
         const released = id => !!(SV.skills[id] && SV.skills[id][3]);
@@ -2176,7 +2229,7 @@
     const scen = euScen();
     const auto = !eu().scen;
     const tab = T.TABS[ty || "speed"][0];
-    const w = T.weightsFor(scen, ty || "speed", Object.assign({}, euOver().general, euOver().tabs[tab]), null, !!cm().independent);
+    const w = T.weightsFor(scen, ty || "speed", Object.assign({}, euOver().general, euOver().tabs[tab]), null, itArg(cm()));
     const num = (k, v, step, path) => `<input type="number" step="${step}" data-eu="${path}" data-k="${k}" value="${v}">`;
     const coachName = (SCENARIOS.find((x) => x.id === state.scenario) || {}).name;
     return `<details class="eu-settings" ${euOpen ? "open" : ""}>
@@ -2210,7 +2263,7 @@
     const ty = state.tab === "tiers" ? (tier().type || "speed") : "speed";
     const tab = T.TABS[ty][0];
     const bag = where === "tab" ? (o.tabs[tab] = o.tabs[tab] || {}) : o.general;
-    const base = T.weightsFor(euScen(), ty, Object.assign({}, o.general, o.tabs[tab]), null, !!cm().independent);
+    const base = T.weightsFor(euScen(), ty, Object.assign({}, o.general, o.tabs[tab]), null, itArg(cm()));
     const v = el.type === "checkbox" ? el.checked : +el.value;
     if (field) { const arr = (bag[field] || base[field]).slice(); arr[+el.dataset.k] = v; bag[field] = arr; }
     else bag[el.dataset.k] = v;
@@ -2225,7 +2278,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.goal !== "race" && c.globalSkills, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.goal !== "race" && c.globalSkills, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, cm().itRaces, cm().itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -2238,8 +2291,8 @@
     renderCM();
     const key = optKey();
     const tg = cmTargets(c);
-    // Independent Training parent runs race a G1-heavy agenda: about 1 turn in 4.
-    const raceShare = c.independent ? 0.25 : undefined;
+    // Independent Training parent runs race their agenda (see itShare).
+    const raceShare = itShare(c);
     const simulationMeta = { scenario: scenario().id, trainee: state.deck.trainee };
     const done = (r, opts, fit) => {
       // The predicted stats: the target search's own careers, or a readout from the same
@@ -2336,7 +2389,7 @@
     const candidates = comparisonDecks(r, c);
     if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
     const p = presetById(r.preset), sv = skillMap(p.id, c.style);
-    const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: c.independent ? 0.25 : undefined };
+    const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
     const job = OPT.sensitivity(sim, candidates);
     sensitivityJob = job; renderCM();
     const tick = () => {
@@ -2380,7 +2433,7 @@
         });
       });
       const sv = skillMap(p.id, c.style);
-      const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: c.independent ? 0.25 : undefined };
+      const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
       const token = {}; wishJob = token; wish = null; renderCM();
       const out = []; let at = 0;
       const tick = () => {
@@ -2464,8 +2517,9 @@
     return `<section class="panel cm-opt">
       <h3>Deck optimizer</h3>
       <div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>
-      ${goal !== "race" ? `<p class="mini"><b>${goal === "ace" ? "Ace parent" : "Debuffer parent"}:</b> picks the cards that give your parent the most ${goal === "ace" ? "white skills that are strong on this race (weighted by median L for the running style)" : "white debuff skills that work on this race's distance and surface with your running style"}, so she can learn them and pass them down as skill sparks. Gold skills don't count, since only white skills become sparks. Every skill counts, not just the best 8, and stats only count as much as you choose.</p>
-        <label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
+      ${goal === "debuffAce" ? `<p class="mini"><b>Debuffer ace:</b> the uma you enter in this CM to slow the others down rather than win. Picks the cards that give her the most debuffs that work on this race's distance and surface with your running style, golds counted double (they hit about twice as hard), white ones too. She needs Wit so they fire (each skill's activation chance is 100 − 9000 ÷ Wit %, at least 20%) and enough Speed and Stamina to stay in position: <b>Debuffer targets</b> below sets them.</p>` : ""}
+      ${goal === "ace" || goal === "debuff" ? `<p class="mini"><b>${goal === "ace" ? "Ace parent" : "Debuffer parent"}:</b> picks the cards that give your parent the most ${goal === "ace" ? "white skills that are strong on this race (weighted by median L for the running style)" : "white debuff skills that work on this race's distance and surface with your running style"}, so she can learn them and pass them down as skill sparks. Gold skills don't count, since only white skills become sparks. Every skill counts, not just the best 8, and stats only count as much as you choose.</p>` : ""}
+      ${goal !== "race" ? `<label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
       <p class="mini">Builds the deck the way you'd use <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: it picks the best card, then the best card given that one, and so on, with Euophrys' own scoring for the scenario. On top, every skill a card can hint is scored by its median length gain on this race as a ${STYLE_LABEL[c.style]} runner. Then it rechecks each slot with the other five fixed.</p>
       ${traineePickerHTML(p, "data-cm-style")}
       ${nSkills ? "" : `<p class="mini warn">No skill values for this race yet${svCache[p.id] === "loading" ? " (loading…)" : ""}, so skills won't count. Paste your own Umalator results below to add them.</p>`}
@@ -2475,7 +2529,8 @@
         <label class="chip-toggle" title="The 50-minute auto mode"><input type="checkbox" data-cm="independent" ${c.independent ? "checked" : ""}> Independent Training</label>
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
       </div>
-      ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> a card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>` : ""}
+      ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${opt(IT_MANUAL_OPTS, c.itManual)}</select></label>` : ""}
+      ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for your G1 plan's ${c.itRaces} G1 races (Parents tab), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: the Parents tab plans the fewest G1s for affinity and sends the count here.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>` : ""}
       ${compHTML(c)}
       ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
       ${targetsHTML(p, c)}
@@ -2501,11 +2556,12 @@
     const t = c.targets || {};
     const coach = state.targets && E.STATS.some((s) => state.targets[s] > 0);
     const parent = c.goal === "ace" || c.goal === "debuff";
+    const debuffer = c.goal === "debuffAce";
     const automatic = state.scenario === "grandlive" && c.goal === "race";
     return `<div class="cm-targets">
       <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
-      ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
+      ${coach || cmTargets(c) || parent || debuffer ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${debuffer ? '<button type="button" class="btn ghost small" id="cmTgDebuffer">Debuffer targets (Wit 1200, the rest from the build)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
       ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : ""}
     </div>`;
   }
@@ -2551,7 +2607,10 @@
     return null;
   };
 
-  const GOALS = [["race", "Racing this CM"], ["ace", "Ace parent"], ["debuff", "Debuffer parent"]];
+  // How much Friendship Bonus, Mood Effect and Training Effectiveness count in Independent
+  // Training, against a manual career: unmeasured there, so it's your call (tiers.js IT_MANUAL).
+  const IT_MANUAL_OPTS = [["1", "Fully (as in a manual career)"], ["0.5", "Half (default)"], ["0.25", "A quarter"], ["0", "Not at all"]];
+  const GOALS = [["race", "Racing this CM"], ["ace", "Ace parent"], ["debuff", "Debuffer parent"], ["debuffAce", "Debuffer ace"]];
   const SKILL_W = [["0", "Not at all (pure Euophrys)"], ["0.5", "A little"], ["1", "Normal"], ["2", "A lot"], ["3", "Skills first"]];
   const COMP_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]];
   function compHTML(c) {
@@ -2562,6 +2621,51 @@
       ${Object.keys(c.comp).length ? '<button type="button" class="btn ghost small" id="compClear">Reset</button>' : ""}</div>
       ${fixed > 6 ? `<p class="mini warn">That adds up to ${fixed} cards; a deck has 6.</p>` : ""}
     </div>`;
+  }
+
+  // The Parents tab (parent-planner.js): G1 plan for affinity and the SS rating check.
+  let pp = null;
+  function parents() {
+    if (pp || !window.UmaParentPlanner || !window.UmaParentData) return pp;
+    const SB = window.UmaSkillBudget, PR = window.UmaRating;
+    const names = new Map();
+    Object.keys(SV.skills).forEach((id) => {
+      const n = SV.skills[id][0];
+      if (!n) return;
+      const k = n.toLowerCase();
+      // Prefer a purchasable id (the skill shop's) when two share a name.
+      if (!names.has(k) || (!SB.DATA.skills[names.get(k)] && SB.DATA.skills[id])) names.set(k, id);
+    });
+    pp = window.UmaParentPlanner.create({
+      D, A: window.UmaAffinity, R: PR, SB, esc, flash, save,
+      state: () => state,
+      container: () => $("#tabBody"),
+      coachTrainee: () => (state.deck.trainee ? D.trainee(state.deck.trainee) : null),
+      turnText: (t) => E.turnInfo(t, scenario()).text,
+      skillName: (id) => skillInfo(id)[0],
+      skillNames: () => Array.from(new Set(Object.values(SV.skills).map((x) => x[0]).filter(Boolean))).sort(),
+      skillIdByName: (n) => names.get(String(n || "").trim().toLowerCase()) || null,
+      caps: () => { const c = E.capsFor(state, scenario()); return E.STATS.map((k) => c[k]); },
+      predicted: () => (optResult && optResult.est && optResult.est.stats ? { stats: optResult.est.stats.slice(), sp: Math.round(optResult.est.sp || 0) } : null),
+      itRaces: () => (cm().itRaces != null ? cm().itRaces : null),
+      cmMust: () => cm().must || [],
+      setItRaces: (n) => { if (n == null) delete cm().itRaces; else cm().itRaces = n; optResult = null; save(); renderTab(); },
+      // Rating lost per optional race: simulate your coach deck racing rarely and often, and
+      // compare the rating of the stats and skill points (at the planner's SP_RATING).
+      raceCost: () => {
+        const cards = (state.deck.slots || []).filter(Boolean).map((sl) => ({ card: D.card(sl.id), lb: sl.lb })).filter((x) => x.card);
+        if (!cards.length) return null;
+        const sc = scenario();
+        const runs = 24;
+        const sim = (raceShare) => OPT.simulate(OPT.buildCtx({ scenario: sc, build: state.build, trainee: state.deck.trainee, caps: E.capsFor(state, sc), raceShare, runs, independent: !!cm().independent }), cards);
+        const a = sim(0.02), b = sim(0.2);
+        const value = (x) => PR.statsScore(x.stats) + x.sp * window.UmaParentPlanner.SP_RATING;
+        const dr = b.races - a.races;
+        if (!(dr > 0.5)) return { error: "The simulation couldn't vary the race count for this scenario." };
+        return { perRace: (value(a) - value(b)) / dr, races: [a.races, b.races], runs };
+      },
+    });
+    return pp;
   }
 
   const debuffOrSkillName = (id) => (window.UmaDebuffs && window.UmaDebuffs[id] ? window.UmaDebuffs[id].n : skillInfo(id)[0]);
@@ -2620,6 +2724,29 @@
     </div>`;
   }
 
+  // Debuffer ace: the debuffs this deck can give her and how likely each is offered, the ones
+  // she can already buy, the ones no card here covers, and whether her Wit makes them fire
+  // (activation: 100 − 9000 ÷ Wit %, at least 20%).
+  function debuffAceHTML(r) {
+    const DB = window.UmaDebuffs || {};
+    const targets = (r.parentConfig && r.parentConfig.targets) || {};
+    const offered = (r.skills || []).filter((x) => targets[x.id] != null).sort((a, b) => b.p * targets[b.id] - a.p * targets[a.id]);
+    const trn = r.simulationMeta && r.simulationMeta.trainee ? D.trainee(r.simulationMeta.trainee) : null;
+    const own = trn ? [].concat(trn.is || [], trn.as || []).map(String).filter((id) => targets[id] != null) : [];
+    const have = new Set(offered.map((x) => String(x.id)).concat(own));
+    const missing = Object.keys(targets).filter((id) => !have.has(id)).sort((a, b) => targets[b] - targets[a]);
+    const kind = (id) => (DB[id] && DB[id].r === 2 ? "gold" : "white");
+    const wit = r.est && r.est.stats ? r.est.stats[4] : null;
+    const fire = (w) => Math.round(Math.max(20, 100 - 9000 / Math.max(1, w)));
+    return `<div class="pred-help">
+      <p><b>${offered.length} debuff${offered.length === 1 ? "" : "s"}</b> this deck can give her on this race${own.length ? `, plus ${own.length} she can buy herself (${own.map((id) => skillNameHTML(id)).join(", ")})` : ""}. About ${offered.reduce((a, x) => a + x.p, 0).toFixed(1)} expected to be offered.</p>
+      ${offered.length ? `<div class="table-wrap"><table><thead><tr><th>Debuff</th><th></th><th>Offered</th><th>From</th></tr></thead><tbody>${offered.map((x) => `<tr><th>${skillNameHTML(x.id)}</th><td class="mini">${kind(x.id)}</td><td class="num">${Math.round(x.p * 100)}%</td><td class="mini">${(x.src || []).map((id) => esc(D.card(id).n)).join(", ")}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      ${missing.length ? `<p class="mini">No card here gives ${missing.slice(0, 8).map((id) => skillNameHTML(id)).join(", ")}${missing.length > 8 ? ` and ${missing.length - 8} more` : ""}. Add one as a must-have to force a card that does, or get it as a spark from a Debuffer parent.</p>` : ""}
+      ${wit ? `<p class="mini">Predicted Wit ${wit}: each debuff fires about <b>${fire(wit)}%</b> of the time when its condition is met (1200 Wit: ${fire(1200)}%).</p>` : `<p class="mini">Each debuff fires about ${fire(1000)}% of the time at 1000 Wit, ${fire(1200)}% at 1200, when its condition is met. Set target stats to see her predicted Wit.</p>`}
+      <p class="mini">Offer chances are estimates from hints and events, not learned-skill chances. Which debuffs actually land also depends on where she runs and who's around her.</p>
+    </div>`;
+  }
+
   function parentSkillsHTML(r) {
     const config = r.parentConfig;
     const pool = window.UmaParentSkills.build(r.cards.map(x => D.card(x.id)), {
@@ -2660,7 +2787,7 @@
     const w = wish;
     const total = r.cards.reduce((a, x) => a + x.score, 0);
     return `<div class="opt-result">
-      <h4>${r.goal === "ace" ? "Best ace parent deck" : r.goal === "debuff" ? "Best debuffer parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
+      <h4>${r.goal === "ace" ? "Best ace parent deck" : r.goal === "debuff" ? "Best debuffer parent deck" : r.goal === "debuffAce" ? "Best debuffer ace deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
       ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
       <div class="opt-cards">${r.cards.map((x) => {
         const card = D.card(x.id);
@@ -2668,6 +2795,7 @@
         <span class="tydot" aria-hidden="true"></span>
         <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>
           <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
+          ${x.it ? `<div class="mini">${itPartsText(x.it)}</div>` : ""}
           ${r.goal === "race" && x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => skillNameHTML(id)).join(", ")}</div>` : ""}
           ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? (r.goal === "race" ? ", but no must-have" : ", lower modeled must-have coverage") : ""})</div>` : ""}</div>
         <div class="num" title="Euophrys score with the other five cards fixed, plus skills">${Math.round(x.score)}<div class="mini">${Math.round(x.base)} + ${Math.round(x.skill)} skills</div></div>
@@ -2679,7 +2807,7 @@
       ${supportEventsHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
       ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? '<p class="mini">The final suggestion also considers simulated careers. A lower static total can still finish closer to your targets or buy a stronger affordable skill set.</p>' : ""}
-      ${r.goal !== "race" ? parentSkillsHTML(r) : r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
+      ${r.goal === "debuffAce" ? debuffAceHTML(r) : r.goal !== "race" ? parentSkillsHTML(r) : r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
         <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${skillNameHTML(x.id)} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.est && r.est.skillBudget ? affordableSkillsHTML(r) : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${skillNameHTML(x.id, skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
       ${r.goal === "race" ? skillSourcesHTML(r.skills || [], !!(r.est && r.est.supportEvents)) : ""}
       <div class="row-wrap">
@@ -2728,6 +2856,19 @@
     </details>`;
   }
 
+  // Predicted rating: the stats' score, the skill points spent at the Parents tab's typical
+  // rating per point, and the unique at her star level. SS doubles white sparks' 3★ chance.
+  function predictedRatingHTML(r) {
+    const PR = window.UmaRating, PP = window.UmaParentPlanner;
+    if (!PR || !PP || !window.UmaParentData) return "";
+    const t = r.simulationMeta && r.simulationMeta.trainee ? D.trainee(r.simulationMeta.trainee) : null;
+    const stars = t ? t.r : 3;
+    const stats = PR.statsScore(r.est.stats), skills = Math.round((r.est.sp || 0) * PP.SP_RATING), unique = PR.uniqueBonus(stars, stars);
+    const total = stats + skills + unique;
+    const rk = PR.rankOf(total);
+    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>${total >= PR.SS ? ", SS: white sparks get the doubled 3★ chance" : `, about ${(PR.SS - total).toLocaleString()} short of SS (${PR.SS.toLocaleString()})`}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent at ~${PP.SP_RATING} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>; fewer races also help.</p>`;
+  }
+
   // Predicted stats from the simulated careers, against your targets when you set them.
   function predictedHTML(r) {
     if (!r.est) return "";
@@ -2747,6 +2888,7 @@
         <tbody><tr>${E.STATS.map((_, i) => cell(i)).join("")}</tr>
         ${parent ? `<tr class="blue-row">${E.STATS.map((_, i) => `<td class="num"><span class="mini">3★ ${blue(r.est.stats[i])}%</span></td>`).join("")}</tr>` : ""}</tbody></table>
       <p class="mini">Skill points: about ${r.est.sp}.${parent ? " 3★: the chance of a 3-star blue spark if that stat is the one picked (uma.guide: 0% under 600, 5% to 1100, 10% over). Inheritance isn't in these numbers and adds more." : ""}</p>
+      ${parent ? predictedRatingHTML(r) : ""}
       ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : " Euophrys' pick was already the closest."}</p>` : ""}
       ${simulationDiagnosticsHTML(r)}
       <details class="pred-help"><summary>What the predicted stats include</summary>
@@ -2881,6 +3023,7 @@
     }
     if (t.closest("#cmTgCoach")) { c.targets = Object.assign({}, state.targets); save(); renderCM(); return true; }
     if (t.closest("#cmTgClear")) { c.targets = {}; save(); renderCM(); return true; }
+    if (t.closest("#cmTgDebuffer")) { c.targets = Object.assign({}, E.BUILDS[presetById(c.preset).build].target, { wit: 1200 }); save(); renderCM(); return true; }
     if (t.closest("#cmTgSpark")) { c.targets = { speed: 1100, stamina: 1100, power: 1100, guts: 1100, wit: 1100 }; save(); renderCM(); return true; }
     if (t.closest("#cmMustAdd")) {
       const id = skillIdByName($("#cmMust").value);
@@ -2935,7 +3078,7 @@
   const TIER_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend and Group"]];
   const TIER_SHOW = [
     ["", "Nothing"], ["score", "Score (Euophrys + skills)"], ["skills", "Best skills (L)"], ["evbond", "Event bond"], ["bond", "Initial bond"], ["race", "Race bonus"],
-    ["fs", "Friendship bonus"], ["te", "Training effectiveness"], ["spec", "Specialty priority"], ["mood", "Mood effect"], ["hint", "Hint frequency"]
+    ["fs", "Friendship bonus"], ["te", "Training effectiveness"], ["spec", "Specialty priority"], ["mood", "Mood effect"], ["hint", "Hint frequency"], ["it", "Independent Training strengths"]
   ];
   // Euophrys' Global preset decks.
   const EU_PRESETS = [["Speed + Power", [30028, 20031, 20033, 20009, 20003]], ["Speed + Stamina", [30028, 20031, 20033, 20008, 30022]], ["Speed + Wit", [30028, 20031, 20033, 20012, 20002]], ["Guts + Wit", [30011, 30030, 30019, 20012, 20002]], ["Race bonus", [20031, 30074, 20027, 20012, 30054]]];
@@ -2991,6 +3134,18 @@
     </div>`;
   }
 
+  // What a card's Independent Training value rests on (tiers.js rank's `it` parts).
+  function itPartsText(it) {
+    const parts = [];
+    if (it.initialStats) parts.push("Initial stats +" + it.initialStats);
+    if (it.initialSp) parts.push("Initial SP +" + it.initialSp);
+    if (it.spBonus) parts.push("SP bonus " + it.spBonus);
+    if (it.raceBonus) parts.push("Race bonus " + it.raceBonus + "%");
+    if (it.hint.lv) parts.push("Hint Lv +" + it.hint.lv);
+    if (it.hint.rate > 1) parts.push("Hint freq. ×" + (+it.hint.rate).toFixed(2));
+    return parts.length ? parts.join(" · ") : '<span class="mini">no Independent Training strengths</span>';
+  }
+
   function tierInfo(x, card, what) {
     const lv = D.levelFor(card, x.lb);
     const fx = D.baseEffects(card, lv);
@@ -3005,6 +3160,7 @@
       case "spec": return "Specialty " + (fx[19] || 0);
       case "mood": return "Mood effect " + (fx[2] || 0) + "%";
       case "hint": return "Hint freq. " + (fx[18] || 0) + "%";
+      case "it": return x.it ? itPartsText(x.it) : '<span class="mini">tick Independent Training</span>';
       default: return "";
     }
   }
@@ -3066,6 +3222,7 @@
           <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-tier-style="${k}">${l}</button>`).join("")}</div></div>
           <label class="field"><span>Skill hints count</span><select data-tier="skillW">${opt(SKILL_W, c.skillW)}</select></label>
           <label class="chip-toggle" title="The 50-minute auto mode: skills only a card's 3rd chain event gives count much less, and Race Bonus counts for a G1-heavy agenda"><input type="checkbox" data-tier="independent" ${c.independent ? "checked" : ""}> Independent Training</label>
+          ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-tier="itManual">${opt(IT_MANUAL_OPTS, c.itManual)}</select></label>` : ""}
           <label class="field"><span>Show</span><select data-tier="show1">${opt(TIER_SHOW, t.show1)}</select></label>
           <label class="field"><span>and</span><select data-tier="show2">${opt(TIER_SHOW, t.show2)}</select></label>
         </div>
@@ -3096,6 +3253,7 @@
     if (k === "preset") c.preset = v;
     else if (k === "skillW") c.skillW = v;
     else if (k === "independent") c.independent = v;
+    else if (k === "itManual") c.itManual = v;
     else t[k] = v;
     save();
     renderTiers();
@@ -3141,6 +3299,10 @@
     }
     if (state.tab === "cm" && HAS_DATA) {
       renderCM();
+      return;
+    }
+    if (state.tab === "parents" && HAS_DATA && parents()) {
+      parents().render(body);
       return;
     }
     if ((state.tab === "cards" || state.tab === "trainees") && HAS_DATA) {

@@ -40,6 +40,32 @@
   // (G1, G2/G3, OP) unless you've set your own.
   const IT_LATE_CHAIN = 0.2;
   const IT_RACES = [15, 3, 0];
+  // Independent Training card value, from players' testing there (r/UmamusumeGame, fujikiseki.xyz):
+  // initial stats and skill points stand out, Specialty Priority seems to do nothing, and
+  // Friendship Bonus, Mood Effect and Training Effectiveness haven't been measured there, so
+  // they count at `itManual` (default half) of their manual-career value. Initial stats and
+  // skill points (Skill Point Bonus, events, Initial Skill Points) count IT_INITIAL / IT_SP
+  // times. These are assumptions, not measured game rules.
+  const IT_INITIAL = 1.5, IT_SP = 1.5, IT_MANUAL = 0.5;
+  function itEntry(e, k) {
+    if (!e) return e;
+    const x = Object.assign({}, e);
+    const scale = (v) => 1 + ((v == null ? 1 : v) - 1) * k;
+    x.specialty_rate = 0;
+    x.unique_specialty = 1;
+    x.fs_specialty = 1;
+    x.tb = scale(e.tb);
+    x.mb = scale(e.mb);
+    x.fs_bonus = scale(e.fs_bonus);
+    x.unique_fs_bonus = scale(e.unique_fs_bonus);
+    x.fs_training = (e.fs_training || 0) * k;
+    x.fs_motivation = (e.fs_motivation || 0) * k;
+    x.starting_stats = e.starting_stats.map((v) => v * IT_INITIAL);
+    x.type_stats = (e.type_stats || 0) * IT_INITIAL;
+    return x;
+  }
+  const itOn = (opts) => !!opts.independent;
+  const itK = (opts) => (opts.itManual != null ? +opts.itManual : IT_MANUAL);
   const lateMemo = new Map();
   function lateChainSkills(card) {
     if (lateMemo.has(card.id)) return lateMemo.get(card.id);
@@ -80,7 +106,12 @@
     const s = EU.getScenario("gl", scen);
     const [tab, type] = TABS[ty] || TABS.speed;
     const w = Object.assign({}, s.general, s[tab], { type });
-    if (independent) w.races = IT_RACES.concat(w.races.slice(3));
+    // `independent` may carry your own agenda's race counts [G1, G2/G3, OP] (the Parents tab's G1 plan).
+    if (independent) {
+      w.races = (Array.isArray(independent) ? independent : IT_RACES).concat(w.races.slice(3));
+      w.stats = w.stats.slice();
+      w.stats[5] *= IT_SP;
+    }
     const o = overrides || {};
     Object.keys(o).forEach((k) => { if (o[k] != null) w[k] = Array.isArray(o[k]) ? o[k].slice() : o[k]; });
     const t = trainee ? D.trainee(trainee) : null;
@@ -164,23 +195,42 @@
     ctx.spWeight = w.stats[5];
     ctx.speedWeight = w.stats[0];
     ctx.races = w.races.slice(0, 3).reduce((a, b) => a + b, 0);
-    const selected = deck.map((c) => entry(c.id, c.lb)).filter(Boolean);
+    const it = itOn(opts), k = itK(opts);
+    const ent = (c) => (it ? itEntry(entry(c.id, c.lb), k) : entry(c.id, c.lb));
+    const selected = deck.map(ent).filter(Boolean);
     const inDeck = new Set(deck.map((c) => D.card(c.id).cid));
     const cands = candidates.filter((c) => {
       const card = D.card(c.id);
       return card && !inDeck.has(card.cid) && card.cid !== ctx.traineeChar && entry(c.id, c.lb);
     });
-    const base = EU.processCards(cands.map((c) => entry(c.id, c.lb)), w, selected);
+    const base = EU.processCards(cands.map(ent), w, selected);
     const baseBy = new Map(base.map((x) => [x.id + ":" + x.lb, x]));
     const before = skillValue(deck, ctx);
     return cands.map((c) => {
       const b = baseBy.get(c.id + ":" + c.lb);
+      // Independent Training: what the card's score rests on there, and its Initial Skill
+      // Points (Euophrys leaves them out).
+      let itParts = null;
+      if (it) {
+        const card = D.card(c.id), fx = D.baseEffects(card, D.levelFor(card, c.lb));
+        const e = entry(c.id, c.lb);
+        const initSp = fx[32] || 0; // skill points already count IT_SP times
+        itParts = {
+          initialStats: Math.round(e.starting_stats.reduce((a, v) => a + v, 0) + (e.type_stats || 0) * (deck.length + 1)),
+          initialSp: fx[32] || 0,
+          spBonus: e.stat_bonus[5] || 0,
+          raceBonus: e.race_bonus || 0,
+          hint: { rate: e.hint_rate, lv: fx[17] || 0 },
+          initialSpScore: initSp * w.stats[5],
+        };
+        b.score += itParts.initialSpScore;
+      }
       const sv = skillValue(deck.concat([c]), ctx);
       const skill = (sv.value - before.value) * ctx.skillWeight;
       const must = sv.mustValue - before.mustValue;
       const base = b.score * (opts.parent ? opts.parent.statsWeight : 1);
       return {
-        id: c.id, lb: c.lb, base, skill, must, score: base + skill + must, info: b.info,
+        id: c.id, lb: c.lb, base, skill, must, score: base + skill + must, info: b.info, it: itParts,
         gives: sv.must.filter((m) => m.src.indexOf(c.id) !== -1).map((m) => m.id),
         skills: sv.list.filter((s) => s.src.indexOf(c.id) !== -1 && s.surplus > 0).slice(0, 3).map((s) => ({ id: s.id, L: s.L, p: s.p }))
       };
@@ -262,7 +312,7 @@
       const alt = from.length ? rank(opts, D.card(c.id).ty, rest, from)[0] : null;
       const altCoverage = alt ? deckSkills(opts, rest.concat([alt])).must.filter((x) => x.p > 0).map((x) => x.id) : [];
       return {
-        id: c.id, lb: c.lb, borrowed: !!c.borrowed, score: own.score - own.must, base: own.base, skill: own.skill, skills: own.skills, gives: own.gives,
+        id: c.id, lb: c.lb, borrowed: !!c.borrowed, score: own.score - own.must, base: own.base, skill: own.skill, skills: own.skills, gives: own.gives, it: own.it || null,
         alt: alt ? { id: alt.id, lb: alt.lb, score: alt.score - alt.must, losesMust: requiredCoverage.some((id) => !altCoverage.includes(id)) } : null
       };
     });
@@ -300,13 +350,15 @@
   const DIST_NO = { Sprint: 1, Mile: 2, Medium: 3, Long: 4 };
   function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf) {
     const out = {};
-    if (mode === "debuff") {
+    // Debuffer parent: white debuffs only (they become sparks). Debuffer ace (the runner you
+    // enter to debuff): golds too, counted double since they hit about twice as hard.
+    if (mode === "debuff" || mode === "debuffAce") {
       Object.entries(debuffs || {}).forEach(([id, d]) => {
         if (d.dist.length && d.dist.indexOf(DIST_NO[preset.course.dist]) === -1) return;
         if (d.ground.length && d.ground.indexOf(preset.course.surface === "Dirt" ? 2 : 1) === -1) return;
         if (d.style.length && d.style.indexOf(STYLE_NO[style]) === -1) return;
-        if (d.r !== 1) return;
-        out[id] = 1; // a debuffer lives on these: count each like a strong race skill
+        if (mode === "debuff" ? d.r !== 1 : d.r !== 1 && d.r !== 2) return;
+        out[id] = d.r === 2 ? 2 : 1; // a debuffer lives on these: count each like a strong race skill
       });
       return out;
     }
@@ -318,7 +370,7 @@
     return out;
   }
 
-  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN };
+  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTiers = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
