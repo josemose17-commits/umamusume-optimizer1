@@ -71,6 +71,8 @@ Existing saves remain usable. Their original input snapshots are exported where 
 
 Mark the support cards you own and their limit break, with the **Owned** picker on any card or **Quick add** under **My cards** in the Support cards tab. They're saved in your browser. **Copy backup code** gives a short code (`UMA1:...`) you can keep or paste into **Restore** on another device. When you add a card you own to your deck, it starts at your limit break, and **Cards I own** limits the deck picker to your cards.
 
+Cards reach Global in the data when GameTora lists their Global date (refreshed daily). If a card is out on Global but the data doesn't know yet, open it in **Support cards** (untick **Global only** to find it) and press **Mark as out on Global**: it then counts as a Global card everywhere (deck picker, optimizer, tier list), in this browser. A date from the data takes over once it arrives, and **Unmark** undoes it.
+
 ## CM & decks
 
 Pick any Champions Meeting or League of Heroes:
@@ -294,6 +296,7 @@ When releasing a change to the site, bump the `?v=` number on the file links in 
 - `tools/`: data builders, including the headless Umalator runner.
 - `app.js`, `style.css`, `index.html`: the page.
 - `test/`: run with `node --test test/*.test.js`.
+- `.github/workflows/`: `update-data.yml` refreshes the game data daily (it only commits when the tests pass); `auto-merge.yml` merges every push to a `claude/*` branch into `main` when the tests pass on the merged result.
 
 ## Limits
 

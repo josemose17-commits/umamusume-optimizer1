@@ -148,6 +148,9 @@ test("event parser retains prior-choice dependencies instead of flattening their
   assert.deepEqual(parsed, data.events[830043004].c[0]);
   const bold = source.replace(/(Selected Choice [^:]+):/g, "'''$1''':");
   assert.deepEqual(JSON.parse(execFileSync("python", ["-c", code], { cwd: require("node:path").resolve(__dirname, ".."), input: bold, encoding: "utf8" })), parsed);
+  // The wiki's current markup: bold labels with the outcome in italics.
+  const italic = bold.replace(/\((Success|Failure)\)/g, "''($1)''");
+  assert.deepEqual(JSON.parse(execFileSync("python", ["-c", code], { cwd: require("node:path").resolve(__dirname, ".."), input: italic, encoding: "utf8" })), parsed);
   const text = require("../engine.js").eventText(parsed, 4); assert.match(text, /if choice 1 was selected/); assert.match(text, /on failure/);
   const offers = D.skillOffers(); S.add(offers, D.card(30043), { skills: { 201701: 10 }, known: new Set(), costs: {}, must: [] }, { success: 1 });
   close(offers.values().find((s) => s.id === "201701").p, 0.8); assert.equal(offers.values().some((s) => s.id === "201591"), false);

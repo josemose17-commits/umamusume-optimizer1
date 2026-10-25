@@ -130,6 +130,24 @@
   let owned = {};
   try { owned = JSON.parse(localStorage.getItem(OWN_KEY)) || {}; } catch (e) { owned = {}; }
   function saveOwned() { try { localStorage.setItem(OWN_KEY, JSON.stringify(owned)); } catch (e) { /* ignore */ } }
+  // Cards you've marked as out on Global before the card data has their Global date (saved in
+  // this browser): { id: date marked }. A date from the data always wins.
+  const GL_KEY = "uma-global-v1";
+  let markedGlobal = {};
+  try { markedGlobal = JSON.parse(localStorage.getItem(GL_KEY)) || {}; } catch (e) { markedGlobal = {}; }
+  function applyMarkedGlobal() {
+    if (!HAS_DATA) return;
+    D.DATA.supports.forEach((c) => {
+      if (c.enMarked && !markedGlobal[c.id]) { c.en = null; c.enMarked = false; }
+      if (markedGlobal[c.id] && !c.en) { c.en = markedGlobal[c.id]; c.enMarked = true; }
+    });
+  }
+  applyMarkedGlobal();
+  function toggleMarkedGlobal(id) {
+    if (markedGlobal[id]) delete markedGlobal[id]; else markedGlobal[id] = new Date().toISOString().slice(0, 10);
+    try { localStorage.setItem(GL_KEY, JSON.stringify(markedGlobal)); } catch (e) { /* ignore */ }
+    applyMarkedGlobal();
+  }
   const ownedLb = (id) => (owned[id] != null ? +owned[id] : null);
   const ownedIds = () => Object.keys(owned).map(Number).filter((id) => D && D.card(id));
   const ownedCode = () => D.encodeOwned(owned);
@@ -761,6 +779,16 @@
       if (use) { setTrainee(+use.dataset.useTrainee); return; }
       const more = e.target.closest("[data-more]");
       if (more) { db().limit += 60; renderDbList(); return; }
+      const mg = e.target.closest("[data-mark-global]");
+      if (mg) {
+        const id = +mg.dataset.markGlobal;
+        toggleMarkedGlobal(id);
+        flash(D.card(id).n + (markedGlobal[id] ? " counts as on Global now" : " no longer counts as on Global"));
+        optResult = null;
+        fillLists();
+        renderDbList();
+        return;
+      }
       const row = e.target.closest("[data-db-row]");
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
@@ -1558,6 +1586,7 @@
         <label class="field"><span>Limit break</span><select data-db="lb">${opt([["0", "LB0"], ["1", "LB1"], ["2", "LB2"], ["3", "LB3"], ["4", "LB4 (max)"], ["own", "Mine (owned LB)"]], d.lb)}</select></label>
         <label class="field"><span>Sort by</span><select data-db="sort">${opt(SORTS, d.sort)}</select></label>
         <label class="chip-toggle"><input type="checkbox" data-db="global" ${d.global ? "checked" : ""}> Global only</label>
+        <span class="mini">New card out on Global but missing? Untick Global only, open the card and press <b>Mark as out on Global</b>.</span>
       </div><div id="dbList"></div>`;
     }
     return `<div class="db-controls">
@@ -1663,7 +1692,8 @@
         <p class="mini"><b>Events over a career:</b> ${eventText(c)}</p>
         <p class="mini"><b>Hint skills:</b> ${sk(c.hs)}</p>
         <p class="mini"><b>Event skills:</b> ${sk(c.es)}</p>
-        <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) : ", not on Global yet"} · ${esc(c.src || "")}</p>
+        <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) + (c.enMarked ? " (marked by you)" : "") : ", not on Global yet in the card data (" + esc(D.DATA.meta.built) + ")"} · ${esc(c.src || "")}
+          ${!c.en || c.enMarked ? `<button type="button" class="btn ghost small" data-mark-global="${c.id}">${c.enMarked ? "Unmark: not out on Global" : "Mark as out on Global"}</button>` : ""}</p>
       </div>`;
     }
     const own = ownedLb(c.id);
