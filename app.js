@@ -48,6 +48,7 @@
       facLevels: {},
       db: k.db || null,
       cm: k.cm || null,
+      pcm: k.pcm || null,
       // The Parents tab's plan spans careers (lineage, G1 wins, rating check).
       parents: k.parents || null,
       turn: 1,
@@ -2090,6 +2091,18 @@
   let sensitivityJob = null;
   let wish = null; // cards worth getting for optResult
   let wishJob = null;
+  // Each deck host keeps its own result: swap them when you move between CM & decks and Parents.
+  let shownHost = "cm";
+  const hostStash = {};
+  function syncDeckHost() {
+    if (state.tab !== "cm" && state.tab !== "parents") return;
+    const h = deckHost();
+    if (h === shownHost) return;
+    hostStash[shownHost] = { optResult, wish, wishJob, sensitivityJob };
+    const x = hostStash[h] || {};
+    optResult = x.optResult || null; wish = x.wish || null; wishJob = x.wishJob || null; sensitivityJob = x.sensitivityJob || null;
+    shownHost = h;
+  }
   let skillLimit = 60;
 
   const presetById = (id) => (P ? P.list.find((p) => p.id === id) : null);
@@ -2111,9 +2124,21 @@
     return STYLES[best][0];
   }
 
+  // Two deck-builder setups with their own settings and result: CM & decks (racing, Debuffer ace)
+  // and the Parents tab's ③ Deck (Ace/Debuffer parent). cm() is the one for the open tab.
+  const deckHost = () => (state.tab === "parents" ? "parents" : "cm");
+  const PARENT_GOALS = ["ace", "debuff"];
   function cm() {
     if (!state.cm) state.cm = {};
-    const c = state.cm;
+    // Parent decks built in CM & decks before they moved: carry those settings over once.
+    if (!state.pcm && PARENT_GOALS.indexOf(state.cm.goal) !== -1) {
+      state.pcm = JSON.parse(JSON.stringify(state.cm));
+      state.cm.goal = "race";
+    }
+    if (deckHost() === "parents" && !state.pcm) state.pcm = { goal: "ace", independent: true };
+    const c = deckHost() === "parents" ? state.pcm : state.cm;
+    if (deckHost() === "parents" && PARENT_GOALS.indexOf(c.goal) === -1) c.goal = "ace";
+    if (deckHost() === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
     const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
@@ -2122,8 +2147,8 @@
   // Independent Training's race agenda: the Parents tab's G1 plan when you've sent it over
   // (c.itRaces G1s), else a G1-heavy default. Optional races then take that share of the
   // ~60 turns after the debut.
-  const itArg = (c) => (c.independent ? (cm().itRaces != null ? [cm().itRaces, 0, 0] : true) : false);
-  const itShare = (c) => (c.independent ? (cm().itRaces != null ? Math.min(0.5, cm().itRaces / 60) : 0.25) : undefined);
+  const itArg = (c) => (c.independent ? (c.itRaces != null ? [c.itRaces, 0, 0] : true) : false);
+  const itShare = (c) => (c.independent ? (c.itRaces != null ? Math.min(0.5, c.itRaces / 60) : 0.25) : undefined);
 
   function presetStatus(p) {
     const g = p.global;
@@ -2143,8 +2168,8 @@
     svCache[id] = "loading";
     fetch("data/skillvalues/" + id + ".json?v=" + ASSET_V)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { svCache[id] = j; if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); })
-      .catch(() => { svCache[id] = "error"; if (state.tab === "cm") renderCM(); });
+      .then((j) => { svCache[id] = j; if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); })
+      .catch(() => { svCache[id] = "error"; if (state.tab === "cm" || state.tab === "parents") renderCM(); });
   }
 
   const skillInfo = (id) => (SV && SV.skills[id]) || [D.DATA.skills[id] || "#" + id, D.skillCost(id) || 0, 1, 1];
@@ -2198,7 +2223,7 @@
       euLoading = true;
       const sc = document.createElement("script");
       sc.src = "data/euophrys-cards.js?v=" + ASSET_V;
-      sc.onload = () => { if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); };
+      sc.onload = () => { if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); };
       sc.onerror = () => { euLoading = false; flash("Couldn't load the tier list data. Check your connection."); };
       document.head.appendChild(sc);
     }
@@ -2290,6 +2315,7 @@
     optRun = { f: 0 };
     renderCM();
     const key = optKey();
+    const host = deckHost();
     const tg = cmTargets(c);
     // Independent Training parent runs race their agenda (see itShare).
     const raceShare = itShare(c);
@@ -2306,12 +2332,15 @@
         } catch (err) { est = null; }
       }
       if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills;
-      optResult = Object.assign(r, { key, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
-      wish = null;
+      const result = Object.assign(r, { key, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       optRun = null;
-      if (state.tab === "cm") renderCM();
+      // You moved to the other deck tab while it ran: keep the result with the tab it's for.
+      if (host !== shownHost) { hostStash[host] = { optResult: result }; if (state.tab === "cm" || state.tab === "parents") renderCM(); return; }
+      optResult = result;
+      wish = null;
+      if (state.tab === "cm" || state.tab === "parents") renderCM();
     };
-    const fail = (err) => { flash(String(err.message || err)); optRun = null; if (state.tab === "cm") renderCM(); };
+    const fail = (err) => { flash(String(err.message || err)); optRun = null; if (state.tab === "cm" || state.tab === "parents") renderCM(); };
     let link = null;
     setTimeout(() => {
       try {
@@ -2393,14 +2422,14 @@
     const job = OPT.sensitivity(sim, candidates);
     sensitivityJob = job; renderCM();
     const tick = () => {
-      if (optResult !== r || r.key !== optKey()) { sensitivityJob = null; if (state.tab === "cm") renderCM(); return; }
+      if (optResult !== r || r.key !== optKey()) { sensitivityJob = null; if (state.tab === "cm" || state.tab === "parents") renderCM(); return; }
       try {
         const more = job.next();
         const progress = $("#sensitivityProgress"); if (progress) progress.textContent = Math.round(job.progress() * 100) + "%";
         if (more) { setTimeout(tick, 0); return; }
         r.sensitivity = job.result(); sensitivityJob = null;
-        if (state.tab === "cm") renderCM();
-      } catch (err) { sensitivityJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
+        if (state.tab === "cm" || state.tab === "parents") renderCM();
+      } catch (err) { sensitivityJob = null; flash(err.message || String(err)); if (state.tab === "cm" || state.tab === "parents") renderCM(); }
     };
     setTimeout(tick, 0);
   }
@@ -2438,7 +2467,7 @@
       const out = []; let at = 0;
       const tick = () => {
         if (wishJob !== token) return;
-        if (optResult !== r || r.key !== optKey()) { wishJob = null; if (state.tab === "cm") renderCM(); return; }
+        if (optResult !== r || r.key !== optKey()) { wishJob = null; if (state.tab === "cm" || state.tab === "parents") renderCM(); return; }
         try {
           if (at < jobs.length) {
             const job = jobs[at++];
@@ -2451,8 +2480,8 @@
           const seen = new Set();
           wish = out.sort((a, b) => b.gain - a.gain).filter((x) => !seen.has(x.id) && seen.add(x.id)).slice(0, 10);
           r.wishMeta = { runs: 8, seed: 857563, candidates: jobs.length }; wishJob = null;
-          if (state.tab === "cm") renderCM();
-        } catch (err) { wishJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
+          if (state.tab === "cm" || state.tab === "parents") renderCM();
+        } catch (err) { wishJob = null; flash(err.message || String(err)); if (state.tab === "cm" || state.tab === "parents") renderCM(); }
       };
       setTimeout(tick, 0); return;
     }
@@ -2470,6 +2499,7 @@
   }
 
   function renderCM() {
+    if (state.tab === "parents") { renderTab(); return; }
     const body = $("#tabBody");
     if (!P || !T) { body.innerHTML = `<div class="empty">The CM data didn't load. Refresh the page.</div>`; return; }
     const c = cm();
@@ -2516,7 +2546,8 @@
     const goal = c.goal || "race";
     return `<section class="panel cm-opt">
       <h3>Deck optimizer</h3>
-      <div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>
+      ${deckHost() === "cm" ? '<p class="mini">Building a parent? Ace and debuffer parents are in the <button type="button" class="linkish" data-goto-tab="parents">Parents</button> tab, with her G1 plan and rating check.</p>' : ""}
+      <div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.filter(([k]) => (PARENT_GOALS.indexOf(k) !== -1) === (deckHost() === "parents")).map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>
       ${goal === "debuffAce" ? `<p class="mini"><b>Debuffer ace:</b> the uma you enter in this CM to slow the others down rather than win. Picks the cards that give her the most debuffs that work on this race's distance and surface with your running style, golds counted double (they hit about twice as hard), white ones too. She needs Wit so they fire (each skill's activation chance is 100 − 9000 ÷ Wit %, at least 20%) and enough Speed and Stamina to stay in position: <b>Debuffer targets</b> below sets them.</p>` : ""}
       ${goal === "ace" || goal === "debuff" ? `<p class="mini"><b>${goal === "ace" ? "Ace parent" : "Debuffer parent"}:</b> picks the cards that give your parent the most ${goal === "ace" ? "white skills that are strong on this race (weighted by median L for the running style)" : "white debuff skills that work on this race's distance and surface with your running style"}, so she can learn them and pass them down as skill sparks. Gold skills don't count, since only white skills become sparks. Every skill counts, not just the best 8, and stats only count as much as you choose.</p>` : ""}
       ${goal !== "race" ? `<label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
@@ -2530,7 +2561,7 @@
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
       </div>
       ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${opt(IT_MANUAL_OPTS, c.itManual)}</select></label>` : ""}
-      ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for your G1 plan's ${c.itRaces} G1 races (Parents tab), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: the Parents tab plans the fewest G1s for affinity and sends the count here.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>` : ""}
+      ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for your G1 plan's ${c.itRaces} G1 races (② Races), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: ${deckHost() === "parents" ? "② Races plans the fewest G1s for affinity and sends the count here" : "the Parents tab plans the fewest G1s for affinity"}.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>` : ""}
       ${compHTML(c)}
       ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
       ${targetsHTML(p, c)}
@@ -2649,6 +2680,14 @@
       predicted: () => (optResult && optResult.est && optResult.est.stats ? { stats: optResult.est.stats.slice(), sp: Math.round(optResult.est.sp || 0) } : null),
       itRaces: () => (cm().itRaces != null ? cm().itRaces : null),
       cmMust: () => cm().must || [],
+      // ③ Deck: the deck builder's race header and controls, for the parent setup.
+      deckHTML: () => {
+        if (!P || !T) return `<div class="empty">The CM data didn't load. Refresh the page.</div>`;
+        const c = cm(), p = presetById(c.preset);
+        loadSkillValues(p.id);
+        euReady();
+        return `<div class="cm">${cmHeader(p, c)}${cmOptimizer(p, c)}</div>`;
+      },
       setItRaces: (n) => { if (n == null) delete cm().itRaces; else cm().itRaces = n; optResult = null; save(); renderTab(); },
       // Rating lost per optional race: simulate your coach deck racing rarely and often, and
       // compare the rating of the stats and skill points (at the planner's SP_RATING).
@@ -2866,7 +2905,7 @@
     const stats = PR.statsScore(r.est.stats), skills = Math.round((r.est.sp || 0) * PP.SP_RATING), unique = PR.uniqueBonus(stars, stars);
     const total = stats + skills + unique;
     const rk = PR.rankOf(total);
-    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>${total >= PR.SS ? ", SS: white sparks get the doubled 3★ chance" : `, about ${(PR.SS - total).toLocaleString()} short of SS (${PR.SS.toLocaleString()})`}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent at ~${PP.SP_RATING} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>; fewer races also help.</p>`;
+    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>${total >= PR.SS ? ", SS: white sparks get the doubled 3★ chance" : `, about ${(PR.SS - total).toLocaleString()} short of SS (${PR.SS.toLocaleString()})`}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent at ~${PP.SP_RATING} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. ${state.tab === "parents" ? "Plan the exact buy in ④ After the run" : 'Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>'}; fewer races also help.</p>`;
   }
 
   // Predicted stats from the simulated careers, against your targets when you set them.
@@ -2994,7 +3033,7 @@
 
   function cmClick(e) {
     const t = e.target;
-    const c = state.tab === "cm" ? cm() : null;
+    const c = state.tab === "cm" || state.tab === "parents" ? cm() : null;
     if (!c) return false;
     const style = t.closest("[data-cm-style]");
     if (style) { c.style = style.dataset.cmStyle; skillLimit = 60; save(); renderCM(); return true; }
@@ -3290,6 +3329,7 @@
   }
 
   function renderTab() {
+    syncDeckHost();
     const sc = scenario();
     $$(".tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
     const body = $("#tabBody");
