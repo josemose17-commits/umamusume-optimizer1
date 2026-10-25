@@ -659,3 +659,5 @@ table.pred .over { color: var(--accent); }
 .pp-result { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
 .pp-sym { font-size: 1.1rem; }
 .pp-big { font-family: var(--font-display); font-size: 1.3rem; }
+.pp-h { margin: 6px 0 0; font-size: 1rem; }
+.pp-tree { margin: 0; }
