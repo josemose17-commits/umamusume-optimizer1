@@ -80,7 +80,8 @@
     const s = EU.getScenario("gl", scen);
     const [tab, type] = TABS[ty] || TABS.speed;
     const w = Object.assign({}, s.general, s[tab], { type });
-    if (independent) w.races = IT_RACES.concat(w.races.slice(3));
+    // `independent` may carry your own agenda's race counts [G1, G2/G3, OP] (the Parents tab's G1 plan).
+    if (independent) w.races = (Array.isArray(independent) ? independent : IT_RACES).concat(w.races.slice(3));
     const o = overrides || {};
     Object.keys(o).forEach((k) => { if (o[k] != null) w[k] = Array.isArray(o[k]) ? o[k].slice() : o[k]; });
     const t = trainee ? D.trainee(trainee) : null;
@@ -300,13 +301,15 @@
   const DIST_NO = { Sprint: 1, Mile: 2, Medium: 3, Long: 4 };
   function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf) {
     const out = {};
-    if (mode === "debuff") {
+    // Debuffer parent: white debuffs only (they become sparks). Debuffer ace (the runner you
+    // enter to debuff): golds too, counted double since they hit about twice as hard.
+    if (mode === "debuff" || mode === "debuffAce") {
       Object.entries(debuffs || {}).forEach(([id, d]) => {
         if (d.dist.length && d.dist.indexOf(DIST_NO[preset.course.dist]) === -1) return;
         if (d.ground.length && d.ground.indexOf(preset.course.surface === "Dirt" ? 2 : 1) === -1) return;
         if (d.style.length && d.style.indexOf(STYLE_NO[style]) === -1) return;
-        if (d.r !== 1) return;
-        out[id] = 1; // a debuffer lives on these: count each like a strong race skill
+        if (mode === "debuff" ? d.r !== 1 : d.r !== 1 && d.r !== 2) return;
+        out[id] = d.r === 2 ? 2 : 1; // a debuffer lives on these: count each like a strong race skill
       });
       return out;
     }
