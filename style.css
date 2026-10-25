@@ -661,3 +661,6 @@ table.pred .over { color: var(--accent); }
 .pp-big { font-family: var(--font-display); font-size: 1.3rem; }
 .pp-h { margin: 6px 0 0; font-size: 1rem; }
 .pp-tree { margin: 0; }
+.pp-tree { display: grid; gap: 8px; }
+.pp-branch { display: grid; gap: 8px; margin-left: 18px; padding-left: 12px; border-left: 2px solid var(--line); }
+.pp-node { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
