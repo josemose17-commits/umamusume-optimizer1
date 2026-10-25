@@ -20,7 +20,7 @@
 
   function create(ctx) {
     const { D, A, R, SB, esc } = ctx;
-    const open = new Set(["aff", "rating"]);
+    const open = new Set(["who", "races", "deck", "rating"]);
     let raceCost = null; // { perRace, races, ... } from ctx.raceCost(), until inputs change
 
     function st() {
@@ -82,13 +82,11 @@
         <div class="pp-g1grid">${g1.map((r) => `<label class="pp-g1"><input type="checkbox" data-pp-win="${key}" value="${esc(r.name)}"${wins.indexOf(r.name) !== -1 ? " checked" : ""}> ${esc(r.name)}</label>`).join("")}</div></details>`;
     }
 
-    function affinityHTML(p) {
-      const t = trainee(p.selfTrainee);
+    // ① Who: the uma you're training, her parents, the ace and partner, and their G1 wins.
+    function whoHTML(p) {
       const vers = p.self ? versions(p.self) : [];
       const a = apt(p);
-      const res = p.self ? plan(p) : null;
-      const sym = (n) => `<b class="pp-sym">${A.symbol(n)}</b> ${n}`;
-      let out = `<p class="mini">Affinity (◎/○/△ on the legacy screen) raises every spark's chance to fire. Most of it is fixed by which characters you pair, but each G1 that two of them both won adds <b>+3</b>: the two parents, and each parent with her own two parents. So the uma you're training now should win the G1s her own parents won (they'll be her grandparents later) and the ones her future partner won. Each race takes a training turn and lowers her rating, so this picks the fewest. G2/G3 wins and titles don't count on Global; over 150 is ◎. Formula: GameTora's compatibility calculator.</p>
+      return `<p class="mini">The uma you're training now, the two parents she inherits from in this run, and (optional) the ace you'll breed from her and the partner parent she'll be paired with. Tick each one's G1 wins.</p>
         <div class="pp-form">
           <label class="field"><span>Uma you're training now</span>${charInput("self", p.self, "Your trainee")}</label>
           ${vers.length > 1 ? `<label class="field"><span>Version (for aptitudes)</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}
@@ -98,7 +96,15 @@
         </div>
         ${a ? `<div class="pp-apt"><span class="mini">Her distance/surface aptitudes (change them if sparks raised one):</span> ${[0, 1, 2, 3, 4, 5].map((i) => `<label class="pp-aptf"><span>${APT_LABELS[i]}</span><select data-pp-apt="${i}">${GRADES.map((g) => `<option${a[i] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("")}${p.apt ? ' <button type="button" class="btn ghost small" data-pp-act="aptReset">Use her base aptitudes</button>' : ""}</div>` : ""}
         <div class="pp-links">${ROLES.map(([k, l, hint]) => `<div class="pp-link"><label class="field"><span>${l} <i class="mini">${hint}</i></span>${charInput(k, p[k].cid)}</label>${p[k].cid ? winsBox(k, p[k].wins) : ""}</div>`).join("")}</div>`;
-      if (!res) return out + `<p class="mini">Pick the uma you're training now to plan her races.</p>`;
+    }
+
+    // ② Races: the fewest G1s she should win for the affinity target, and what they cost.
+    function racesHTML(p) {
+      const res = p.self ? plan(p) : null;
+      const sym = (n) => `<b class="pp-sym">${A.symbol(n)}</b> ${n}`;
+      let out = `<p class="mini">The fewest G1s she should win so that, as a parent later, she reaches ${A.symbol(p.target)} affinity. Each race costs rating, so fewer is better.</p>
+        <details class="pred-help"><summary>How this works</summary><p class="mini">Affinity (◎/○/△ on the legacy screen) raises every spark's chance to fire. Most of it is fixed by which characters you pair, but each G1 that two of them both won adds <b>+3</b>: the two parents, and each parent with her own two parents. So she should win the G1s her own parents won (they'll be her grandparents later) and the ones her future partner won. Career-goal G1s come first (she runs them anyway), then the races shared with the most umas; races outside her aptitudes or on a turn already taken are skipped. G2/G3 wins and titles don't count on Global; over 150 is ◎. Formula: GameTora's compatibility calculator.</p></details>`;
+      if (!res) return out + `<p class="mini">Pick the uma you're training now in ① to plan her races.</p>`;
       const b = res.base;
       out += `<div class="pp-result">`;
       if (p.ace) {
@@ -185,15 +191,19 @@
       return out + "</div>";
     }
 
+    const section = (key, title, note, body) => `<details class="panel pp-sec" data-pp-open="${key}"${open.has(key) ? " open" : ""}><summary><h2>${title}</h2><span class="mini">${note}</span></summary>${body}</details>`;
+
     function render(el) {
       const p = st();
       const skillNames = ctx.skillNames();
       el.innerHTML = `<div class="parents">
         <datalist id="ppChars">${Array.from(chars.values()).sort().map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
         <datalist id="ppSkills">${skillNames.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
-        <details class="panel pp-sec" data-pp-open="aff"${open.has("aff") ? " open" : ""}><summary><h2>G1 plan for affinity</h2><span class="mini">fewest races to ◎</span></summary>${affinityHTML(p)}</details>
-        <details class="panel pp-sec" data-pp-open="rating"${open.has("rating") ? " open" : ""}><summary><h2>Rating check: reach SS</h2><span class="mini">best skill buy for rating</span></summary>${ratingHTML(p)}</details>
-        <p class="mini">For the deck: <b>CM &amp; decks</b> → <b>Ace parent</b>, <b>Debuffer parent</b> or <b>Debuffer ace</b>, with <b>Independent Training</b> ticked for the auto mode. Its result shows the predicted rating.</p>
+        <p class="mini pp-intro">Build a parent in order: who she is, which G1s to win, the deck, then the skills to buy at the end so she reaches SS.</p>
+        ${section("who", "① Who", p.self ? esc(charName(p.self)) : "pick your uma", whoHTML(p))}
+        ${section("races", "② Races", "fewest G1s for affinity", racesHTML(p))}
+        ${section("deck", "③ Deck", "ace or debuffer parent", ctx.deckHTML())}
+        ${section("rating", "④ After the run", "skills to buy, reach SS", ratingHTML(p))}
       </div>`;
     }
 
