@@ -67,8 +67,8 @@
     function plan(p) {
       const base = A.total(lineage(p), knownWins(p));
       const need = p.ace ? Math.max(0, p.target - base.total) : Infinity;
-      const links = [["l1", "her parent 1"], ["l2", "her parent 2"], ["partner", "partner"]]
-        .map(([k, role]) => ({ role, cid: p[k].cid, wins: p[k].wins }));
+      const links = [["l1", "grandparent"], ["l2", "grandparent"], ["partner", "parent 2"]]
+        .map(([k, role]) => ({ role: charName(p[k].cid) + " (" + role + ")", cid: p[k].cid, wins: p[k].wins }));
       const out = A.planRaces({ self: p.self, apt: apt(p), minGrade: p.minGrade, links, need });
       return Object.assign(out, { base, need, after: base.total + out.points });
     }
@@ -76,27 +76,35 @@
     function charInput(key, value, placeholder) {
       return `<input data-pp-char="${key}" list="ppChars" value="${esc(charName(value))}" placeholder="${esc(placeholder || "Character")}" autocomplete="off">`;
     }
-    function winsBox(key, wins) {
+    function winsBox(key, wins, who) {
       const id = "w-" + key;
-      return `<details class="pp-wins" data-pp-open="${id}"${open.has(id) ? " open" : ""}><summary>Tick her G1 wins · ${wins.length ? wins.length + " ticked: " + esc(wins.slice(0, 3).join(", ")) + (wins.length > 3 ? " +" + (wins.length - 3) : "") : "none yet"}</summary>
+      return `<details class="pp-wins" data-pp-open="${id}"${open.has(id) ? " open" : ""}><summary>Tick ${esc(who)}'s G1 wins · ${wins.length ? wins.length + " ticked: " + esc(wins.slice(0, 3).join(", ")) + (wins.length > 3 ? " +" + (wins.length - 3) : "") : "none yet"}</summary>
         <div class="pp-g1grid">${g1.map((r) => `<label class="pp-g1"><input type="checkbox" data-pp-win="${key}" value="${esc(r.name)}"${wins.indexOf(r.name) !== -1 ? " checked" : ""}> ${esc(r.name)}</label>`).join("")}</div></details>`;
     }
 
     // ① Who: the uma you're training, her parents, the ace and partner, and their G1 wins.
+    // ① Who: the ace's family tree, since affinity is counted on the ace's run. Parent 1 is the
+    // uma you're training now; her grandparents are this run's legacies. Names fill the labels.
     function whoHTML(p) {
       const vers = p.self ? versions(p.self) : [];
       const a = apt(p);
-      return `<p class="mini pp-tree"><b>Ace</b> = She + Partner · <b>She</b> = Legacy 1 + Legacy 2 · <b>Partner</b> = Partner's legacy 1 + 2</p>
-        <h3 class="pp-h">Now: this run</h3>
-        <div class="pp-form">
-          <label class="field"><span>Uma you're training <i class="mini">also the coach's trainee</i></span>${charInput("self", p.self, "Your trainee")}</label>
-          ${vers.length > 1 ? `<label class="field"><span>Version</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}
-        </div>
-        ${a ? `<div class="pp-apt"><span class="mini">Her aptitudes, used to skip races she can't win. If a spark raised one, change it here:</span> ${[0, 1, 2, 3, 4, 5].map((i) => `<label class="pp-aptf"><span>${APT_LABELS[i]}</span><select data-pp-apt="${i}">${GRADES.map((g) => `<option${a[i] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("")}${p.apt ? ' <button type="button" class="btn ghost small" data-pp-act="aptReset">Use her base aptitudes</button>' : ""}</div>` : ""}
-        <div class="pp-links">${["l1","l2"].map((k) => { const [, l, hint] = ROLES.find((r) => r[0] === k); return `<div class="pp-link"><label class="field"><span>${l}${hint ? ` <i class="mini">${hint}</i>` : ""}</span>${charInput(k, p[k].cid)}</label>${p[k].cid ? winsBox(k, p[k].wins) : ""}</div>`; }).join("")}</div>
-        <h3 class="pp-h">Later: when she's a parent</h3>
-        <div class="pp-form"><label class="field"><span>The ace you'll breed <i class="mini">optional</i></span>${charInput("ace", p.ace, "The future trainee")}</label></div>
-        <div class="pp-links">${["partner","pg1","pg2"].map((k) => { const [, l, hint] = ROLES.find((r) => r[0] === k); return `<div class="pp-link"><label class="field"><span>${l}${hint ? ` <i class="mini">${hint}</i>` : ""}</span>${charInput(k, p[k].cid)}</label>${p[k].cid ? winsBox(k, p[k].wins) : ""}</div>`; }).join("")}</div>`;
+      const n = (cid, fallback) => (cid ? esc(charName(cid)) : fallback);
+      const p1 = n(p.self, "Parent 1"), p2 = n(p.partner.cid, "Parent 2");
+      const box = (k, label, note) => `<div class="pp-link"><label class="field"><span>${label}${note ? ` <i class="mini">${note}</i>` : ""}</span>${charInput(k, p[k].cid)}</label>${p[k].cid ? winsBox(k, p[k].wins, charName(p[k].cid)) : ""}</div>`;
+      return `<p class="mini">Affinity is counted on the <b>ace's</b> run, so this is her family tree. Fill in names and they show up in the labels.</p>
+        <div class="pp-tree">
+          <div class="pp-node"><label class="field"><span>Ace <i class="mini">the uma you'll breed (optional)</i></span>${charInput("ace", p.ace, "The future trainee")}</label></div>
+          <div class="pp-branch">
+            <div class="pp-node"><label class="field"><span>Parent 1 <i class="mini">the uma you're training now (also the coach's trainee)</i></span>${charInput("self", p.self, "Your trainee")}</label>
+              ${vers.length > 1 ? `<label class="field"><span>Version</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}</div>
+            ${a ? `<div class="pp-apt"><span class="mini">${p1}'s aptitudes, used to skip races she can't win. If a spark raised one, change it here:</span> ${[0, 1, 2, 3, 4, 5].map((i) => `<label class="pp-aptf"><span>${APT_LABELS[i]}</span><select data-pp-apt="${i}">${GRADES.map((g) => `<option${a[i] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("")}${p.apt ? ' <button type="button" class="btn ghost small" data-pp-act="aptReset">Use her base aptitudes</button>' : ""}</div>` : ""}
+            <div class="pp-branch pp-links">${box("l1", "Grandparent", p1 + "'s parent (a legacy in this run)")}${box("l2", "Grandparent", p1 + "'s parent (a legacy in this run)")}</div>
+          </div>
+          <div class="pp-branch">
+            <div class="pp-links">${box("partner", "Parent 2", "the ace's other parent (optional)")}</div>
+            <div class="pp-branch pp-links">${box("pg1", "Grandparent", p2 + "'s parent (optional)")}${box("pg2", "Grandparent", p2 + "'s parent (optional)")}</div>
+          </div>
+        </div>`;
     }
 
     // ② Races: the fewest G1s she should win for the affinity target, and what they cost.
@@ -109,7 +117,7 @@
           <label class="field"><span>Race only if aptitude is</span><select data-pp="minGrade">${["A", "B", "C"].map((g) => `<option value="${g}"${p.minGrade === g ? " selected" : ""}>${g} or better</option>`).join("")}</select></label>
         </div>
         <details class="pred-help"><summary>How this works</summary><p class="mini">Affinity (◎/○/△ on the legacy screen) raises every spark's chance to fire. Most of it is fixed by which characters you pair, but each G1 that two of them both won adds <b>+3</b>: the two parents, and each parent with her own two parents. So she should win the G1s her own parents won (they'll be her grandparents later) and the ones her future partner won. Career-goal G1s come first (she runs them anyway), then the races shared with the most umas; races outside her aptitudes or on a turn already taken are skipped. G2/G3 wins and titles don't count on Global; over 150 is ◎. Formula: GameTora's compatibility calculator.</p></details>`;
-      if (!res) return out + `<p class="mini">Pick the uma you're training in ① to plan her races.</p>`;
+      if (!res) return out + `<p class="mini">Pick Parent 1 (the uma you're training) in ① to plan her races.</p>`;
       const b = res.base;
       out += `<div class="pp-result">`;
       if (p.ace) {
