@@ -137,6 +137,9 @@
   const glOpen = {};
   let openRow = null;
   let resetArmed = null;
+  // The turn-by-turn coach can be folded away (say, while using the deck tabs); it stays as you left it.
+  const COACH_KEY = "uma-coach-open-v1";
+  function coachOpen() { try { return localStorage.getItem(COACH_KEY) !== "0"; } catch (e) { return true; } }
 
   function save() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
@@ -177,6 +180,9 @@
         </div>
       </header>
 
+      <details class="coach" id="coachPanel"${coachOpen() ? " open" : ""}>
+        <summary><h2>Turn-by-turn coach</h2><span class="mini" id="coachSummary"></span></summary>
+        <div class="coach-body">
       <section class="turnbar" aria-label="Career turns">
         <div class="turn-head">
           <button type="button" id="prev" class="btn ghost square" aria-label="Previous turn" title="Previous turn (←)">◀</button>
@@ -261,6 +267,8 @@
           <div class="panel" id="options"></div>
         </aside>
       </main>
+        </div>
+      </details>
 
       <nav class="tabs" role="tablist">
         <button type="button" role="tab" data-tab="plan">Turn plan</button>
@@ -277,6 +285,9 @@
       <div class="dock" id="dock"><div class="dock-text" id="dockText"></div><button type="button" class="btn" id="dockDone">Done ▶</button></div>
     `;
 
+    $("#coachPanel").addEventListener("toggle", (e) => {
+      try { localStorage.setItem(COACH_KEY, e.target.open ? "1" : "0"); } catch (err) { /* ignore */ }
+    });
     const sel = $("#scenario");
     const groups = [["global", "On Global now"], ["global-soon", "Coming to Global next"], ["jp-current", "JP latest"], ["jp", "JP only (future Global)"], ["announced", "Announced"]];
     sel.innerHTML = groups.map(([st, lab]) => {
@@ -1993,6 +2004,7 @@
     } else fp.hidden = true;
     $("#dockText").textContent = (a.prefix.length ? a.prefix.join(" → ") + " → " : "") + a.label;
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
+    $("#coachSummary").textContent = "Turn " + state.turn + " / " + sc.totalTurns + " · " + $("#dockText").textContent;
   }
 
   const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", tokens: "Song tokens", songFocus: "Songs first preference", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race", opening: "Opening plan" };

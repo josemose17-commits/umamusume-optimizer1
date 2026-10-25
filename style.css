@@ -114,6 +114,16 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 
 .example-note { border: 1px dashed var(--gold); background: var(--surface); border-radius: var(--r); padding: 8px 12px; }
 
+/* Turn-by-turn coach: the turn strip, this turn's inputs and the call, foldable as one. */
+.coach > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; list-style: none; }
+.coach > summary::-webkit-details-marker { display: none; }
+.coach > summary h2 { margin: 0; }
+.coach > summary h2::before { content: "▸ "; color: var(--muted); }
+.coach[open] > summary h2::before { content: "▾ "; }
+.coach[open] > summary .mini { display: none; }
+.coach-body { display: grid; gap: 14px; margin-top: 10px; }
+.coach:not([open]) ~ .dock { display: none; }
+
 /* Main grid */
 .grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }

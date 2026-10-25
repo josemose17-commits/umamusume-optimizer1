@@ -18,6 +18,8 @@ Open `index.html` in a browser. It needs no build step or server, and it saves y
 
 Shortcuts: ← and → change turns.
 
+Tap **Turn-by-turn coach** to fold the turn strip, this turn's inputs and the call into one line (the turn and the call) while you use the tabs below. It stays folded or open the next time you visit.
+
 ## Your deck and trainee (exact gains)
 
 Open **Trainee and deck** and type your trainee and up to 6 support cards. Names autocomplete from the full database. Then set each card's limit break. From then on:
