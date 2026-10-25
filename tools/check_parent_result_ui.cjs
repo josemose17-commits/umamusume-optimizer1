@@ -14,7 +14,7 @@ function fixture() {
     meFix: 1, fcalFix: 1, strengthFix: 1, caps: {}, sparks: {}, targets: {},
     stats: {speed: 300, stamina: 200, power: 250, guts: 150, wit: 200},
     goals: [], goalsOff: [], goalRace: false, extras: {}, calib: [], fcal: [], log: [],
-    race: '', fans: 0, tab: 'cm', cm: {goal: 'ace', preset: 'cm1', style: 'Senkou', ownedOnly: true, borrow: false, locked: [30101,30052,20033,30078,30111,30054], must: [201322]}, conditions: {}, facLevels: {},
+    race: '', fans: 0, tab: 'parents', cm: {goal: 'ace', preset: 'cm1', style: 'Senkou', ownedOnly: true, borrow: false, locked: [30101,30052,20033,30078,30111,30054], must: [201322]}, conditions: {}, facLevels: {},
     gl: {songs: {}, tokens: [100, 100, 100, 100, 100], lessons: {}, shop: {}, focus: 'songs'},
     deck: {trainee: null, globalOnly: true, slots: [null, null, null, null, null, null]},
     facilities: ['speed', 'stamina', 'power', 'guts', 'wit'].map(stat => ({stat, gain: 20, fail: 0, cards: 0, members: [], hints: [], extra: 0, extras: {}}))
@@ -118,7 +118,7 @@ test('Global parent search excludes an unreleased owned card and unreleased skil
  }finally{ui.w.close();}
 });
 test('ace racing result retains actual affordable-career output instead of the parent inventory',async()=>{
- const state=fixture();state.cm.goal='race';let simulation;
+ const state=fixture();state.cm.goal='race';state.tab='cm';let simulation;
  const ui=load(state,undefined,w=>{
    const real=w.UmaOptimizer.targetSearch;
    w.UmaOptimizer.targetSearch=(...args)=>{const search=real(...args), finish=search.result; search.result=()=>{const fit=finish();simulation=fit.after;return fit;};return search;};

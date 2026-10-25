@@ -136,7 +136,8 @@ def main():
     # Career objectives per character (GameTora's URA objectives; other scenarios use the same
     # character goals except where the scenario sets its own). Each goal: turn (deadline, or the
     # race's turn for a fixed race), condition type (1 = finish in the top N, 3 = fans), value,
-    # race choice (0 = one fixed race, else pick one of the races), race names. URA Finals goals
+    # race choice (0 = one fixed race, else pick one of the races), order (alternatives share
+    # it), race names. URA Finals goals
     # (target type 3) are left to the scenario.
     out_obj = {}
     for o in objectives:
@@ -149,6 +150,8 @@ def main():
                 "c": g.get("cond_type"),
                 "v": g.get("cond_value"),
                 "ch": g.get("race_choice", 0),
+                # Goals with the same order and a race choice are alternatives: run one of them.
+                "o": g.get("order", 0),
                 "r": [r.get("name_en") or r.get("name_ja") for r in g.get("races", [])],
             })
         out_obj[o["char_id"]] = goals

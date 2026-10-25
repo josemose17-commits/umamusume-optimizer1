@@ -11,16 +11,31 @@ function withGroups(groups) {
 }
 test.afterEach(() => { delete globalThis.UmaParentData; delete require.cache[require.resolve('../affinity.js')]; });
 
-test('total follows GameTora: trainee-parent pairs, parent pair counted on both sides, trios, +3 per shared G1', () => {
+test('total follows GameTora: trainee-parent pairs, the parent pair once, trios, +3 per shared G1', () => {
   const A = withGroups([[10, [1, 2]], [5, [1, 2, 3]], [7, [2, 4]], [2, [1, 3]]]);
   const L = {trainee: 1, p1: 2, p2: 4, g11: 3};
-  const r = A.total(L, {p1: ['Japan Cup', 'Arima Kinen'], p2: ['Japan Cup'], g11: ['Arima Kinen', 'Japan Cup']});
-  // (1,2) 15 + trio (1,2,3) 5 + parents (2,4) 7, on both sides; (1,4) 0.
-  assert.equal(r.base, 15 + 5 + 7 + 7);
+  const W = {p1: ['Japan Cup', 'Arima Kinen'], p2: ['Japan Cup'], g11: ['Arima Kinen', 'Japan Cup']};
+  const r = A.total(L, W);
+  // (1,2) 15 + trio (1,2,3) 5 + parents (2,4) 7 once; (1,4) 0.
+  assert.equal(r.base, 15 + 5 + 7);
   assert.deepEqual(r.race.p1p2, ['Japan Cup']);
   assert.deepEqual(r.race.p1g11.sort(), ['Arima Kinen', 'Japan Cup']);
   assert.equal(r.racePts, 9);
-  assert.equal(r.total, 43);
+  assert.equal(r.total, 36);
+  // Each uma's own affinity: the parent pair and the shared wins count for both umas involved.
+  assert.deepEqual(A.individual(L, W), {p1: 15 + 5 + 7 + 3 * 3, p2: 7 + 3, g11: 5 + 3 * 2, g12: 0, g21: 0, g22: 0});
+  assert.equal(A.sparkMult(50), 1.5);
+});
+
+test("matches GameTora's own calculator on 30 real families (totals and each uma's affinity)", () => {
+  const F = require('./fixtures/affinity-gametora.json');
+  F.cases.forEach((c, i) => {
+    const A = withGroups(c.groups);
+    const t = A.total(c.lineage, c.wins), ind = A.individual(c.lineage, c.wins);
+    assert.equal(t.total, c.gametora.total, 'case ' + i + ' total');
+    assert.equal(t.symbol, c.gametora.symbol.replace('◯', '○'), 'case ' + i + ' symbol');
+    ['p1', 'p2', 'g11', 'g12', 'g21', 'g22'].forEach((k) => assert.equal(ind[k], c.gametora[k], 'case ' + i + ' ' + k));
+  });
 });
 
 test('a grandparent who is the same character as her parent adds nothing', () => {
@@ -70,4 +85,38 @@ test('race plan skips races outside her aptitudes and same-turn clashes', () => 
   assert.equal(p.agenda.length, 1);
   assert.equal(p.skipped.length, 1);
   assert.equal(p.skipped[0].why, 'clash');
+});
+
+test('race plan: a race held in two years moves to the other one instead of blocking a one-year race', () => {
+  const A = withGroups([]);
+  const links = [{role: 'a', cid: 9001, wins: ['Tenno Sho (Autumn)', 'Kikuka Sho']}, {role: 'b', cid: 9002, wins: ['Tenno Sho (Autumn)']}, {role: 'c', cid: 9003, wins: ['Tenno Sho (Autumn)']}];
+  // Kikuka Sho is only on turn 44; Tenno Sho (Autumn) is on 44 and 68.
+  const p = A.planRaces({self: 9999, apt: Array(10).fill('A'), links, need: 12});
+  assert.ok(p.reached);
+  assert.deepEqual(p.agenda.map((r) => r.name + '@' + r.turn), ['Kikuka Sho@44', 'Tenno Sho (Autumn)@68']);
+});
+
+test("race plan: every career goal's turn is taken, G1 or not", () => {
+  const A = withGroups([]);
+  // Silence Suzuka races the Kobe Shimbun Hai (a goal) on turn 42, when the Sprinters Stakes is held.
+  assert.ok(A.careerGoals(1002).fixed.some((g) => g.turn === 42 && !g.g1));
+  const p = A.planRaces({self: 1002, apt: Array(10).fill('A'), links: [{role: 'a', cid: 9001, wins: ['Sprinters Stakes']}], need: 3});
+  assert.deepEqual(p.agenda.map((r) => r.name + '@' + r.turn), ['Sprinters Stakes@66']);
+});
+
+test('race plan: a "pick one" career goal takes the shared G1, free', () => {
+  const A = withGroups([]);
+  // Daiwa Scarlet runs the Japanese Oaks or the Japanese Derby (same order, race choice).
+  const derby = 'Tokyo Yushun (Japanese Derby)';
+  assert.ok(A.careerGoals(1009).choices.some((opts) => opts.some((x) => x.name === derby) && opts.some((x) => x.name === 'Japanese Oaks')));
+  const p = A.planRaces({self: 1009, apt: Array(10).fill('A'), links: [{role: 'a', cid: 9001, wins: [derby]}], need: 3});
+  assert.equal(p.extraRaces, 0);
+  assert.deepEqual(p.agenda.map((r) => [r.name, r.free, r.goal]), [[derby, true, 'choice']]);
+});
+
+test('race plan: G1s she has already won are not planned again', () => {
+  const A = withGroups([]);
+  const p = A.planRaces({self: 9999, apt: Array(10).fill('A'), links: [{role: 'a', cid: 9001, wins: ['Osaka Hai', 'Satsuki Sho']}], need: 99, won: ['Osaka Hai']});
+  assert.deepEqual(p.agenda.map((r) => r.name), ['Satsuki Sho']);
+  assert.deepEqual(p.alreadyWon, ['Osaka Hai']);
 });

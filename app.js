@@ -773,6 +773,8 @@
       if (tierClick(e)) return;
       const euSum = e.target.closest(".eu-settings > summary");
       if (euSum) euOpen = !euSum.parentElement.open;
+      const ppSum = e.target.closest(".pp-skills > summary");
+      if (ppSum) ppSkillsOpen = !ppSum.parentElement.open;
       if (e.target.closest("#euReset")) { eu().over[euScen()] = { general: {}, tabs: {} }; save(); renderTab(); return; }
       const add = e.target.closest("[data-add-card]");
       if (add) { addToDeck(+add.dataset.addCard); return; }
@@ -2663,6 +2665,7 @@
 
   // The Parents tab (parent-planner.js): G1 plan for affinity and the SS rating check.
   let pp = null;
+  let ppSkillsOpen = false;
   function parents() {
     if (pp || !window.UmaParentPlanner || !window.UmaParentData) return pp;
     const SB = window.UmaSkillBudget, PR = window.UmaRating;
@@ -2693,7 +2696,8 @@
         const c = cm(), p = presetById(c.preset);
         loadSkillValues(p.id);
         euReady();
-        return `<div class="cm">${cmHeader(p, c)}${cmOptimizer(p, c)}</div>`;
+        // The race's skill table (must-have ☆, Global-only releases) in a closed box.
+        return `<div class="cm">${cmHeader(p, c)}${cmOptimizer(p, c)}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), Global releases only</summary>${cmSkills(p, c)}</details></div>`;
       },
       // ② Races sets ③ Deck's Independent Training race count (no re-render: the page is drawing).
       setItRaces: (n) => { const c = cm(); if (n == null) delete c.itRaces; else c.itRaces = n; },
