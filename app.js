@@ -2140,6 +2140,8 @@
     if (deckHost() === "parents" && !state.pcm) state.pcm = { goal: "ace", independent: true };
     const c = deckHost() === "parents" ? state.pcm : state.cm;
     if (deckHost() === "parents" && PARENT_GOALS.indexOf(c.goal) === -1) c.goal = "ace";
+    // Parents are trained in Independent Training here, so its race count always applies.
+    if (deckHost() === "parents") c.independent = true;
     if (deckHost() === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
     const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
@@ -2563,11 +2565,11 @@
       <div class="row-wrap">
         <label class="chip-toggle"><input type="checkbox" data-cm="ownedOnly" ${c.ownedOnly ? "checked" : ""}> Only cards I own (${n})</label>
         <label class="chip-toggle"><input type="checkbox" data-cm="borrow" ${c.borrow ? "checked" : ""}> Borrow 1 card from a friend</label>
-        <label class="chip-toggle" title="The 50-minute auto mode"><input type="checkbox" data-cm="independent" ${c.independent ? "checked" : ""}> Independent Training</label>
+        ${deckHost() === "cm" ? `<label class="chip-toggle" title="The 50-minute auto mode"><input type="checkbox" data-cm="independent" ${c.independent ? "checked" : ""}> Independent Training</label>` : ""}
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
       </div>
       ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${opt(IT_MANUAL_OPTS, c.itManual)}</select></label>` : ""}
-      ${c.independent ? note(`<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for your G1 plan's ${c.itRaces} G1 races (② Races), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: ${deckHost() === "parents" ? "② Races plans the fewest G1s for affinity and sends the count here" : "the Parents tab plans the fewest G1s for affinity"}.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>`) : ""}
+      ${c.independent ? note(`<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for the ${c.itRaces} extra race${c.itRaces === 1 ? "" : "s"} from ② (on top of her career goals), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: ${deckHost() === "parents" ? "② Races sends the count of extra races here" : "the Parents tab plans the fewest G1s for affinity"}.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>`) : ""}
       ${compHTML(c)}
       ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
       ${targetsHTML(p, c)}
@@ -2663,7 +2665,36 @@
     </div>`;
   }
 
-  // The Parents tab (parent-planner.js): G1 plan for affinity and the SS rating check.
+  // Predicted stats per race count for the Parents tab (see queuePredict below).
+  const predictCache = new Map();
+  let predictQueue = [], predictTimer = null, predictDone = null;
+  function predictDeck() {
+    // The Parents tab's own result: live while it's open, else the one kept for it.
+    const r = deckHost() === "parents" ? optResult : hostStash.parents && hostStash.parents.optResult;
+    if (r && r.cards) return { label: "the deck built in ③", cards: r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })) };
+    const cards = (state.deck.slots || []).filter(Boolean).map((sl) => ({ card: D.card(sl.id), lb: sl.lb })).filter((x) => x.card);
+    return cards.length ? { label: "your coach deck", cards } : null;
+  }
+  function predictKey(n) {
+    const d = predictDeck();
+    if (!d) return null;
+    return JSON.stringify([d.cards.map((x) => x.card.id + ":" + x.lb), n, state.deck.trainee, state.scenario, (state.pcm || {}).preset, state.caps || {}, state.sparks || {}]);
+  }
+  function predictNext() {
+    predictTimer = null;
+    const job = predictQueue.shift();
+    if (!job) return;
+    try {
+      const d = predictDeck(), c = state.pcm || {}, p = presetById(c.preset);
+      const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, job.n / 60), runs: 16,
+        helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false }), d.cards);
+      predictCache.set(job.k, { stats: est.stats, sp: est.sp, races: est.races });
+    } catch (err) { predictCache.set(job.k, null); }
+    if (predictQueue.length) predictTimer = setTimeout(predictNext, 0);
+    if (predictDone && state.tab === "parents") predictDone();
+  }
+
+  // The Parents tab (parent-planner.js): the parent, her races, her deck, and the SS check.
   let pp = null;
   let ppSkillsOpen = false;
   function parents() {
@@ -2687,7 +2718,6 @@
       skillNames: () => Array.from(new Set(Object.values(SV.skills).map((x) => x[0]).filter(Boolean))).sort(),
       skillIdByName: (n) => names.get(String(n || "").trim().toLowerCase()) || null,
       caps: () => { const c = E.capsFor(state, scenario()); return E.STATS.map((k) => c[k]); },
-      predicted: () => (optResult && optResult.est && optResult.est.stats ? { stats: optResult.est.stats.slice(), sp: Math.round(optResult.est.sp || 0) } : null),
       cmMust: () => cm().must || [],
       setTrainee: (id) => setTrainee(id),
       // ③ Deck: the deck builder's race header and controls, for the parent setup.
@@ -2701,19 +2731,15 @@
       },
       // ② Races sets ③ Deck's Independent Training race count (no re-render: the page is drawing).
       setItRaces: (n) => { const c = cm(); if (n == null) delete c.itRaces; else c.itRaces = n; },
-      // Rating lost per optional race: simulate your coach deck racing rarely and often, and
-      // compare the rating of the stats and skill points (at the planner's SP_RATING).
-      raceCost: () => {
-        const cards = (state.deck.slots || []).filter(Boolean).map((sl) => ({ card: D.card(sl.id), lb: sl.lb })).filter((x) => x.card);
-        if (!cards.length) return null;
-        const sc = scenario();
-        const runs = 24;
-        const sim = (raceShare) => OPT.simulate(OPT.buildCtx({ scenario: sc, build: state.build, trainee: state.deck.trainee, caps: E.capsFor(state, sc), raceShare, runs, independent: !!cm().independent }), cards);
-        const a = sim(0.02), b = sim(0.2);
-        const value = (x) => PR.statsScore(x.stats) + x.sp * window.UmaParentPlanner.SP_RATING;
-        const dr = b.races - a.races;
-        if (!(dr > 0.5)) return { error: "The simulation couldn't vary the race count for this scenario." };
-        return { perRace: (value(a) - value(b)) / dr, races: [a.races, b.races], runs };
+      // ② "What the races cost": predicted stats and skill points for n extra races, with the
+      // deck built in ③ (else the coach deck), Independent Training. Cached; filled in one
+      // simulation at a time after the page draws.
+      predictSource: () => (predictDeck() ? predictDeck().label : null),
+      predict: (n) => predictCache.get(predictKey(n)) || null,
+      queuePredict: (ns, done) => {
+        ns.forEach((n) => { const k = predictKey(n); if (k && !predictCache.has(k) && !predictQueue.some((q) => q.k === k)) predictQueue.push({ k, n }); });
+        predictDone = done;
+        if (!predictTimer) predictTimer = setTimeout(predictNext, 30);
       },
     });
     return pp;
