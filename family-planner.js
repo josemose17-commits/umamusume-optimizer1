@@ -67,6 +67,68 @@
     }
     const vetName = (v) => { const t = trainee(v.tid); return ctx.charName(v.cid) + (t && versions(v.cid).length > 1 ? ` [${t.t}]` : ""); };
     // Her sparks, with her rating to tell two of the same uma apart.
+    // Rentals pasted from uma.moe (rentals.js), kept in this browser; a new paste adds to them
+    // (a friend ID already there is replaced by the newer copy).
+    const RP = root.UmaRentals && root.UmaSparkNames && V ? root.UmaRentals.create({ names: root.UmaSparkNames, whiteOf: V.whiteOf, trainees: D.DATA.trainees }) : null;
+    let rents = null;
+    function rentalsList() {
+      if (rents) return rents;
+      try { rents = JSON.parse(store().getItem(RENTALS_KEY)) || []; } catch (e) { rents = []; }
+      return rents;
+    }
+    function setRentals(list) {
+      rents = list;
+      try { if (list.length) store().setItem(RENTALS_KEY, JSON.stringify(list)); else store().removeItem(RENTALS_KEY); } catch (e) { /* ignore */ }
+    }
+    function addRentals(text) {
+      try {
+        const r = RP.parse(text), ids = new Set(r.list.map((x) => x.friend));
+        setRentals(rentalsList().filter((x) => !ids.has(x.friend)).concat(r.list));
+        const odd = [...new Set([].concat(...r.list.map((x) => x.unknown)))];
+        ctx.flash(`Added ${r.list.length} rental${r.list.length === 1 ? "" : "s"}${r.skipped ? ` (${r.skipped} unreadable)` : ""}${odd.length ? `; names not recognised: ${odd.slice(0, 4).join(", ")}` : ""}.`);
+      } catch (err) { ctx.flash("Couldn't read that: " + err.message); }
+      ctx.rerender();
+    }
+    // The family with rental r as Parent 2, her parents as Parent 2's parents.
+    function withRental(f, r) {
+      const out = Object.assign({}, f);
+      out.p2 = Object.assign(asMember(r.parent), { rental: r.friend });
+      out.g21 = asMember(r.parents[0]); out.g22 = asMember(r.parents[1]);
+      return out;
+    }
+    // With no Parent 1 yet, the best one for this rental: your best veteran, else the uma you
+    // own with the most affinity with the ace and the rental (sparks unknown).
+    function bestP1(fr, x) {
+      const v = veterans().list.length ? rankVets(fr, "p1", x)[0] : null;
+      if (v) return { vet: v.v, fm: withVet(fr, "p1", v.v) };
+      const ace = fr.ace.cid, rc = fr.p2.cid;
+      const c = [...mineCids()].filter((c) => +c !== +ace && +c !== +rc).map((c) => ({ c, pts: A.together(ace, c) + A.together(c, rc) })).sort((a, b) => b.pts - a.pts)[0];
+      if (!c) return null;
+      const fm = Object.assign({}, fr, { p1: Object.assign(blank(), { cid: c.c, tid: (ownVersions(c.c)[0] || {}).id || null }) });
+      return { cid: c.c, fm };
+    }
+    function rankRentals(f, x) {
+      return rentalsList().filter((r) => r.parent && +r.parent.cid !== +f.ace.cid && +r.parent.cid !== +f.p1.cid).map((r) => {
+        const fr = withRental(f, r), p1 = f.p1.cid ? null : bestP1(fr, x);
+        return { r, p1, s: fam.score(familyOf(p1 ? p1.fm : fr), x) };
+      }).filter((row) => !row.s.problems.length).sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total);
+    }
+    function rentalsHTML(f, x) {
+      if (!RP || !f.rental) return "";
+      const list = rentalsList(), rows = list.length ? rankRentals(f, x) : [];
+      const top = (s) => s.white.filter((w) => w.slot === "p2" || w.slot === "g21" || w.slot === "g22").sort((a, b) => b.p * b.L - a.p * a.L).slice(0, 3).map((w) => esc(ctx.skillName(w.id))).join(", ");
+      return `<details class="pred-help" data-pp-open="fpRentals"${ctx.isOpen("fpRentals") ? " open" : ""}><summary><b>Rentals from uma.moe</b> · ${list.length ? `${list.length} pasted${rows[0] ? `, best ${esc(rows[0].r.parent ? ctx.charName(rows[0].r.parent.cid) : "")} (${esc(rows[0].r.trainer)})` : ""}` : "paste parents to compare them"}</summary>
+        <p class="mini">On uma.moe, select whole parent cards (from the trainer's name to the last race spark), copy, and paste here; you can paste more later. Each is ranked as Parent 2 with her two parents by the family score${f.p1.cid ? ` with ${esc(ctx.charName(f.p1.cid))} as Parent 1` : ", each with the best Parent 1 from your veterans (or your umas)"}. uma.moe gives the family's total stars per spark, so what isn't the rental's own is split between her parents; her parents' G1 wins aren't known.</p>
+        <textarea class="fp-vets" data-fp-rent-text rows="3" placeholder="Paste uma.moe parent cards here"></textarea>
+        <div class="row-wrap"><button type="button" class="btn small" data-fp-rent-add>Add</button>${list.length ? `<button type="button" class="btn ghost small" data-fp-rent-clear>Remove all</button>` : ""}</div>
+        ${rows.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Rental (and her parents)</th><th>Friend</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((row) => {
+          const r = row.r, p = row.p1;
+          return `<tr><td>${esc(r.names[0])} <span class="mini">+ ${esc(r.names[1] || "")} + ${esc(r.names[2] || "")}</span><div class="mini">${sparkText(r.parent)}${top(row.s) ? ` · best sparks: ${top(row.s)}` : ""}${p ? ` · with ${p.vet ? `your ${esc(vetName(p.vet))}` : esc(ctx.charName(p.cid))} as Parent 1` : ""}${r.unknown.length ? ` · <span class="warn">not recognised: ${r.unknown.map(esc).join(", ")}</span>` : ""}</div></td>
+            <td>${esc(r.trainer)}<div class="mini">${r.friend.replace(/(\d{3})(?=\d)/g, "$1 ")}</div></td><td class="num">${row.s.value.toFixed(2)}</td><td class="num">${row.s.total} ${row.s.symbol}</td>
+            <td><button type="button" class="linkish" data-fp-rent-use="${r.friend}">Use</button> <button type="button" class="linkish" data-fp-rent-del="${r.friend}" aria-label="Remove">✕</button></td></tr>`;
+        }).join("")}</tbody></table></div>` : ""}
+      </details>`;
+    }
     const vetText = (v) => `rating ${(v.score || 0).toLocaleString("en-US")} · ${sparkText(v.self)}`;
 
     function st() {
@@ -108,6 +170,7 @@
       const want = fam.lookFor(x);
       out += lookForHTML(f, want);
       out += vetsHTML(f, x);
+      out += rentalsHTML(f, x);
       out += treeHTML(f, x, want);
       return out;
     }
@@ -272,6 +335,7 @@
           <input class="fp-skill" data-fp-white-name="${k}" list="ppSkills" placeholder="White spark" autocomplete="off"><select data-fp-white-stars="${k}">${[1, 2, 3].map((n) => `<option value="${n}">${n}★</option>`).join("")}</select><button type="button" class="btn ghost small" data-fp-white-add="${k}">Add</button></div>
           <details class="pp-wins" data-pp-open="fpWins-${k}"${ctx.isOpen("fpWins-" + k) ? " open" : ""}><summary class="mini">G1 wins · ${m.wins.length ? m.wins.length + " ticked" : "none"}</summary><div class="pp-g1grid">${g1.map((r) => `<label class="pp-g1"><input type="checkbox" data-fp-win="${k}" value="${esc(r)}"${m.wins.indexOf(r) !== -1 ? " checked" : ""}> ${esc(r)}</label>`).join("")}</div></details>
           <div class="row-wrap"><button type="button" class="btn ghost small" data-fp-keep="${k}">Save as a candidate for this slot</button>${m.cid ? `<button type="button" class="btn ghost small" data-fp-clear="${k}">Clear</button>` : ""}</div>` : ""}
+        ${m.rental ? `<p class="mini">A friend's rental from uma.moe (ID ${esc(m.rental.replace(/(\d{3})(?=\d)/g, "$1 "))}); her parents filled in below.</p>` : ""}
         ${m.vet != null ? `<p class="mini">From your veterans${GRAND[k] ? " (her parents filled in below)" : ""}.</p>` : ""}
         ${k === "p1" && m.cid && m.vet == null ? trainForHTML(m, w, x) : ""}
         ${vetSlotHTML(f, k, x)}
@@ -315,6 +379,16 @@
       else if ((el = hit("data-fp-cand-del"))) { const [k, i] = el.dataset.fpCandDel.split(","); f.cands[k].splice(+i, 1); }
       else if ((el = hit("data-fp-vets-import"))) { const ta = el.closest("details").querySelector("[data-fp-vets-text]"); if (!ta.value.trim()) { ctx.flash("Paste the JSON first."); return true; } importVeterans(ta.value); return true; }
       else if ((el = hit("data-fp-vets-clear"))) setVeterans({ at: "", list: [] });
+      else if ((el = hit("data-fp-rent-add"))) { const ta = el.closest("details").querySelector("[data-fp-rent-text]"); if (!ta.value.trim()) { ctx.flash("Paste the uma.moe cards first."); return true; } addRentals(ta.value); return true; }
+      else if ((el = hit("data-fp-rent-clear"))) setRentals([]);
+      else if ((el = hit("data-fp-rent-del"))) setRentals(rentalsList().filter((r) => r.friend !== el.dataset.fpRentDel));
+      else if ((el = hit("data-fp-rent-use"))) {
+        const r = rentalsList().find((x) => x.friend === el.dataset.fpRentUse);
+        if (r) {
+          const fr = withRental(f, r), p1 = f.p1.cid ? null : bestP1(fr, inputs(f).x);
+          Object.assign(f, p1 ? p1.fm : fr);
+        }
+      }
       else if ((el = hit("data-fp-umas-vets"))) setUmas(myUmas().concat(veterans().list.map((v) => v.tid)));
       else if ((el = hit("data-fp-umas-clear"))) setUmas([]);
       else if ((el = hit("data-fp-vets-pairs"))) { vetPairs = { key: pairKey(f), rows: rankPairs(f, inputs(f).x) }; }
@@ -334,7 +408,7 @@
     }
     function change(e) {
       const f = st(), t = e.target, ds = t.dataset;
-      if (ds.fpVetsText != null) return true;
+      if (ds.fpVetsText != null || ds.fpRentText != null) return true;
       if (ds.fpRental != null) { f.rental = t.checked; ctx.rerender(); return true; }
       if (ds.fpUma != null) {
         const id = +ds.fpUma, own = myUmas().filter((x) => x !== id);
@@ -370,7 +444,7 @@
     return { html, click, change, note };
   }
 
-  const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1";
+  const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1", RENTALS_KEY = "uma-rentals-v1";
   const WHY = { L: "race skill", green: "green", recovery: "recovery", debuff: "debuff" };
   const api = { create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

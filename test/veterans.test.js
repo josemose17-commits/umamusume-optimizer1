@@ -7,7 +7,7 @@ const A = require("../affinity.js");
 const F = require("../family.js");
 
 const vets = V.create(SB.DATA.skills);
-// A made-up export in umaextractor's shape: Special Week (card 101701) with Teio and McQueen as parents.
+// A made-up export in umaextractor's shape: card 101701 with cards 101501 and 101301 as parents.
 const uma = (card, factors, saddles, extra) => Object.assign({ card_id: card, factor_info_array: factors.map((id) => ({ factor_id: id, level: 0 })), win_saddle_id_array: saddles }, extra || {});
 const EXPORT = [
   uma(101701, [103, 3301, 2004902, 2019001, 10170102, 1002301, 3000102], [10, 11, 12, 18, 1, 2], {
