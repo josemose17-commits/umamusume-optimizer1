@@ -82,10 +82,11 @@
     }
     function addRentals(text) {
       try {
-        const r = RP.parse(text), ids = new Set(r.list.map((x) => x.friend));
+        const r = RP.parse(text), ids = new Set(r.list.map((x) => x.friend)), had = new Set(rentalsList().map((x) => x.friend));
         setRentals(rentalsList().filter((x) => !ids.has(x.friend)).concat(r.list));
-        const odd = [...new Set([].concat(...r.list.map((x) => x.unknown)))];
-        ctx.flash(`Added ${r.list.length} rental${r.list.length === 1 ? "" : "s"}${r.skipped ? ` (${r.skipped} unreadable)` : ""}${odd.length ? `; names not recognised: ${odd.slice(0, 4).join(", ")}` : ""}.`);
+        const odd = [...new Set([].concat(...r.list.map((x) => x.unknown)))], fresh = [...ids].filter((id) => !had.has(id)).length, again = ids.size - fresh;
+        const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+        ctx.flash(`${fresh ? `Added ${plural(fresh, "new rental")}` : "No new rentals"}${again ? `${fresh ? "; " : ": "}${plural(again, "friend")} already in the list (updated)` : ""}${r.skipped ? `; ${r.skipped} unreadable` : ""}${odd.length ? `; names not recognised: ${odd.slice(0, 4).join(", ")}` : ""}. ${plural(rentalsList().length, "rental")} in all.`);
       } catch (err) { ctx.flash("Couldn't read that: " + err.message); }
       ctx.rerender();
     }
