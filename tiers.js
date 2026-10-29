@@ -143,7 +143,11 @@
       const L = ctx.skills[id];
       if (L == null || ctx.known.has(id)) return;
       const cost = ctx.costs[id] || D.skillCost(id) || 150;
-      const surplus = L * SPEED_PER_L * ctx.speedWeight + cost * offer.conditionalDiscount * ctx.spWeight;
+      // Parents: a white's spark comes at 20%, or 40% if she learns its gold (GameTora), so the
+      // share of its availability that comes with a gold hint doubles its worth.
+      const gold = ctx.parent && offer.prerequisiteSources ? 1 - offer.prerequisiteSources.reduce((m, r) => m * (1 - r.p), 1) : 0;
+      const spark = 1 + (offer.p > 0 ? Math.min(1, gold / offer.p) : 0);
+      const surplus = L * SPEED_PER_L * ctx.speedWeight * spark + cost * offer.conditionalDiscount * ctx.spWeight;
       list.push(Object.assign({}, offer, { L, cost, surplus }));
     });
     list.sort((a, b) => b.surplus * b.p - a.surplus * a.p);
@@ -341,8 +345,8 @@
     return { value: sv.value, mustValue: sv.mustValue, must: sv.must };
   }
 
-  // Target skills for a parent deck, as { skill id: weight in lengths }. Only white skills
-  // become skill sparks, so gold skills (and inherited uniques) don't count.
+  // Target skills for a parent deck, as { skill id: weight in lengths }. A spark is always a
+  // white skill's, so targets are whites; a gold hint counts through its white (skillValue).
   //   ace: white skills that are good on the race (median L for the running style);
   //   debuff: white debuffs that can trigger on the race's distance/surface with your style
   //   (each counted like a 1 L skill). rarityOf(id): 1 white, 2 gold, 9 inherited unique.

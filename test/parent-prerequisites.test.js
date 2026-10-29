@@ -117,11 +117,13 @@ test('inventory blocks an unreleased gold from fabricating a released white rout
  const route=conditional.skills.find(s=>s.id==='w').sources[0].routes[0];
  assert.equal(route.purchase,'prerequisite');assert.equal(route.conditional,true);assert.equal(route.note,'requires condition');
 });
-test('an actual direct-plus-gold card values a parent target once and never counts gold as a white spark',()=>{
+test('an actual direct-plus-gold card values a parent target once, its gold route weighted by the 40% spark chance',()=>{
  const w='200332',g='200331',deck=[{id:30111,lb:2}],o={scenario:'GL',must:[w],parent:{targets:{[w]:1},statsWeight:.1}};
  const r=T.describeDeck(o,deck,deck,[]);const skills=r.skills.filter(s=>s.id===w);
  assert.equal(skills.length,1);assert.equal(r.skills.some(s=>s.id===g),false);assert.ok(r.expected<=1);
- const s=skills[0];close(s.surplus,60+s.cost*s.conditionalDiscount);assert.equal(s.prerequisiteSources.length,1);
+ const s=skills[0];assert.equal(s.prerequisiteSources.length,1);
+ // The white's spark: 20%, or 40% when she learns the gold (GameTora), so the gold share of its availability doubles it.
+ const viaGold=Math.min(1,s.prerequisiteSources[0].p/s.p);assert.ok(viaGold>0);close(s.surplus,60*(1+viaGold)+s.cost*s.conditionalDiscount);
  const inv=I.build([D.card(30111)],{skills:S.skills,purchases:M,events:E});
  assert.equal(inv.skills.find(s=>s.id===g).spark,false);assert.equal(inv.skills.filter(s=>s.id===w).length,1);
 });
