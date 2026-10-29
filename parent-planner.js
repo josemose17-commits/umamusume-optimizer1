@@ -154,6 +154,14 @@
       return { s, levels, values };
     }
     // Learned skills count once per family (a gold replaces its white, ◎ its ○).
+    // The chance a learned skill leaves a spark (of its base white) at career end: 20% for ○
+    // and other whites, 25% for ◎ (a white with a white before it), 40% for gold (GameTora).
+    function sparkChance(id) {
+      const m = SB.DATA.skills[id];
+      if (!m) return 20;
+      if (m[3] === 2) return 40;
+      return m[2] && SB.DATA.skills[m[2]] && SB.DATA.skills[m[2]][3] === 1 ? 25 : 20;
+    }
     function learnedTop(s, ids) {
       const chains = ids.map((id) => ({ id, c: s.chain(id) }));
       return ids.filter((id) => !chains.some((x) => x.id !== id && x.c && x.c.indexOf(id) !== -1 && x.c.length > 1));
@@ -170,7 +178,7 @@
       const n = extraCount(p);
       const pred = n != null ? ctx.predict(n) : null;
       const statsIn = STAT_LABELS.map((l, i) => `<label class="field pp-stat"><span>${l}</span><input type="number" inputmode="numeric" min="0" max="2500" data-pp-stat="${i}" value="${r.stats[i] == null ? "" : r.stats[i]}" placeholder="${pred ? pred.stats[i] : ""}"></label>`).join("");
-      let out = `<p class="mini">${typed ? "Using the stats you typed." : pred ? `Using the predicted stats for ${n} extra race${n === 1 ? "" : "s"} (②, with the deck from ③). Type her real final stats after the run.` : "Type her final stats, or build a deck in ③ to start from predicted ones."} Add the skills in her shop and it picks the buy that reaches SS (${R.SS.toLocaleString()}) with the most ✦ relevant skills for ③'s race, or gets her closest when nothing reaches it.</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Relevant (✦), for an Ace parent: white skills worth more than 0.1 L (median) on ③'s race for her style, greens whose condition fits the race (course, direction, distance, ground, weather, season, style), and for Mile and longer the recoveries that fit it; never debuffs. For a Debuffer parent: the debuffs that work there. A gold replaces its white, so it never counts as a relevant spark. Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
+      let out = `<p class="mini">${typed ? "Using the stats you typed." : pred ? `Using the predicted stats for ${n} extra race${n === 1 ? "" : "s"} (②, with the deck from ③). Type her real final stats after the run.` : "Type her final stats, or build a deck in ③ to start from predicted ones."} Add the skills in her shop and it picks the buy that reaches SS (${R.SS.toLocaleString()}) with the most ✦ relevant skills for ③'s race, or gets her closest when nothing reaches it.</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Relevant (✦), for an Ace parent: white skills worth more than 0.1 L (median) on ③'s race for her style, greens whose condition fits the race (course, direction, distance, ground, weather, season, style), and for Mile and longer the recoveries that fit it; never debuffs. For a Debuffer parent: the debuffs that work there. Each relevant family counts once: its spark is always the base white skill's hint, and learning ◎ or the gold only raises the chance of getting it (20% for ○, 25% for ◎, 40% for gold; GameTora), so a gold is a good buy, not a lost spark. SS raises the spark's chance of 2★ and 3★ (3★ 5% → 10%). Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
         <div class="pp-form">${statsIn}
           <label class="field pp-stat"><span>Skill points left</span><input type="number" inputmode="numeric" min="0" data-pp-r="sp" value="${r.sp == null ? "" : r.sp}" placeholder="${pred ? pred.sp : ""}"></label>
           <label class="field pp-stat"><span>Unique skill level</span><input type="number" inputmode="numeric" min="0" max="10" data-pp-r="uniqueLevel" value="${uLv}"></label>
@@ -183,12 +191,12 @@
       const { s, levels, values } = solver(p, a);
       const rel = ctx.relevant();
       const relT = rel ? rel.targets : {};
-      // A learned or bought skill is a relevant spark when it's white and its family has one.
-      const isRel = (id) => { const c = s.chain(id); return !!(c && SB.DATA.skills[id] && SB.DATA.skills[id][3] === 1 && c.some((x) => relT[x])); };
+      // A learned or bought skill is a relevant spark when its family has a relevant skill: the
+      // spark is the base white's, whichever tier she learns, and the tier sets its chance.
+      const isRel = (id) => { const c = s.chain(id); return !!(c && c.some((x) => relT[x])); };
       const tag = (id) => {
         const k = (s.chain(id) || [id]).map((x) => rel && rel.why[x]).filter(Boolean).pop();
-        if (!k) return "";
-        return isRel(id) ? `<span class="chip relchip">${WHY[k]}</span>` : `<span class="mini">gold: replaces a relevant ${WHY[k]}</span>`;
+        return k ? `<span class="chip relchip">${WHY[k]} · ${sparkChance(id)}%</span>` : "";
       };
       const learned = learnedTop(s, r.learned);
       const stats = typed ? r.stats.map((x) => +x || 0) : pred ? pred.stats.slice() : [0, 0, 0, 0, 0];
@@ -204,13 +212,17 @@
       const rk = R.rankOf(after);
       out += `<div class="pp-result"><p>Now: <b>${now.total.toLocaleString()}</b> (${now.rank.label}) = stats ${now.stats.toLocaleString()} + skills ${now.skills.toLocaleString()} + unique ${now.unique}.</p>`;
       if (buy && buy.selected.length) {
-        out += `<p>Best buy with ${sp} SP${rel ? ": SS first, then the most relevant skills" : ""}: ${buy.selected.map((o) => `<b>${esc(ctx.skillName(o.id))}</b> (${o.cost} SP, +${Math.round(o.value)}${o.rel > 0 ? ", ✦ relevant" : o.rel < 0 ? ", replaces a relevant white" : ""}${o.required.length ? ", spark ★" : ""})`).join(", ")}. Spends ${buy.spent}, ${buy.unspent} left.</p>`;
+        out += `<p>Best buy with ${sp} SP${rel ? ": SS first, then the most relevant skills" : ""}: ${buy.selected.map((o) => `<b>${esc(ctx.skillName(o.id))}</b> (${o.cost} SP, +${Math.round(o.value)}${o.rel > 0 ? ", ✦ relevant" : ""}${o.required.length ? ", spark ★" : ""})`).join(", ")}. Spends ${buy.spent}, ${buy.unspent} left.</p>`;
         if (buy.unmetMust.length) out += `<p class="mini warn">Can't afford every spark skill: ${buy.unmetMust.map((id) => esc(ctx.skillName(id))).join(", ")}.</p>`;
       }
       out += `<p>After buying: <b class="pp-big">${after.toLocaleString()} · ${rk.label}</b>${after >= R.SS ? " ✓ SS" : ` · <b>${(R.SS - after).toLocaleString()}</b> short of SS`}.</p>`;
       if (rel) {
         const have = learned.filter(isRel).length, more = buy ? buy.relevant : 0;
-        out += `<p>✦ <b>${have + more} relevant skill${have + more === 1 ? "" : "s"}</b> to pass down (${have} learned${buy ? ` ${more < 0 ? "−" : "+"} ${Math.abs(more)} from this buy` : ""}) for ${esc(rel.race)} as a ${esc(rel.style)} runner.</p>`;
+        // Each family's top skill after the buy, for the expected number of relevant sparks.
+        const top = new Map(learned.filter((id) => SB.DATA.skills[id]).map((id) => [SB.DATA.skills[id][0], id]));
+        if (buy) buy.selected.forEach((x) => top.set(x.family, x.id));
+        const expect = [...top.values()].filter(isRel).reduce((n, id) => n + sparkChance(id) / 100, 0);
+        out += `<p>✦ <b>${have + more} relevant skill${have + more === 1 ? "" : "s"}</b> to pass down (${have} learned${buy ? ` + ${more} from this buy` : ""}) for ${esc(rel.race)} as a ${esc(rel.style)} runner: about <b>${expect.toFixed(1)}</b> relevant white sparks expected (20% each for ○, 25% for ◎, 40% for gold).</p>`;
       } else out += `<p class="mini">Pick the race and style in ③ to count her relevant skills${ctx.relevantLoading() ? " (loading the race's skill values…)" : ""}.</p>`;
       if (after < R.SS) out += shortHTML(p, a, levels, sp, gap, after, stats, n, pred, typed);
       return out + "</div>";

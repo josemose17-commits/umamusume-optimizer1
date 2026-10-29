@@ -10,8 +10,8 @@
   const STAT_AT_50 = [0, 25, 66, 116, 181, 261, 352, 457, 577, 707, 847, 993, 1143, 1298, 1463, 1633, 1808, 2004, 2209, 2419, 2635, 2895, 3171, 3501, 3841, 4249, 4688, 5160, 5665, 6203, 6773, 7377, 8013, 8681, 9383, 10117, 10884, 11684, 12516, 13382, 14280, 15197, 16125, 17062, 18010, 18967, 19935, 20912, 21900, 22897, 23905];
   const RANK_LABELS = ["G", "G+", "F", "F+", "E", "E+", "D", "D+", "C", "C+", "B", "B+", "A", "A+", "S", "S+", "SS", "SS+", "UG"];
   const SS = 17500;
-  // Aptitude multiplier on a skill's rating when its role (distance, style or surface) is S/A,
-  // B/C, D/E/F or G for this uma.
+  // Aptitude multiplier on a skill's rating when its role (distance or style) is S/A, B/C,
+  // D/E/F or G for this uma. Turf/Dirt only limit where a skill fires, never its rating (UmaTools).
   const MULT = { good: 1.1, average: 0.9, bad: 0.8, terrible: 0.7 };
   const ROLE_INDEX = { turf: 0, dirt: 1, sprint: 2, mile: 3, medium: 4, long: 5, front: 6, pace: 7, late: 8, end: 9 };
   const ROLE_GROUP = { turf: "surface", dirt: "surface", sprint: "distance", mile: "distance", medium: "distance", long: "distance", front: "style", pace: "style", late: "style", end: "style" };
@@ -49,7 +49,8 @@
     const base = e[0] || 0;
     const role = String(e[5] || "").toLowerCase();
     if (!role || !apt) return base;
-    const roles = role.split("/").filter((r) => ROLE_INDEX[r] != null);
+    const roles = role.split("/").filter((r) => ROLE_INDEX[r] != null && ROLE_GROUP[r] !== "surface");
+    if (!roles.length) return base;
     if (roles.length === 1) {
       const col = { good: 1, average: 2, bad: 3, terrible: 4 }[bucket(apt[ROLE_INDEX[roles[0]]])];
       return e[col] != null ? e[col] : Math.round(base * MULT[bucket(apt[ROLE_INDEX[roles[0]]])]);

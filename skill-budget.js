@@ -111,15 +111,15 @@
         offered: [...new Set(groups.flat().map((o) => o.id))], unsupported: [...unsupported].sort() };
     }
     // The parent's buy: values are rating points. Must-haves first, then reach `gap` more
-    // rating (SS) if any buy does, then the most relevant white skills (sparks), then the
-    // most rating. A family counts once, through its top white: ◎ replaces ○, and a gold
-    // replaces its white, so buying it over a relevant white loses that spark.
+    // rating (SS) if any buy does, then the most relevant skill families, then the most
+    // rating. A family counts once: its spark is always the base white's, whether she learns
+    // ○, ◎ or the gold (which only raise its chance: 20%, 25%, 40%; GameTora, umamusu.wiki).
     // Returns solve()'s fields plus reached (gap met) and relevant (net relevant skills added).
     function solveSS(levels, projectedSp, o = {}) {
       const rel = o.relevant || {}, gap = o.gap || 0;
       const isRel = (id) => {
         const c = id && chain(id);
-        return !!(c && metadata[id][3] === 1 && c.some((p) => rel[p]));
+        return !!(c && c.some((p) => rel[p]));
       };
       const owned = new Map();
       learned.forEach((id) => { const c = chain(id); if (c && (!owned.has(metadata[id][0]) || owned.get(metadata[id][0]).length < c.length)) owned.set(metadata[id][0], c); });

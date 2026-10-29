@@ -62,29 +62,44 @@ const ratings = () => { const v = {}; Object.keys(SB.DATA.skills).forEach((id) =
 const SHOP = ["200352", "200351", "200011", "200012", "200332", "200331", "200362"];
 const REL = { "200352": 1, "200012": 1, "200332": 1 };
 
-test("SS buy: the most relevant skills while the rating gap is met", () => {
+test("SS buy: the most relevant families while the rating gap is met", () => {
   const s = SB.create({ skills: ratings(), available: SHOP, lengthValue: 1 });
   const easy = s.solveSS({}, 1200, { gap: 0, relevant: REL });
   assert.ok(easy.reached);
-  assert.strictEqual(easy.relevant, 3);
-  assert.ok(!easy.selected.some((x) => x.id === "200351" || x.id === "200331"), "no gold over a relevant white");
+  assert.strictEqual(easy.relevant, 3, "Corner Recovery, Right-Handed and Professor of Curvature families");
   const plain = s.solve({}, 1200);
-  // A gap only the golds can meet: SS comes first, so relevant whites give way.
-  const hard = s.solveSS({}, 1200, { gap: Math.round(plain.value) - 1, relevant: REL });
-  assert.ok(hard.reached && hard.relevant < 3);
-  assert.ok(hard.value >= plain.value - 1);
+  // A gap only the most rating can meet: SS comes first.
+  const hard = s.solveSS({}, 1200, { gap: Math.round(plain.value), relevant: REL });
+  assert.ok(hard.reached && hard.value >= plain.value - 1);
   // Out of reach: the highest rating, like the plain solver.
   const none = s.solveSS({}, 1200, { gap: 1e6, relevant: REL });
   assert.ok(!none.reached);
   assert.strictEqual(Math.round(none.value), Math.round(plain.value));
 });
 
-test("SS buy: a gold over a learned relevant white loses that spark", () => {
+test("SS buy: relevant skills beat more rating when SS is already met", () => {
+  // SP for one of two skills with the same cost and rating: the relevant one, either way round.
+  const s = SB.create({ skills: ratings(), available: ["200352", "200362"], lengthValue: 1 });
+  assert.deepStrictEqual(s.solveSS({}, 170, { gap: 0, relevant: { "200362": 1 } }).selected.map((o) => o.id), ["200362"]);
+  const x = s.solveSS({}, 170, { gap: 0, relevant: { "200352": 1 } });
+  assert.deepStrictEqual(x.selected.map((o) => o.id), ["200352"]);
+});
+
+test("SS buy: a gold keeps its white's spark, so it stays relevant", () => {
+  // The spark is always the base white's; the gold only raises its chance (GameTora: 40%).
   const s = SB.create({ skills: ratings(), learned: ["200352"], available: ["200351"], lengthValue: 1 });
-  const x = s.solveSS({}, 1000, { gap: 1e6, relevant: REL });
+  const x = s.solveSS({}, 1000, { gap: 0, relevant: REL });
   assert.strictEqual(x.selected[0].id, "200351");
-  assert.strictEqual(x.relevant, -1);
-  assert.strictEqual(s.solveSS({}, 1000, { gap: 0, relevant: REL }).selected.length, 0, "kept when SS doesn't need it");
+  assert.strictEqual(x.relevant, 0, "same family, no spark lost");
+  const fresh = SB.create({ skills: ratings(), available: ["200351"], lengthValue: 1 }).solveSS({}, 1000, { gap: 0, relevant: REL });
+  assert.strictEqual(fresh.relevant, 1);
+});
+
+test("skill rating: Turf/Dirt never scale a skill's rating (UmaTools)", () => {
+  const P = require("../data/parent-data.js");
+  const id = Object.keys(P.skillRating).find((k) => String(P.skillRating[k][5]).toLowerCase() === "dirt");
+  const turfOnly = ["A", "G", "A", "A", "A", "A", "A", "A", "A", "A"];
+  assert.strictEqual(R.skillScore(id, turfOnly), P.skillRating[id][0]);
 });
 
 test("SS buy: spark ★ skills are bought first", () => {
