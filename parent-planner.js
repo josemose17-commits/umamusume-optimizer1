@@ -1,6 +1,6 @@
 // The Parents tab: the ace's family and its affinity (each uma's own too), the fewest G1s the
-// uma you're training now should win for ◎ (each race costs rating), and check whether her
-// rating reaches SS (which doubles her white sparks' 3★ chance) with the best skill purchase.
+// uma you're training now should win for ◎ (each race costs rating), and the skill purchase
+// that reaches SS (which doubles her white sparks' 3★ chance) with the most relevant skills.
 // Logic lives in affinity.js and rating.js; this file renders and keeps state.parents.
 (function (root) {
   "use strict";
@@ -10,6 +10,14 @@
   // Rating per skill point for converting SP: the median white skill's rating ÷ its full cost
   // (1.21; hint discounts raise it). Used only for rough "or this many more SP" readouts.
   const SP_RATING = 1.2;
+  const WHY = { L: "race skill", green: "green", recovery: "recovery", debuff: "debuff" };
+
+  // Rating per skill point for buying these skills: the median of each one's rating at these
+  // aptitudes ÷ its full cost (no hint discount). SP_RATING when there are too few to tell.
+  function spRating(ids, apt, R, SB) {
+    const x = ids.map((id) => { const c = SB.baseCost(id); return c > 0 ? R.skillScore(id, apt) / c : null; }).filter((v) => v != null).sort((a, b) => a - b);
+    return x.length < 5 ? SP_RATING : Math.round(x[x.length >> 1] * 100) / 100;
+  }
 
   function create(ctx) {
     const { D, A, R, SB, esc } = ctx;
@@ -62,8 +70,10 @@
       return Object.assign(out, { extra, lowApt });
     }
     const extraCount = (p) => { const sc = schedule(p); return sc ? sc.extra.length : null; };
-    // Her rating from predicted stats and skill points (all spent, ~SP_RATING each) and her unique.
-    const predictedRating = (p, x) => R.statsScore(x.stats) + Math.round((x.sp || 0) * SP_RATING) + R.uniqueBonus(stars(p), stars(p));
+    // Rating per skill point: what her relevant skills for ③'s race give at her aptitudes.
+    const spRate = (p) => { const rel = ctx.relevant(); return rel ? spRating(Object.keys(rel.targets), apt(p), R, SB) : SP_RATING; };
+    // Her rating from predicted stats and skill points (all spent, ~spRate each) and her unique.
+    const predictedRating = (p, x) => R.statsScore(x.stats) + Math.round((x.sp || 0) * spRate(p)) + R.uniqueBonus(stars(p), stars(p));
 
     function charInput(key, value, placeholder) {
       return `<input data-pp-char="${key}" list="ppChars" value="${esc(charName(value))}" placeholder="${esc(placeholder || "Character")}" autocomplete="off">`;
@@ -113,20 +123,34 @@
         const rt = predictedRating(p, x);
         return `<tr${k === n ? ' class="cur"' : ""}><td class="num">${k}${k === n ? " ←" : ""}</td>${x.stats.map((v) => `<td class="num">${v}</td>`).join("")}<td class="num">${x.sp}</td><td class="num"><b>${rt.toLocaleString()}</b></td><td>${rt >= R.SS ? "SS ✓" : `${(R.SS - rt).toLocaleString()} short`}</td></tr>`;
       };
-      return `<p class="mini"><b>What the races cost</b> (${esc(src)}, Independent Training, average of 16 simulated careers; rating counts all skill points spent at ~${SP_RATING} each, before inheritance):</p>
-        <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th>Extra races</th>${STAT_LABELS.map((l) => `<th>${l.slice(0, 3)}</th>`).join("")}<th>SP</th><th>Rating</th><th>SS</th></tr></thead><tbody>${counts.map(row).join("")}</tbody></table></div>`;
+      return `<p class="mini"><b>What the races cost</b> (${esc(src)}, Independent Training, average of 16 simulated careers; rating counts all skill points spent on her relevant skills at ~${spRate(p).toFixed(2)} each, before inheritance):</p>
+        <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th>Extra races</th>${STAT_LABELS.map((l) => `<th>${l.slice(0, 3)}</th>`).join("")}<th>SP</th><th>Rating</th><th>SS</th></tr></thead><tbody>${counts.map(row).join("")}</tbody></table></div>${missing.length ? "" : maxRacesHTML(p, counts, n)}`;
+    }
+
+    // The most extra races that still reach SS: the last simulated count that does, and the
+    // straight line from it to the next one that doesn't.
+    function maxRacesHTML(p, counts, n) {
+      const pts = counts.map((k) => [k, predictedRating(p, ctx.predict(k))]);
+      const ok = pts.filter(([, rt]) => rt >= R.SS);
+      if (!ok.length) return `<p class="pp-max"><b>Even with no extra races she falls short of SS</b> on the prediction: ④ shows what to change.</p>`;
+      const [k, rt] = ok[ok.length - 1];
+      const after = pts.find(([j]) => j > k);
+      const most = after ? k + Math.floor((rt - R.SS) / Math.max(1, rt - after[1]) * (after[0] - k)) : null;
+      const line = most == null ? `<b>${k}+ extra races</b> still reach SS (every count simulated here does)` : `<b>About ${most} extra race${most === 1 ? "" : "s"} at most</b> still reach SS`;
+      return `<p class="pp-max">${line}${n != null ? `: you have ${n}${most != null && n > most ? `, ${n - most} too many` : " ✓"}` : ""}.</p>`;
     }
 
     // ---------- Rating check ----------
-    function solver(p, a) {
+    function solver(p, a, must) {
       const r = p.rating;
+      must = must || r.must;
       const values = {};
       Object.keys(SB.DATA.skills).forEach((id) => { values[id] = R.skillScore(id, a); });
-      r.must.forEach((id) => { if (!Number.isFinite(values[id])) values[id] = 0; });
+      must.forEach((id) => { if (!Number.isFinite(values[id])) values[id] = 0; });
       const shop = r.shop;
       const levels = {}, available = [];
       Object.keys(shop).forEach((id) => { if (shop[id] > 0) levels[id] = shop[id]; else available.push(id); });
-      const s = SB.create({ skills: values, learned: r.learned, available, must: r.must.filter((id) => r.learned.indexOf(id) === -1), lengthValue: 1 });
+      const s = SB.create({ skills: values, learned: r.learned, available, must: must.filter((id) => r.learned.indexOf(id) === -1), lengthValue: 1 });
       return { s, levels, values };
     }
     // Learned skills count once per family (a gold replaces its white, ◎ its ○).
@@ -146,39 +170,69 @@
       const n = extraCount(p);
       const pred = n != null ? ctx.predict(n) : null;
       const statsIn = STAT_LABELS.map((l, i) => `<label class="field pp-stat"><span>${l}</span><input type="number" inputmode="numeric" min="0" max="2500" data-pp-stat="${i}" value="${r.stats[i] == null ? "" : r.stats[i]}" placeholder="${pred ? pred.stats[i] : ""}"></label>`).join("");
-      let out = `<p class="mini">${typed ? "Using the stats you typed." : pred ? `Using the predicted stats for ${n} extra race${n === 1 ? "" : "s"} (②, with the deck from ③). Type her real final stats after the run.` : "Type her final stats, or build a deck in ③ to start from predicted ones."} Add the skills in her shop and it picks the buy that gets her closest to SS (${R.SS.toLocaleString()}).</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
+      let out = `<p class="mini">${typed ? "Using the stats you typed." : pred ? `Using the predicted stats for ${n} extra race${n === 1 ? "" : "s"} (②, with the deck from ③). Type her real final stats after the run.` : "Type her final stats, or build a deck in ③ to start from predicted ones."} Add the skills in her shop and it picks the buy that reaches SS (${R.SS.toLocaleString()}) with the most ✦ relevant skills for ③'s race, or gets her closest when nothing reaches it.</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Relevant (✦), for an Ace parent: white skills worth more than 0.1 L (median) on ③'s race for her style, greens whose condition fits the race (course, direction, distance, ground, weather, season, style), and for Mile and longer the recoveries that fit it; never debuffs. For a Debuffer parent: the debuffs that work there. A gold replaces its white, so it never counts as a relevant spark. Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
         <div class="pp-form">${statsIn}
           <label class="field pp-stat"><span>Skill points left</span><input type="number" inputmode="numeric" min="0" data-pp-r="sp" value="${r.sp == null ? "" : r.sp}" placeholder="${pred ? pred.sp : ""}"></label>
           <label class="field pp-stat"><span>Unique skill level</span><input type="number" inputmode="numeric" min="0" max="10" data-pp-r="uniqueLevel" value="${uLv}"></label>
         </div>
-        <div class="row-wrap">${typed || r.sp != null ? '<button type="button" class="btn ghost small" data-pp-act="usePredicted">Clear: use the predicted stats</button>' : ""}${t ? `<button type="button" class="btn ghost small" data-pp-act="addInnate">Add her innate and awakening skills to the shop</button>` : ""}${ctx.cmMust().length ? `<button type="button" class="btn ghost small" data-pp-act="addMust">Add my CM &amp; decks must-haves as spark ★</button>` : ""}</div>
+        <div class="row-wrap">${typed || r.sp != null ? '<button type="button" class="btn ghost small" data-pp-act="usePredicted">Clear: use the predicted stats</button>' : ""}${t ? `<button type="button" class="btn ghost small" data-pp-act="addInnate">Add her innate and awakening skills to the shop</button>` : ""}${ctx.cmMust().length ? `<button type="button" class="btn ghost small" data-pp-act="addMust">Add my CM &amp; decks must-haves as spark ★</button>` : ""}${ctx.deckRelevant() ? `<button type="button" class="btn ghost small" data-pp-act="addRelevant">Add the ③ deck's relevant skills to the shop</button>` : ""}</div>
         <div class="row-wrap"><label class="field grow"><span>Add a skill (learned, or offered in the skill shop)</span><input id="ppSkill" list="ppSkills" placeholder="Skill name" autocomplete="off"></label>
           <label class="field"><span>Hint level</span><select id="ppSkillLv">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}">Lv${n}</option>`).join("")}</select></label>
           <button type="button" class="btn ghost small" data-pp-act="shopAdd">Add to shop</button><button type="button" class="btn ghost small" data-pp-act="learnAdd">Already learned</button></div>`;
       if (!a) return out + `<p class="mini">Pick the uma you're training now (above) so skill ratings use her aptitudes.</p>`;
       const { s, levels, values } = solver(p, a);
+      const rel = ctx.relevant();
+      const relT = rel ? rel.targets : {};
+      // A learned or bought skill is a relevant spark when it's white and its family has one.
+      const isRel = (id) => { const c = s.chain(id); return !!(c && SB.DATA.skills[id] && SB.DATA.skills[id][3] === 1 && c.some((x) => relT[x])); };
+      const tag = (id) => {
+        const k = (s.chain(id) || [id]).map((x) => rel && rel.why[x]).filter(Boolean).pop();
+        if (!k) return "";
+        return isRel(id) ? `<span class="chip relchip">${WHY[k]}</span>` : `<span class="mini">gold: replaces a relevant ${WHY[k]}</span>`;
+      };
       const learned = learnedTop(s, r.learned);
       const stats = typed ? r.stats.map((x) => +x || 0) : pred ? pred.stats.slice() : [0, 0, 0, 0, 0];
       const now = R.rating({ stats, skills: learned, apt: a, uniqueLevel: uLv, stars: stars(p) });
       const shopIds = Object.keys(r.shop);
-      if (r.learned.length) out += `<div class="row-wrap"><b class="mini">Learned:</b> ${r.learned.map((id) => `<span class="chip">${esc(ctx.skillName(id))} <span class="mini">${values[id] != null ? values[id] : R.skillScore(id, a)}</span> <button type="button" class="linkish" data-pp-learn-del="${id}" aria-label="Remove">✕</button></span>`).join("")}</div>`;
-      if (shopIds.length) out += `<div class="table-wrap"><table class="plan"><thead><tr><th>In the shop</th><th>Hint</th><th>Rating</th><th title="A spark skill you're building her for: always bought">Spark ★</th><th></th></tr></thead><tbody>${shopIds.map((id) => `<tr><td>${esc(ctx.skillName(id))}</td><td><select data-pp-lv="${id}">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}"${+r.shop[id] === n ? " selected" : ""}>Lv${n}</option>`).join("")}</select></td><td class="num">${R.skillScore(id, a)}</td><td><button type="button" class="must-tog" data-pp-must="${id}" aria-pressed="${r.must.indexOf(id) !== -1}">${r.must.indexOf(id) !== -1 ? "★" : "☆"}</button></td><td><button type="button" class="linkish" data-pp-shop-del="${id}" aria-label="Remove">✕</button></td></tr>`).join("")}</tbody></table></div>`;
+      if (r.learned.length) out += `<div class="row-wrap"><b class="mini">Learned:</b> ${r.learned.map((id) => `<span class="chip">${esc(ctx.skillName(id))} <span class="mini">${values[id] != null ? values[id] : R.skillScore(id, a)}</span>${isRel(id) ? " ✦" : ""} <button type="button" class="linkish" data-pp-learn-del="${id}" aria-label="Remove">✕</button></span>`).join("")}</div>`;
+      if (shopIds.length) out += `<div class="table-wrap"><table class="plan"><thead><tr><th>In the shop</th><th>Hint</th><th>Rating</th><th title="Relevant for ③'s race: becomes a spark worth passing down">Relevant</th><th title="A spark skill you're building her for: always bought">Spark ★</th><th></th></tr></thead><tbody>${shopIds.map((id) => `<tr><td>${esc(ctx.skillName(id))}</td><td><select data-pp-lv="${id}">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}"${+r.shop[id] === n ? " selected" : ""}>Lv${n}</option>`).join("")}</select></td><td class="num">${R.skillScore(id, a)}</td><td>${tag(id)}</td><td><button type="button" class="must-tog" data-pp-must="${id}" aria-pressed="${r.must.indexOf(id) !== -1}">${r.must.indexOf(id) !== -1 ? "★" : "☆"}</button></td><td><button type="button" class="linkish" data-pp-shop-del="${id}" aria-label="Remove">✕</button></td></tr>`).join("")}</tbody></table></div>`;
       const sp = r.sp != null ? +r.sp : !typed && pred ? pred.sp : 0;
-      const buy = shopIds.length || r.learned.length ? s.solve(levels, sp) : null;
+      const gap = R.SS - now.total;
+      const buy = shopIds.length || r.learned.length ? s.solveSS(levels, sp, { gap, relevant: relT }) : null;
       const gain = buy ? Math.round(buy.value) : 0;
       const after = now.total + gain;
       const rk = R.rankOf(after);
       out += `<div class="pp-result"><p>Now: <b>${now.total.toLocaleString()}</b> (${now.rank.label}) = stats ${now.stats.toLocaleString()} + skills ${now.skills.toLocaleString()} + unique ${now.unique}.</p>`;
       if (buy && buy.selected.length) {
-        out += `<p>Best buy with ${sp} SP: ${buy.selected.map((o) => `<b>${esc(ctx.skillName(o.id))}</b> (${o.cost} SP, +${Math.round(o.value)}${o.required.length ? ", spark ★" : ""})`).join(", ")}. Spends ${buy.spent}, ${buy.unspent} left.</p>`;
+        out += `<p>Best buy with ${sp} SP${rel ? ": SS first, then the most relevant skills" : ""}: ${buy.selected.map((o) => `<b>${esc(ctx.skillName(o.id))}</b> (${o.cost} SP, +${Math.round(o.value)}${o.rel > 0 ? ", ✦ relevant" : o.rel < 0 ? ", replaces a relevant white" : ""}${o.required.length ? ", spark ★" : ""})`).join(", ")}. Spends ${buy.spent}, ${buy.unspent} left.</p>`;
         if (buy.unmetMust.length) out += `<p class="mini warn">Can't afford every spark skill: ${buy.unmetMust.map((id) => esc(ctx.skillName(id))).join(", ")}.</p>`;
       }
       out += `<p>After buying: <b class="pp-big">${after.toLocaleString()} · ${rk.label}</b>${after >= R.SS ? " ✓ SS" : ` · <b>${(R.SS - after).toLocaleString()}</b> short of SS`}.</p>`;
-      if (after < R.SS) {
-        const add = R.statsFor(stats, R.SS - after, ctx.caps());
-        out += `<p class="mini">To close it: about ${add ? add.map((n, i) => (n ? `+${n} ${STAT_LABELS[i]}` : "")).filter(Boolean).join(", ") : "more stats than her caps allow"} (the highest stats score most per point), or about ${Math.ceil((R.SS - after) / SP_RATING).toLocaleString()} more skill points of typical skills, or fewer races. Every learned skill counts, including ones that don't help this race.</p>`;
-      }
+      if (rel) {
+        const have = learned.filter(isRel).length, more = buy ? buy.relevant : 0;
+        out += `<p>✦ <b>${have + more} relevant skill${have + more === 1 ? "" : "s"}</b> to pass down (${have} learned${buy ? ` ${more < 0 ? "−" : "+"} ${Math.abs(more)} from this buy` : ""}) for ${esc(rel.race)} as a ${esc(rel.style)} runner.</p>`;
+      } else out += `<p class="mini">Pick the race and style in ③ to count her relevant skills${ctx.relevantLoading() ? " (loading the race's skill values…)" : ""}.</p>`;
+      if (after < R.SS) out += shortHTML(p, a, levels, sp, gap, after, stats, n, pred, typed);
       return out + "</div>";
+    }
+
+    // Short of SS: which spark ★ to let go, how many fewer races, or how many more stats.
+    function shortHTML(p, a, levels, sp, gap, after, stats, n, pred, typed) {
+      const r = p.rating, relT = (ctx.relevant() || { targets: {} }).targets;
+      const tips = [];
+      r.must.filter((id) => r.learned.indexOf(id) === -1).forEach((id) => {
+        const x = solver(p, a, r.must.filter((m) => m !== id)).s.solveSS(levels, sp, { gap, relevant: relT });
+        if (x.reached) tips.push(`unmark ★ <b>${esc(ctx.skillName(id))}</b> (then she reaches SS)`);
+      });
+      const zero = !typed && n > 0 ? ctx.predict(0) : null;
+      if (zero && pred) {
+        const per = (predictedRating(p, zero) - predictedRating(p, pred)) / n;
+        if (per > 0) { const k = Math.ceil((R.SS - after) / per); if (k <= n) tips.push(`about <b>${k} fewer extra race${k === 1 ? "" : "s"}</b> in ② (each costs about ${Math.round(per)} rating)`); }
+      }
+      const add = R.statsFor(stats, R.SS - after, ctx.caps());
+      tips.push(`about ${add ? add.map((v, i) => (v ? `+${v} ${STAT_LABELS[i]}` : "")).filter(Boolean).join(", ") : "more stats than her caps allow"} (the highest stats score most per point)`);
+      tips.push(`about ${Math.ceil((R.SS - after) / SP_RATING).toLocaleString()} more skill points of typical skills`);
+      return `<p class="mini warn">SS is out of reach with this shop. To close it: ${tips.join("; or ")}. Every learned skill counts, including ones that don't help this race.</p>`;
     }
 
     const section = (key, title, note, body) => `<details class="panel pp-sec" data-pp-open="${key}"${open.has(key) ? " open" : ""}><summary><h2>${title}</h2><span class="mini" data-pp-note="${key}">${note}</span></summary><div data-pp-body="${key}">${body}</div></details>`;
@@ -269,6 +323,8 @@
         if (a === "aptReset") p.apt = null;
         if (a === "usePredicted") { r.stats = [null, null, null, null, null]; r.sp = null; }
         if (a === "addMust") ctx.cmMust().forEach((id) => { id = String(id); if (r.learned.indexOf(id) === -1 && r.shop[id] == null) r.shop[id] = 0; if (r.must.indexOf(id) === -1) r.must.push(id); });
+        // Every relevant white the ③ deck can give, at Lv0: remove the ones her shop doesn't show.
+        if (a === "addRelevant") (ctx.deckRelevant() || []).forEach((id) => { id = String(id); if (r.shop[id] == null && r.learned.indexOf(id) === -1) r.shop[id] = 0; });
         if (a === "addInnate") { const tr = trainee(p.selfTrainee); if (tr) (tr.is || []).concat(tr.as || []).forEach((id) => { id = String(id); if (r.shop[id] == null && r.learned.indexOf(id) === -1) r.shop[id] = 0; }); }
         if (a === "shopAdd" || a === "learnAdd") {
           const id = ctx.skillIdByName(ctx.container().querySelector("#ppSkill").value);
@@ -333,10 +389,10 @@
       return true;
     }
 
-    return { render, click, change, onToggle, SP_RATING, schedule: (p) => schedule(p || st()) };
+    return { render, click, change, onToggle, SP_RATING, spRate: () => spRate(st()), schedule: (p) => schedule(p || st()) };
   }
 
-  const api = { create, SP_RATING };
+  const api = { create, SP_RATING, spRating };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaParentPlanner = api;
 })(typeof window !== "undefined" ? window : globalThis);

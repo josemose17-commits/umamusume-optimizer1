@@ -668,3 +668,6 @@ table.pred .over { color: var(--accent); }
 .pp-aff b { color: var(--fg); }
 .pp-errs { display: grid; gap: 2px; }
 .pp-partners [aria-pressed="true"] { border-color: var(--accent); }
+/* Parents: relevant-skill tags in ④ and ②'s most-races-for-SS line. */
+.chip.relchip { border-color: var(--accent); color: var(--accent); }
+.pp-max { margin: 8px 0 0; }

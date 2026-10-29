@@ -110,6 +110,76 @@
         unmetMust: [...must].filter((id) => !satisfied.has(id)),
         offered: [...new Set(groups.flat().map((o) => o.id))], unsupported: [...unsupported].sort() };
     }
+    // The parent's buy: values are rating points. Must-haves first, then reach `gap` more
+    // rating (SS) if any buy does, then the most relevant white skills (sparks), then the
+    // most rating. A family counts once, through its top white: ◎ replaces ○, and a gold
+    // replaces its white, so buying it over a relevant white loses that spark.
+    // Returns solve()'s fields plus reached (gap met) and relevant (net relevant skills added).
+    function solveSS(levels, projectedSp, o = {}) {
+      const rel = o.relevant || {}, gap = o.gap || 0;
+      const isRel = (id) => {
+        const c = id && chain(id);
+        return !!(c && metadata[id][3] === 1 && c.some((p) => rel[p]));
+      };
+      const owned = new Map();
+      learned.forEach((id) => { const c = chain(id); if (c && (!owned.has(metadata[id][0]) || owned.get(metadata[id][0]).length < c.length)) owned.set(metadata[id][0], c); });
+      const groups = options(levels).map((g) => g.map((x) => {
+        const base = owned.get(x.family);
+        return Object.assign({}, x, { rel: (isRel(x.id) ? 1 : 0) - (base && isRel(base[base.length - 1]) ? 1 : 0) });
+      }));
+      const budget = Number.isFinite(+projectedSp) ? Math.max(0, Math.floor(+projectedSp)) : 0;
+      const limit = Math.min(budget, groups.reduce((n, g) => n + Math.max(...g.map((x) => x.cost)), 0));
+      const neg = groups.filter((g) => g.some((x) => x.rel < 0)).length, pos = groups.filter((g) => g.some((x) => x.rel > 0)).length;
+      const C = neg + pos + 1, W = limit + 1;
+      // best[c * W + b]: the highest (must-haves × priority + rating) with net relevant c − neg
+      // and exactly b SP spent; rating and musts are kept alongside to read them back.
+      const priority = 1 + 2 * groups.reduce((n, g) => n + Math.max(...g.map((x) => Math.abs(x.value))), 0);
+      let best = new Float64Array(C * W).fill(-Infinity);
+      best[neg * W] = 0;
+      const history = [];
+      groups.forEach((group) => {
+        const next = best.slice(), picked = new Int16Array(C * W);
+        group.forEach((x, i) => {
+          const v = x.value + x.required.length * priority;
+          for (let c = 0; c < C; c++) {
+            const c2 = c + x.rel;
+            if (c2 < 0 || c2 >= C) continue;
+            for (let b = 0; b + x.cost <= limit; b++) {
+              const from = best[c * W + b];
+              if (from === -Infinity) continue;
+              const at = c2 * W + b + x.cost;
+              if (from + v > next[at] + 1e-9) { next[at] = from + v; picked[at] = i + 1; }
+            }
+          }
+        });
+        best = next; history.push(picked);
+      });
+      const musts = (s) => Math.floor((s + 1e-6) / priority);
+      const later = (a, b) => { const i = a.findIndex((k, j) => Math.abs(k - b[j]) > 1e-9); return i !== -1 && a[i] > b[i]; };
+      let top = 0;
+      best.forEach((s) => { if (s > -Infinity) top = Math.max(top, musts(s)); });
+      let pick = -1, pickKey = null;
+      for (let c = 0; c < C; c++) for (let b = 0; b <= limit; b++) {
+        const s = best[c * W + b];
+        if (s === -Infinity || musts(s) < top) continue;
+        const rating = s - top * priority, ok = rating >= gap - 1e-9;
+        // Reached first, then (if reached) more relevant before more rating, else rating first.
+        const key = ok ? [1, c, rating, -b] : [0, rating, c, -b];
+        if (!pickKey || later(key, pickKey)) { pick = c * W + b; pickKey = key; }
+      }
+      const selected = [];
+      let at = pick, spent = pick % W;
+      for (let g = groups.length - 1; g >= 0 && at >= 0; g--) {
+        const choice = history[g][at];
+        if (choice) { const x = groups[g][choice - 1]; selected.push(x); at -= x.rel * W + x.cost; }
+      }
+      selected.reverse();
+      const satisfied = new Set(selected.flatMap((s) => s.required).concat([...learned].filter((id) => must.has(id))));
+      const value = selected.reduce((n, x) => n + x.value, 0);
+      return { budget, spent, unspent: budget - spent, selected, value, L: selected.reduce((n, x) => n + x.L, 0),
+        reached: value >= gap - 1e-9, relevant: selected.reduce((n, x) => n + x.rel, 0),
+        unmetMust: [...must].filter((id) => !satisfied.has(id)), offered: [...new Set(groups.flat().map((x) => x.id))], unsupported: [...unsupported].sort() };
+    }
     // Event-route screening values the best family gain plus hint savings.
     // Final affordable selection is separate; routes are not jointly optimized
     // with every other card's random offers.
@@ -125,7 +195,7 @@
       utilities.set(key, value); return value;
     }
     const key = JSON.stringify([values, costs, [...learned].sort(), [...available].sort(), [...must].sort()]);
-    return { options, solve, chain, unlocks, hintUtility, key };
+    return { options, solve, solveSS, chain, unlocks, hintUtility, key };
   }
   let catalog;
   function baseCost(id) {
