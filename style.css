@@ -671,3 +671,11 @@ table.pred .over { color: var(--accent); }
 /* Parents: relevant-skill tags in ④ and ②'s most-races-for-SS line. */
 .chip.relchip { border-color: var(--accent); color: var(--accent); }
 .pp-max { margin: 8px 0 0; }
+/* Parents: the family section (ace → parents → grandparents). */
+.fp-tree { display: grid; gap: 10px; }
+.fp-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: grid; gap: 8px; min-width: 0; }
+.fp-card.fp-grand { margin-left: 16px; }
+.fp-head { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.fp-pair { display: flex; gap: 4px; }
+.fp-skill { width: 160px; max-width: 100%; }
+.fp-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }

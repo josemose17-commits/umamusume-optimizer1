@@ -2754,6 +2754,25 @@
         return Object.assign(parentTargetsFor(c, p), { race: p.name, style: STYLE_LABEL[c.style] });
       },
       relevantLoading: () => svCache[cm().preset] === "loading",
+      // The family section: the ace races the CM set in CM & decks (state.cm, not ③'s parent race).
+      aceRace: () => { const c = state.cm || {}; return { preset: presetById(c.preset) || defaultPreset(), style: c.style || defaultStyle() }; },
+      // Her relevant skills there ({ targets, why, L } with every charted skill's L), or null
+      // while the race's skill values load.
+      aceSkills: (race) => {
+        const id = race.preset.id;
+        loadSkillValues(id);
+        if (!(pasted[id] && pasted[id][race.style]) && typeof svCache[id] !== "object") return null;
+        const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
+        const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds });
+        if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x)) { delete out.targets[x]; delete out.why[x]; } });
+        return Object.assign(out, { L });
+      },
+      // How likely the racing deck built in CM & decks offers each skill, or null.
+      aceOffers: () => {
+        const r = state.tab === "cm" ? optResult : hostStash.cm && hostStash.cm.optResult;
+        return r && r.goal === "race" && r.skills ? Object.fromEntries(r.skills.map((x) => [String(x.id), x.p])) : null;
+      },
+      build: (p) => E.BUILDS[p.build] || null,
       // The relevant white skills the deck built in ③ can give (its skill pool), or null.
       deckRelevant: () => {
         const r = deckHost() === "parents" ? optResult : hostStash.parents && hostStash.parents.optResult;

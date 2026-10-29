@@ -21,7 +21,7 @@
 
   function create(ctx) {
     const { D, A, R, SB, esc } = ctx;
-    const open = new Set(["who", "races", "deck", "rating"]);
+    const open = new Set(["family", "fpLook", "who", "races", "deck", "rating"]);
 
     function st() {
       const s = ctx.state();
@@ -50,6 +50,11 @@
     const trainee = (id) => D.DATA.trainees.find((t) => t.id === +id) || null;
     const versions = (cid) => D.DATA.trainees.filter((t) => t.cid === +cid);
     const g1 = A.g1Races().sort((a, b) => a.turns[0] - b.turns[0] || a.name.localeCompare(b.name));
+    // The family section (family-planner.js), ace down; it shares this tab's lists and redraws.
+    const fp = root.UmaFamilyPlanner && root.UmaFamily ? root.UmaFamilyPlanner.create(Object.assign({}, ctx, {
+      F: root.UmaFamily, parentsState: () => st(), charInput, charName, charId: (v) => charByName.get(String(v).toLowerCase()) || null,
+      chars: () => Array.from(onGlobal), isOpen: (k) => open.has(k), rerender: () => rerender(),
+    })) : null;
 
     function apt(p) {
       if (p.apt) return p.apt;
@@ -307,8 +312,9 @@
       return JSON.stringify([n, p.selfTrainee]);
     }
 
-    const notes = (p) => { const n = extraCount(p); return { who: p.self ? esc(charName(p.self)) : "pick your uma", races: n == null ? "the G1s she'll run" : `${n} extra race${n === 1 ? "" : "s"}`, rating: "skills to buy, reach SS" }; };
+    const notes = (p) => { const n = extraCount(p); return { family: fp ? fp.note() : "", who: p.self ? esc(charName(p.self)) : "pick your uma", races: n == null ? "the G1s she'll run" : `${n} extra race${n === 1 ? "" : "s"}`, rating: "skills to buy, reach SS" }; };
     const bodies = { who: whoHTML, races: racesHTML, rating: ratingHTML };
+    if (fp) bodies.family = () => fp.html();
 
     function render(el) {
       const p = st();
@@ -316,7 +322,8 @@
       deckSig = syncDeck(p);
       const nt = notes(p);
       el.innerHTML = `<div class="parents">
-        <p class="mini pp-intro">Build a parent in order: who she is, the G1s she'll run, the deck, then the skills to buy so she reaches SS. More races mean fewer training turns, so ② shows what they cost.</p>
+        <p class="mini pp-intro">Plan the ace's family from the top down, then build each parent in order: who she is, the G1s she'll run, the deck, then the skills to buy so she reaches SS. More races mean fewer training turns, so ② shows what they cost.</p>
+        ${fp ? section("family", "Family: ace → parents → grandparents", nt.family, fp.html()) : ""}
         ${section("who", "① The parent", nt.who, whoHTML(p))}
         ${section("races", "② Races", nt.races, racesHTML(p))}
         ${section("deck", "③ Deck", "ace or debuffer parent", ctx.deckHTML())}
@@ -365,6 +372,7 @@
     }
 
     function click(e) {
+      if (fp && fp.click(e)) return true;
       const p = st(), r = p.rating;
       const t = e.target;
       const act = t.closest("[data-pp-act]");
@@ -409,6 +417,7 @@
       const p = st(), r = p.rating;
       const t = e.target, ds = t.dataset;
       if (!t.isConnected) return false;
+      if (fp && fp.change(e)) return true;
       if (ds.ppChar != null) {
         const v = t.value.trim();
         const cid = v ? charByName.get(v.toLowerCase()) : null;
