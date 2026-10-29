@@ -33,9 +33,16 @@
     return index.get(+cid) || [];
   }
 
-  // Points from every group all of these characters belong to.
+  // Points from every group all of these characters belong to (kept per set: families are
+  // ranked by the thousand).
+  const memo = new Map();
   function together(...cids) {
     if (cids.some((c) => !c) || new Set(cids.map(Number)).size < cids.length) return 0;
+    const key = cids.map(Number).sort((a, b) => a - b).join(",");
+    if (!memo.has(key)) memo.set(key, groupPoints(cids));
+    return memo.get(key);
+  }
+  function groupPoints(cids) {
     const P = pdata();
     const first = groupsOf(cids[0]);
     let sum = 0;
