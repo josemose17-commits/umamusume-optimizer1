@@ -68,5 +68,18 @@ test("rentals: several cards at once, and names it doesn't know are listed", () 
   const { list } = rp.parse(text);
   assert.deepStrictEqual(list.map((r) => r.trainer), ["A", "B"]);
   assert.deepStrictEqual(list[1].unknown, ["Made-Up Skill"]);
-  assert.throws(() => rp.parse("hello"), /No uma.moe parents/);
+  assert.throws(() => rp.parse("hello"), /no uma.moe parents/);
+});
+
+test("rentals: cards it can't read are named with the reason, and names match loosely", () => {
+  const odd = card("C", "999 888 777 666").replace("Nishino Flower", "Nobody Atall");
+  const cut = ["D", "123 456 789 012", "Plan", "78", "Affinity"].join("\n");
+  const { list, skipped } = rp.parse([card("A", "111 222 333 444"), odd, cut].join("\n"));
+  assert.strictEqual(list.length, 1);
+  assert.deepStrictEqual(skipped.map((x) => x.trainer), ["C", "D"]);
+  assert.match(skipped[0].why, /not recognised: Nobody Atall/);
+  assert.match(skipped[1].why, /cut off/);
+  assert.throws(() => rp.parse(cut), /couldn't read D/);
+  const spaced = rp.parse(card("E", "111 222 333 445").replace("Nishino Flower", "nishino  flower")).list[0];
+  assert.strictEqual(spaced.parent.cid, G.trainees.find((t) => t.n === "Nishino Flower").cid);
 });
