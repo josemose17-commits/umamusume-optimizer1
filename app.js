@@ -2126,12 +2126,16 @@
     return STYLES[best][0];
   }
 
-  // Two deck-builder setups with their own settings and result: CM & decks (racing, Debuffer ace)
-  // and the Parents tab's ③ Deck (Ace/Debuffer parent). cm() is the one for the open tab.
+  // Two deck-builder setups with their own settings and result: CM & decks (racing)
+  // and the Parents tab's ③ Deck (Ace parent). cm() is the one for the open tab.
   const deckHost = () => (state.tab === "parents" ? "parents" : "cm");
-  const PARENT_GOALS = ["ace", "debuff"];
+  const PARENT_GOALS = ["ace"];
   function cm() {
     if (!state.cm) state.cm = {};
+    // The debuffer goals are gone: a saved one becomes the plain goal for its tab.
+    if (state.cm.goal === "debuffAce") state.cm.goal = "race";
+    if (state.cm.goal === "debuff") state.cm.goal = "ace";
+    if (state.pcm && state.pcm.goal === "debuff") state.pcm.goal = "ace";
     // Parent decks built in CM & decks before they moved: carry those settings over once.
     if (!state.pcm && PARENT_GOALS.indexOf(state.cm.goal) !== -1) {
       state.pcm = JSON.parse(JSON.stringify(state.cm));
@@ -2242,11 +2246,11 @@
   function euOpts(c, p) {
     const sv = skillMap(p.id, c.style);
     const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +cm().itManual, eventSuccessRate: +c.eventSuccessRate };
-    if (c.goal === "ace" || c.goal === "debuff" || c.goal === "debuffAce") {
+    if (c.goal === "ace") {
       o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY };
       if (c.globalSkills) o.must = o.must.filter(released);
       // Reach SS: the search keeps a deck whose predicted rating reaches SS, then the most skills.
-      if (c.reachSS && c.goal !== "debuffAce" && window.UmaRating) {
+      if (c.reachSS && window.UmaRating) {
         const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null, stars = t ? t.r : 3;
         o.parent.reachSS = { ss: window.UmaRating.SS, unique: window.UmaRating.uniqueBonus(stars, stars), spRating: parentSpRating(c, p) };
       }
@@ -2255,15 +2259,10 @@
   }
   const released = (id) => !!(SV.skills[id] && SV.skills[id][3]);
   // The parent's relevant skills for a race and style (parent-relevance.js): { targets, why },
-  // why naming the rule ("L", "green", "recovery", "debuff"). Global releases only if set.
+  // why naming the rule ("L", "green", "recovery"). Global releases only if set.
   function parentTargetsFor(c, p) {
     const sv = skillMap(p.id, c.style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
-    let out;
-    if (c.goal === "ace") out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds });
-    else {
-      const targets = T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, rarity);
-      out = { targets, why: Object.fromEntries(Object.keys(targets).map((id) => [id, "debuff"])) };
-    }
+    const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id)) { delete out.targets[id]; delete out.why[id]; } });
     return out;
   }
@@ -2578,13 +2577,12 @@
     const note = (html) => (deckHost() === "parents" ? (notes.push(html), "") : html);
     return `<section class="panel cm-opt">
       <h3>Deck optimizer</h3>
-      ${deckHost() === "cm" ? '<p class="mini">Building a parent? Ace and debuffer parents are in the <button type="button" class="linkish" data-goto-tab="parents">Parents</button> tab, with her G1 plan and rating check.</p>' : ""}
-      <div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.filter(([k]) => (PARENT_GOALS.indexOf(k) !== -1) === (deckHost() === "parents")).map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>
-      ${goal === "debuffAce" ? `<p class="mini"><b>Debuffer ace:</b> the uma you enter in this CM to slow the others down rather than win. Picks the cards that give her the most debuffs that work on this race's distance and surface with your running style, golds counted double (they hit about twice as hard), white ones too. She needs Wit so they fire (each skill's activation chance is 100 − 9000 ÷ Wit %, at least 20%) and enough Speed and Stamina to stay in position: <b>Debuffer targets</b> below sets them.</p>` : ""}
-      ${deckHost() === "parents" ? `<p class="mini">${goal === "ace" ? "Picks the cards that give her the most white skills strong on this race, to pass down as sparks." : "Picks the cards that give her the most white debuffs that work on this race, to pass down as sparks."} Pick the race and style above, then press <b>Find my best deck</b>.</p>` : ""}
-      ${goal === "ace" || goal === "debuff" ? note(`<p class="mini"><b>${goal === "ace" ? "Ace parent" : "Debuffer parent"}:</b> picks the cards that give your parent the most ${goal === "ace" ? "white skills relevant on this race: worth more than 0.1 L (median) for the running style and weighted by it, the greens whose condition fits the race, and for Mile and longer the recoveries that fit it (debuffs are for the Debuffer parent)" : "white debuff skills that work on this race's distance and surface with your running style"}, so she can learn them and pass them down as skill sparks. Gold hints count through their white: a spark is always the base white skill's, and learning the gold raises its chance to 40% (20% for a white). Every skill counts, not just the best 8, and stats only count as much as you choose.</p>`) : ""}
+      ${deckHost() === "cm" ? '<p class="mini">Building a parent? Ace parents are in the <button type="button" class="linkish" data-goto-tab="parents">Parents</button> tab, with her G1 plan and rating check.</p>' : ""}
+      ${GOALS.filter(([k]) => (PARENT_GOALS.indexOf(k) !== -1) === (deckHost() === "parents")).length > 1 ? `<div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.filter(([k]) => (PARENT_GOALS.indexOf(k) !== -1) === (deckHost() === "parents")).map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>` : ""}
+      ${deckHost() === "parents" ? `<p class="mini">Picks the cards that give her the most white skills strong on this race, to pass down as sparks. Pick the race and style above, then press <b>Find my best deck</b>.</p>` : ""}
+      ${goal === "ace" ? note(`<p class="mini"><b>Ace parent:</b> picks the cards that give your parent the most white skills relevant on this race: worth more than 0.1 L (median) for the running style and weighted by it, the greens whose condition fits the race, and for Mile and longer the recoveries that fit it (never debuffs), so she can learn them and pass them down as skill sparks. Gold hints count through their white: a spark is always the base white skill's, and learning the gold raises its chance to 40% (20% for a white). Every skill counts, not just the best 8, and stats only count as much as you choose.</p>`) : ""}
       ${goal !== "race" ? `<label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
-      ${goal === "ace" || goal === "debuff" ? `<label class="chip-toggle" title="Keeps a deck whose predicted rating reaches SS (17,500), then the one with the most skills"><input type="checkbox" data-cm="reachSS" ${c.reachSS ? "checked" : ""}> Reach SS</label>${c.reachSS ? `<p class="mini"><b>Reach SS:</b> a deck whose predicted rating reaches SS beats any that doesn't; among those, the most skills win. If none reaches it, the closest does. Predicted rating: the stats' score, the skill points spent on her relevant skills (about ${parentSpRating(c, p).toFixed(2)} rating each at her aptitudes) and her unique. Inheritance adds stats on top, so this errs safe.</p>` : ""}` : ""}
+      ${goal === "ace" ? `<label class="chip-toggle" title="Keeps a deck whose predicted rating reaches SS (17,500), then the one with the most skills"><input type="checkbox" data-cm="reachSS" ${c.reachSS ? "checked" : ""}> Reach SS</label>${c.reachSS ? `<p class="mini"><b>Reach SS:</b> a deck whose predicted rating reaches SS beats any that doesn't; among those, the most skills win. If none reaches it, the closest does. Predicted rating: the stats' score, the skill points spent on her relevant skills (about ${parentSpRating(c, p).toFixed(2)} rating each at her aptitudes) and her unique. Inheritance adds stats on top, so this errs safe.</p>` : ""}` : ""}
       ${note(`<p class="mini">Builds the deck the way you'd use <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: it picks the best card, then the best card given that one, and so on, with Euophrys' own scoring for the scenario. On top, every skill a card can hint is scored by its median length gain on this race as a ${STYLE_LABEL[c.style]} runner. Then it rechecks each slot with the other five fixed.</p>`)}
       ${traineePickerHTML(p, "data-cm-style")}
       ${nSkills ? "" : `<p class="mini warn">No skill values for this race yet${svCache[p.id] === "loading" ? " (loading…)" : ""}, so skills won't count. Paste your own Umalator results below to add them.</p>`}
@@ -2621,15 +2619,14 @@
     const bt = E.BUILDS[p.build].target;
     const t = c.targets || {};
     const coach = state.targets && E.STATS.some((s) => state.targets[s] > 0);
-    const parent = c.goal === "ace" || c.goal === "debuff";
-    const debuffer = c.goal === "debuffAce";
+    const parent = c.goal === "ace";
     const automatic = state.scenario === "grandlive" && c.goal === "race";
     return `<div class="cm-targets">
       ${deckHost() === "parents" ? `<span class="mini"><b>Target stats</b> (optional): the search swaps cards to get her closer. <b>Blue spark targets</b> aims every stat at 1100 for 3★ blue sparks.</span><details class="pred-help"><summary>More on targets</summary>` : ""}
       <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       ${deckHost() === "parents" ? "</details>" : ""}
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
-      ${coach || cmTargets(c) || parent || debuffer ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${debuffer ? '<button type="button" class="btn ghost small" id="cmTgDebuffer">Debuffer targets (Wit 1200, the rest from the build)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
+      ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
       ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : ""}
     </div>`;
   }
@@ -2678,7 +2675,7 @@
   // How much Friendship Bonus, Mood Effect and Training Effectiveness count in Independent
   // Training, against a manual career: unmeasured there, so it's your call (tiers.js IT_MANUAL).
   const IT_MANUAL_OPTS = [["1", "Fully (as in a manual career)"], ["0.5", "Half (default)"], ["0.25", "A quarter"], ["0", "Not at all"]];
-  const GOALS = [["race", "Racing this CM"], ["ace", "Ace parent"], ["debuff", "Debuffer parent"], ["debuffAce", "Debuffer ace"]];
+  const GOALS = [["race", "Racing this CM"], ["ace", "Ace parent"]];
   const SKILL_W = [["0", "Not at all (pure Euophrys)"], ["0.5", "A little"], ["1", "Normal"], ["2", "A lot"], ["3", "Skills first"]];
   const COMP_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]];
   function compHTML(c) {
@@ -2863,29 +2860,6 @@
     </div>`;
   }
 
-  // Debuffer ace: the debuffs this deck can give her and how likely each is offered, the ones
-  // she can already buy, the ones no card here covers, and whether her Wit makes them fire
-  // (activation: 100 − 9000 ÷ Wit %, at least 20%).
-  function debuffAceHTML(r) {
-    const DB = window.UmaDebuffs || {};
-    const targets = (r.parentConfig && r.parentConfig.targets) || {};
-    const offered = (r.skills || []).filter((x) => targets[x.id] != null).sort((a, b) => b.p * targets[b.id] - a.p * targets[a.id]);
-    const trn = r.simulationMeta && r.simulationMeta.trainee ? D.trainee(r.simulationMeta.trainee) : null;
-    const own = trn ? [].concat(trn.is || [], trn.as || []).map(String).filter((id) => targets[id] != null) : [];
-    const have = new Set(offered.map((x) => String(x.id)).concat(own));
-    const missing = Object.keys(targets).filter((id) => !have.has(id)).sort((a, b) => targets[b] - targets[a]);
-    const kind = (id) => (DB[id] && DB[id].r === 2 ? "gold" : "white");
-    const wit = r.est && r.est.stats ? r.est.stats[4] : null;
-    const fire = (w) => Math.round(Math.max(20, 100 - 9000 / Math.max(1, w)));
-    return `<div class="pred-help">
-      <p><b>${offered.length} debuff${offered.length === 1 ? "" : "s"}</b> this deck can give her on this race${own.length ? `, plus ${own.length} she can buy herself (${own.map((id) => skillNameHTML(id)).join(", ")})` : ""}. About ${offered.reduce((a, x) => a + x.p, 0).toFixed(1)} expected to be offered.</p>
-      ${offered.length ? `<div class="table-wrap"><table><thead><tr><th>Debuff</th><th></th><th>Offered</th><th>From</th></tr></thead><tbody>${offered.map((x) => `<tr><th>${skillNameHTML(x.id)}</th><td class="mini">${kind(x.id)}</td><td class="num">${Math.round(x.p * 100)}%</td><td class="mini">${(x.src || []).map((id) => esc(D.card(id).n)).join(", ")}</td></tr>`).join("")}</tbody></table></div>` : ""}
-      ${missing.length ? `<p class="mini">No card here gives ${missing.slice(0, 8).map((id) => skillNameHTML(id)).join(", ")}${missing.length > 8 ? ` and ${missing.length - 8} more` : ""}. Add one as a must-have to force a card that does, or get it as a spark from a Debuffer parent.</p>` : ""}
-      ${wit ? `<p class="mini">Predicted Wit ${wit}: each debuff fires about <b>${fire(wit)}%</b> of the time when its condition is met (1200 Wit: ${fire(1200)}%).</p>` : `<p class="mini">Each debuff fires about ${fire(1000)}% of the time at 1000 Wit, ${fire(1200)}% at 1200, when its condition is met. Set target stats to see her predicted Wit.</p>`}
-      <p class="mini">Offer chances are estimates from hints and events, not learned-skill chances. Which debuffs actually land also depends on where she runs and who's around her.</p>
-    </div>`;
-  }
-
   function parentSkillsHTML(r) {
     const config = r.parentConfig;
     const pool = window.UmaParentSkills.build(r.cards.map(x => D.card(x.id)), {
@@ -2926,7 +2900,7 @@
     const w = wish;
     const total = r.cards.reduce((a, x) => a + x.score, 0);
     return `<div class="opt-result">
-      <h4>${r.goal === "ace" ? "Best ace parent deck" : r.goal === "debuff" ? "Best debuffer parent deck" : r.goal === "debuffAce" ? "Best debuffer ace deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
+      <h4>${r.goal === "ace" ? "Best ace parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
       ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
       <div class="opt-cards">${r.cards.map((x) => {
         const card = D.card(x.id);
@@ -2946,7 +2920,7 @@
       ${supportEventsHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
       ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? '<p class="mini">The final suggestion also considers simulated careers. A lower static total can still finish closer to your targets or buy a stronger affordable skill set.</p>' : ""}
-      ${r.goal === "debuffAce" ? debuffAceHTML(r) : r.goal !== "race" ? parentSkillsHTML(r) : r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
+      ${r.goal !== "race" ? parentSkillsHTML(r) : r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
         <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${skillNameHTML(x.id)} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.est && r.est.skillBudget ? affordableSkillsHTML(r) : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${skillNameHTML(x.id, skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
       ${r.goal === "race" ? skillSourcesHTML(r.skills || [], !!(r.est && r.est.supportEvents)) : ""}
       <div class="row-wrap">
@@ -3021,7 +2995,7 @@
       const d = r.est.stats[i] - t;
       return `<td class="num">${r.est.stats[i]}<div class="mini">${t}</div><div class="mini ${d < 0 ? "short" : "over"}">${d < 0 ? d : "+" + d}</div></td>`;
     };
-    const parent = r.goal === "ace" || r.goal === "debuff";
+    const parent = r.goal === "ace";
     const blue = (x) => (x > 1100 ? 10 : x >= 600 ? 5 : 0);
     return `<div class="predicted">
       <b>${f ? "Predicted stats vs your targets" : "Predicted stats"}</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers${f ? "; rows: predicted, target, difference" : ""})</span>
@@ -3164,7 +3138,6 @@
     }
     if (t.closest("#cmTgCoach")) { c.targets = Object.assign({}, state.targets); save(); renderCM(); return true; }
     if (t.closest("#cmTgClear")) { c.targets = {}; save(); renderCM(); return true; }
-    if (t.closest("#cmTgDebuffer")) { c.targets = Object.assign({}, E.BUILDS[presetById(c.preset).build].target, { wit: 1200 }); save(); renderCM(); return true; }
     if (t.closest("#cmTgSpark")) { c.targets = { speed: 1100, stamina: 1100, power: 1100, guts: 1100, wit: 1100 }; save(); renderCM(); return true; }
     if (t.closest("#cmMustAdd")) {
       const id = skillIdByName($("#cmMust").value);

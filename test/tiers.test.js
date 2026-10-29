@@ -69,25 +69,19 @@ test("the trainee's own character is never picked", () => {
   assert.ok(r.cards.every((c) => D.card(c.id).cid !== tr.cid));
 });
 
-test("parent decks: debuff targets follow the race's distance and the runner's style", () => {
+// Ace parent targets for a Long race with skill values: the race's relevant white skills.
+const longAce = () => {
   const X = require("../data/debuffs.js");
+  const SV = require("../data/skillvalues/index.js");
   const P = require("../data/presets.js");
-  const long = P.list.find((p) => p.course.dist === "Long" && p.course.surface === "Turf");
-  const sprint = P.list.find((p) => p.course.dist === "Sprint");
-  const name = (t) => Object.keys(t).map((id) => X[id].n);
-  const tl = T.parentTargets("debuff", long, "Senkou", {}, X);
-  const ts = T.parentTargets("debuff", sprint, "Oikomi", {}, X);
-  assert.ok(name(tl).includes("Stamina Eater") && !name(tl).includes("Intimidate"));
-  assert.ok(name(ts).includes("Intimidate") && !name(ts).includes("Stamina Eater"));
-  assert.ok(name(ts).includes("Intense Gaze") && !name(tl).includes("Intense Gaze"), "End Closer-only debuffs follow the style");
-  assert.ok(!name(tl).includes("Dust Cloud"), "dirt-only debuffs are left out on turf");
-});
+  const pr = P.list.find((p) => p.course.dist === "Long" && SV.ready.includes(p.id));
+  const L = {};
+  require("../data/skillvalues/" + pr.id + ".json").Senkou.forEach(([id, m]) => { L[id] = m / 100; });
+  return T.parentTargets("ace", pr, "Senkou", L, X, 0.1, (id) => (SV.skills[id] ? SV.skills[id][2] : null));
+};
 
 test("parent decks collect more target skills than a racing deck", () => {
-  const X = require("../data/debuffs.js");
-  const P = require("../data/presets.js");
-  const pr = P.list.find((p) => p.course.dist === "Long");
-  const targets = T.parentTargets("debuff", pr, "Senkou", {}, X);
+  const targets = longAce();
   const pool = glob.filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
   const parent = T.buildDeck({ scenario: "GL", parent: { targets, statsWeight: 0.1 } }, pool, []);
   const race = T.buildDeck({ scenario: "GL", skillWeight: 0 }, pool, []);
@@ -106,8 +100,7 @@ test("parent targets are white skills only (gold skills and inherited uniques do
   const ace = T.parentTargets("ace", pr, "Senkou", L, X, 0.1, (id) => SV.skills[id][2]);
   assert.ok(Object.keys(ace).length > 10);
   assert.ok(Object.keys(ace).every((id) => SV.skills[id][2] === 1));
-  const deb = T.parentTargets("debuff", pr, "Senkou", {}, X);
-  assert.ok(Object.keys(deb).every((id) => X[id].r === 1));
+  assert.ok(Object.keys(ace).every((id) => !X[id]), "never debuffs");
 });
 
 // ---- Must-have skills ----
@@ -181,10 +174,7 @@ test("Independent Training: a G1-heavy agenda for race bonus, unless you set you
 test("parent decks with stat targets: 'A little' keeps the skills and still gets closer to the targets", () => {
   const O = require("../optimizer.js");
   const { SCENARIOS } = require("../scenarios.js");
-  const X = require("../data/debuffs.js");
-  const P = require("../data/presets.js");
-  const pr = P.list.find((p) => p.course.dist === "Long");
-  const targets = T.parentTargets("debuff", pr, "Senkou", {}, X);
+  const targets = longAce();
   const pool = glob.filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
   const opts = { scenario: "GL", parent: { targets, statsWeight: 0.1 }, independent: true };
   const start = T.buildDeck(opts, pool, []).cards;
@@ -199,10 +189,7 @@ test("parent decks with Reach SS: the predicted rating doesn't fall, and every d
   const O = require("../optimizer.js");
   const R = require("../rating.js");
   const { SCENARIOS } = require("../scenarios.js");
-  const X = require("../data/debuffs.js");
-  const P = require("../data/presets.js");
-  const pr = P.list.find((p) => p.course.dist === "Long");
-  const targets = T.parentTargets("debuff", pr, "Senkou", {}, X);
+  const targets = longAce();
   const pool = glob.filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
   // Out of reach on purpose, so every swap is judged by how close it gets.
   const reachSS = { ss: 40000, unique: R.uniqueBonus(3, 3), spRating: 1.2, ignoreFit: true };

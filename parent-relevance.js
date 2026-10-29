@@ -1,9 +1,7 @@
 // Which white skills are relevant for a parent built for one CM race and running style, to pass
 // down as sparks:
-// - Ace parent: skills worth more than 0.1 L (median) there, the greens (passive stat skills)
-//   whose conditions fit the race, and for Mile and longer the recoveries that fit it. Never
-//   debuffs: they're for debuffer parents only.
-// - Debuffer parent: only the debuffs that work there (tiers.js parentTargets).
+// skills worth more than 0.1 L (median) there, the greens (passive stat skills) whose conditions
+// fit the race, and for Mile and longer the recoveries that fit it. Never debuffs.
 // Greens and recoveries come from data/skill-kinds.js; a green whose condition depends on
 // something unknown before the race (gate, popularity, the other runners) doesn't count, and a
 // recovery's in-race conditions (position, phase, corners) are taken as met.
