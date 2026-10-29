@@ -253,7 +253,8 @@
         uL > 0.1 ? `green: her unique <b>${esc(ctx.skillName(u))}</b> is worth ${uL.toFixed(2)} L here, so raise its level` : "",
       ].filter(Boolean);
       return `<details data-pp-open="fpTrain"${ctx.isOpen("fpTrain") ? " open" : ""}><summary class="mini"><b>Train her for the ace</b></summary><ul class="mini">${items.map((i) => `<li>${i}</li>`).join("")}</ul>
-        <p class="mini">Then import your veterans again to score the result. The parent builder below (② to ④) plans her races and skill buys.</p></details>`;
+        <div class="row-wrap"><button type="button" class="btn small" data-fp-build>Send her to the parent builder</button>${st().builderUndo ? `<button type="button" class="btn ghost small" data-fp-build-undo>Undo the last send</button>` : ""}</div>
+        <p class="mini">Sends her to ① (as your trainee), the ace's race and style to ③ (as an Ace parent), and these white sparks to ④'s shop as spark ★, so the builder below plans her races, deck and skill buys for this family. After the run, import your veterans again to score her.</p></details>`;
     }
     // Your veterans for one parent slot, with the rest of the family as it is.
     function rankVets(f, k, x) {
@@ -354,6 +355,9 @@
       if (s.problems.length) return `<p class="mini warn">${s.problems.map(esc).join(" ")}</p>`;
       const pct = (p) => Math.round(p * 100) + "%";
       return `<div class="pp-result"><p>Affinity <b>${s.total} ${s.symbol}</b> · family score <b class="pp-big">${s.value.toFixed(2)}</b> <span class="mini">(in lengths: relevant hints and green sparks by their L and chance, key-stat start bonus at 60 per L, a needed aptitude at 1 L)</span></p>
+        ${s.skills.length ? `<details data-pp-open="fpGets"${ctx.isOpen("fpGets") ? " open" : ""}><summary class="mini"><b>What the ace gets</b>: a hint for ${s.skills.filter((k) => k.p >= 0.3).length} relevant skill${s.skills.filter((k) => k.p >= 0.3).length === 1 ? "" : "s"} at 30%+${s.start.some(Boolean) ? `, ${s.start.map((v, i) => (v ? `+${v} ${F.STAT_LABELS[i]}` : "")).filter(Boolean).join(", ")} at the start` : ""}</summary>
+          <div class="table-wrap"><table class="plan"><thead><tr><th>Relevant skill</th><th>Chance of a hint</th><th>L</th><th>From</th></tr></thead><tbody>${s.skills.slice(0, 15).map((k) => `<tr><td>${esc(ctx.skillName(k.id))}</td><td class="num">${pct(k.p)}</td><td class="num">${k.L.toFixed(2)}</td><td class="mini">${[...new Set(k.from)].map((x) => FROM[x]).join(", ")}</td></tr>`).join("")}</tbody></table></div>
+          <p class="mini">Each chance combines every family member's spark for that skill over her two inspirations (a skill several of them carry is likely). A hint lowers its price and adds +1 to +5 hint levels (odds unknown); stats from blue sparks at the inspirations aren't counted, only the start bonus.</p></details>` : ""}
         <p class="mini">Relevant white sparks: about <b>${s.hints.toFixed(1)}</b> hints expected over her two inspirations (${s.whiteL.toFixed(2)} L)${s.white.length ? ": " + s.white.sort((a, b) => b.p * b.L - a.p * a.L).slice(0, 8).map((w) => `${esc(ctx.skillName(w.id))} ${pct(w.p)}`).join(", ") : ""}. Each gives +1 to +5 hint levels (odds unknown).</p>
         ${s.green.length ? `<p class="mini">Green: ${s.green.map((g) => `${esc(ctx.skillName(g.id))} ${pct(g.p)} (${g.L.toFixed(2)} L)`).join(", ")}.</p>` : ""}
         <p class="mini">Blue at the start: ${s.start.map((v, i) => (v ? `+${v} ${F.STAT_LABELS[i]}` : "")).filter(Boolean).join(", ") || "none"} (more from inspirations).${s.pink.length ? ` Pink: ${s.pink.map((p) => `${p.label} ${pct(p.p)} to fire at least once`).join(", ")}.` : ""}</p>
@@ -381,6 +385,12 @@
       else if ((el = hit("data-fp-vets-clear"))) setVeterans({ at: "", list: [] });
       else if ((el = hit("data-fp-rent-add"))) { const ta = el.closest("details").querySelector("[data-fp-rent-text]"); if (!ta.value.trim()) { ctx.flash("Paste the uma.moe cards first."); return true; } addRentals(ta.value); return true; }
       else if ((el = hit("data-fp-rent-clear"))) setRentals([]);
+      else if ((el = hit("data-fp-build"))) {
+        if (!f.p1.tid) { ctx.flash("Pick Parent 1's version first."); return true; }
+        const w = fam.lookFor(Object.assign({}, inputs(f).x, { chars: [], fam: {} }));
+        f.builderUndo = ctx.toBuilder(f.p1.tid, w.white.slice(0, 5).map((x) => x.id));
+        ctx.flash(`${ctx.charName(f.p1.cid)} sent to the parent builder: ① to ④ below.`);
+      } else if ((el = hit("data-fp-build-undo"))) { if (f.builderUndo) ctx.undoBuilder(f.builderUndo); f.builderUndo = null; }
       else if ((el = hit("data-fp-rent-del"))) setRentals(rentalsList().filter((r) => r.friend !== el.dataset.fpRentDel));
       else if ((el = hit("data-fp-rent-use"))) {
         const r = rentalsList().find((x) => x.friend === el.dataset.fpRentUse);
@@ -445,6 +455,7 @@
   }
 
   const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1", RENTALS_KEY = "uma-rentals-v1";
+  const FROM = { p1: "Parent 1", p2: "Parent 2", g11: "P1's parent", g12: "P1's parent", g21: "P2's parent", g22: "P2's parent" };
   const WHY = { L: "race skill", green: "green", recovery: "recovery", debuff: "debuff" };
   const api = { create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
