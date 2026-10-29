@@ -2714,7 +2714,7 @@
       const d = predictDeck(), c = state.pcm || {}, p = presetById(c.preset);
       const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, job.n / 60), runs: 16,
         helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false }), d.cards);
-      predictCache.set(job.k, { stats: est.stats, sp: est.sp, races: est.races });
+      predictCache.set(job.k, { stats: est.stats, sp: est.sp, races: est.races, finals: est.finals });
     } catch (err) { predictCache.set(job.k, null); }
     if (predictQueue.length) predictTimer = setTimeout(predictNext, 0);
     if (predictDone && state.tab === "parents") predictDone();
@@ -2987,7 +2987,8 @@
     const stats = PR.statsScore(r.est.stats), skills = Math.round((r.est.sp || 0) * rate), unique = PR.uniqueBonus(stars, stars);
     const total = stats + skills + unique;
     const rk = PR.rankOf(total);
-    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>${total >= PR.SS ? ", SS: white sparks get the doubled 3★ chance" : `, about ${(PR.SS - total).toLocaleString()} short of SS (${PR.SS.toLocaleString()})`}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent ${c ? "on her relevant skills " : ""}at ~${rate.toFixed(2)} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. ${state.tab === "parents" ? "Plan the exact buy in ④ After the run" : 'Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>'}; fewer races also help.</p>`;
+    const fin = r.est.finals || [], hit = fin.filter((f) => PR.statsScore(f.stats) + Math.round(f.sp * rate) + unique >= PR.SS).length;
+    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>${total >= PR.SS ? ", SS: white sparks get the doubled 3★ chance" : `, about ${(PR.SS - total).toLocaleString()} short of SS (${PR.SS.toLocaleString()})`}${fin.length ? `; <b>SS in ${hit} of ${fin.length}</b> simulated careers` : ""}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent ${c ? "on her relevant skills " : ""}at ~${rate.toFixed(2)} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. ${state.tab === "parents" ? "Plan the exact buy in ④ After the run" : 'Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>'}; fewer races also help.</p>`;
   }
 
   // Predicted stats from the simulated careers, against your targets when you set them.

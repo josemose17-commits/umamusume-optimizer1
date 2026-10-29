@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const R = require('../rating.js');
 const P = require('../data/parent-data.js');
 
-test('stat scores match the published 50-point table and interpolate between', () => {
+test('stat scores match the published 50-point table', () => {
   assert.equal(R.statScore(0), 0);
   assert.equal(R.statScore(300), 352);
   assert.equal(R.statScore(1000), 2635);
@@ -57,4 +57,11 @@ test('rating sums stats, skills and unique; statsFor closes a gap on the highest
   const add = R.statsFor([1000, 600, 600, 600, 600], 500);
   assert.ok(add[0] > 0 && add.slice(1).every((n) => n === 0));
   assert.equal(R.statsFor([1200, 1200, 1200, 1200, 1200], 100, [1200, 1200, 1200, 1200, 1200]), null);
+});
+
+test("stat scores between the 50-point marks follow the game's per-point rates (UmaTools)", () => {
+  // Values from UmaTools' rating code, where 10-point bands made the old interpolation miss.
+  assert.strictEqual(R.statScore(1210), 3920);
+  assert.strictEqual(R.statScore(1229), 4073);
+  for (let v = 1; v <= 2500; v++) assert.ok(R.statScore(v) >= R.statScore(v - 1));
 });

@@ -2,12 +2,29 @@
 // learned skill's rating value, plus the unique skill's level bonus. The sum sets the rank
 // (SS from 17,500); an SS parent doubles her white sparks' 3★ chance.
 //
-// Stat scores: UmaTools' rating guide (daftuyda.moe/guides/rating-system), which publishes the
-// score at every 50 points; points between them are interpolated (the curve is smooth, so this
-// is within a point or two). Skill values and rank thresholds: data/parent-data.js.
+// Stat scores: the game's per-point rates as UmaTools publishes them (daftuyda.moe, rating guide
+// and rating code): each point up to a stat adds its band's rate, in tenths, and the score is the
+// rounded total. Bands: 50 points up to 1200, 10 points to 2000, then +1 every 25 points.
+// Skill values and rank thresholds: data/parent-data.js.
 (function (root) {
   "use strict";
-  const STAT_AT_50 = [0, 25, 66, 116, 181, 261, 352, 457, 577, 707, 847, 993, 1143, 1298, 1463, 1633, 1808, 2004, 2209, 2419, 2635, 2895, 3171, 3501, 3841, 4249, 4688, 5160, 5665, 6203, 6773, 7377, 8013, 8681, 9383, 10117, 10884, 11684, 12516, 13382, 14280, 15197, 16125, 17062, 18010, 18967, 19935, 20912, 21900, 22897, 23905];
+  const RATES_TO_1200 = [5, 8, 10, 13, 16, 18, 21, 24, 26, 28, 29, 30, 31, 33, 34, 35, 39, 41, 42, 43, 52, 55, 66, 68, 68];
+  const RATES_TO_2000 = [79, 80, 81, 83, 84, 85, 86, 88, 89, 90, 92, 93, 94, 96, 97, 98, 100, 101, 102, 103, 105, 106, 107, 109, 110, 111, 113, 114, 115, 117, 118, 119, 121, 122, 123, 124, 126, 127, 128, 130, 131, 132, 134, 135, 136, 138, 139, 140, 141, 143, 144, 145, 147, 148, 149, 151, 152, 153, 155, 156, 157, 159, 160, 161, 162, 164, 165, 166, 168, 169, 170, 172, 173, 174, 176, 177, 178, 179, 181, 182, 182];
+  // STAT_SCORE[v]: the score of a stat at v (0-2500). The totals restart at UmaTools' published
+  // values for 1200 and 2000.
+  const STAT_SCORE = (() => {
+    const out = [0];
+    let raw = 0;
+    for (let v = 1; v <= 2500; v++) {
+      if (v === 1201) raw = 38413;
+      if (v === 2001) raw = 142796;
+      raw += v <= 1200 ? RATES_TO_1200[Math.floor(v / 50)] : v <= 2000 ? RATES_TO_2000[Math.floor((v - 1200) / 10)] : 183 + Math.floor((v - 2001) / 25);
+      out[v] = Math.round(raw / 10);
+    }
+    return out;
+  })();
+  // The score every 50 points, as the rating guide's table lists it.
+  const STAT_AT_50 = STAT_SCORE.filter((_, v) => v % 50 === 0);
   const RANK_LABELS = ["G", "G+", "F", "F+", "E", "E+", "D", "D+", "C", "C+", "B", "B+", "A", "A+", "S", "S+", "SS", "SS+", "UG"];
   const SS = 17500;
   // Aptitude multiplier on a skill's rating when its role (distance or style) is S/A, B/C,
@@ -22,9 +39,7 @@
 
   function statScore(x) {
     const v = Math.max(0, Math.min(2500, Math.floor(+x || 0)));
-    const i = Math.floor(v / 50);
-    if (i >= STAT_AT_50.length - 1) return STAT_AT_50[STAT_AT_50.length - 1];
-    return Math.round(STAT_AT_50[i] + (STAT_AT_50[i + 1] - STAT_AT_50[i]) * (v - i * 50) / 50);
+    return STAT_SCORE[v];
   }
 
   const statsScore = (stats) => stats.reduce((a, x) => a + statScore(x), 0);

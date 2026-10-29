@@ -117,3 +117,22 @@ test("rating per skill point follows the skills and her aptitudes", () => {
   assert.ok(good > bad && good > 1 && good < 2);
   assert.strictEqual(PP.spRating([], APT, R, SB), PP.SP_RATING);
 });
+
+test("SS buy: with SP to spare, a relevant skill goes up to the tier with the better spark chance", () => {
+  // Right-Handed ○ alone vs ◎ (25%): the same one relevant family, the ◎ when SP allows.
+  const s = SB.create({ skills: ratings(), available: ["200012", "200011"], lengthValue: 1 });
+  const rel = { "200012": 1 };
+  assert.deepStrictEqual(s.solveSS({}, 100, { gap: 0, relevant: rel }).selected.map((o) => o.id), ["200012"]);
+  const x = s.solveSS({}, 400, { gap: 0, relevant: rel });
+  assert.deepStrictEqual(x.selected.map((o) => o.id), ["200011"]);
+  assert.strictEqual(x.spent, x.selected[0].cost);
+});
+
+test("SS buy: spark chance comes before rating among equal relevant counts, never before SS", () => {
+  // Made-up ratings where the ○ rates higher than its ◎: the ◎ still wins on spark chance...
+  const s = SB.create({ skills: { "200012": 200, "200011": 150 }, available: ["200012", "200011"], lengthValue: 1 });
+  const rel = { "200012": 1 };
+  assert.deepStrictEqual(s.solveSS({}, 400, { gap: 0, relevant: rel }).selected.map((o) => o.id), ["200011"]);
+  // ...unless SS needs the ○'s rating.
+  assert.deepStrictEqual(s.solveSS({}, 400, { gap: 180, relevant: rel }).selected.map((o) => o.id), ["200012"]);
+});

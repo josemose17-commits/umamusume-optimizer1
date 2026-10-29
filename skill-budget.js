@@ -111,8 +111,8 @@
         offered: [...new Set(groups.flat().map((o) => o.id))], unsupported: [...unsupported].sort() };
     }
     // The parent's buy: values are rating points. Must-haves first, then reach `gap` more
-    // rating (SS) if any buy does, then the most relevant skill families, then the most
-    // rating. A family counts once: its spark is always the base white's, whether she learns
+    // rating (SS) if any buy does, then the most relevant skill families, then better spark
+    // chances among them (an upgrade pass after the knapsack), then the most rating. A family counts once: its spark is always the base white's, whether she learns
     // ○, ◎ or the gold (which only raise its chance: 20%, 25%, 40%; GameTora, umamusu.wiki).
     // Returns solve()'s fields plus reached (gap met) and relevant (net relevant skills added).
     function solveSS(levels, projectedSp, o = {}) {
@@ -174,8 +174,26 @@
         if (choice) { const x = groups[g][choice - 1]; selected.push(x); at -= x.rel * W + x.cost; }
       }
       selected.reverse();
+      // Same number of relevant families: upgrade one to the tier with a better spark chance
+      // (◎ 25%, gold 40%, ○ 20%) while the SP left covers it and the rating gap stays met.
+      const chance = (id) => (metadata[id][3] === 2 ? 40 : metadata[id][2] && metadata[metadata[id][2]] && metadata[metadata[id][2]][3] === 1 ? 25 : 20);
+      let value = selected.reduce((n, x) => n + x.value, 0);
+      for (let more = true; more;) {
+        more = false;
+        let best = null;
+        selected.forEach((x, i) => {
+          if (!isRel(x.id)) return;
+          groups.find((g) => g.some((o) => o.id === x.id)).forEach((y) => {
+            const extra = y.cost - x.cost, after = value - x.value + y.value;
+            if (chance(y.id) <= chance(x.id) || extra > budget - spent || y.required.length < x.required.length) return;
+            if (value >= gap - 1e-9 && after < gap - 1e-9) return;
+            const gain = chance(y.id) - chance(x.id);
+            if (!best || gain > best.gain || gain === best.gain && after > best.after) best = { i, y, extra, after, gain };
+          });
+        });
+        if (best) { spent += best.extra; value = best.after; selected[best.i] = best.y; more = true; }
+      }
       const satisfied = new Set(selected.flatMap((s) => s.required).concat([...learned].filter((id) => must.has(id))));
-      const value = selected.reduce((n, x) => n + x.value, 0);
       return { budget, spent, unspent: budget - spent, selected, value, L: selected.reduce((n, x) => n + x.L, 0),
         reached: value >= gap - 1e-9, relevant: selected.reduce((n, x) => n + x.rel, 0),
         unmetMust: [...must].filter((id) => !satisfied.has(id)), offered: [...new Set(groups.flat().map((x) => x.id))], unsupported: [...unsupported].sort() };

@@ -212,6 +212,8 @@ test("parent decks with Reach SS: the predicted rating doesn't fall, and every d
   while (s.next());
   const r = s.result();
   assert.ok(Number.isFinite(r.before.rating) && Number.isFinite(r.after.rating));
+  assert.strictEqual(r.after.finals.length, 16);
+  assert.strictEqual(r.after.ssShare, 0, "no career reaches 40,000");
   assert.ok(r.after.rating >= r.before.rating);
   assert.strictEqual(r.after.rating, R.statsScore(r.after.stats) + Math.round(r.after.sp * 1.2) + reachSS.unique);
 });
