@@ -57,7 +57,7 @@
     // What to look for. ace: { cid, apt }, race: { preset, style }, rel: the ace's relevant
     // skills, raceL: { skill id: L } (inherited uniques included), offers: { id: chance the ace's
     // deck offers it } or null, innate: her own innate/awakening skill ids, build: engine build,
-    // chars: character ids to pick from, uniques: [{ id (inherited), L, owners }], fam: entered.
+    // chars: character ids to pick from, mine: the ones you own (or none), uniques: [{ id (inherited), L, owners }], fam: entered.
     function lookFor(x) {
       const fams = families(x.rel);
       const innate = new Set((x.innate || []).map(String));
@@ -76,11 +76,15 @@
       const ace = x.ace && x.ace.cid;
       const pool = (x.chars || []).filter((cid) => +cid !== +ace);
       // Parent pairs: the ace with each parent, plus the pair together (grandparents and G1 wins
-      // come on top).
+      // come on top). With x.mine (characters you own), Parent 1 is one of them and Parent 2 any
+      // character, as a friend's rental.
       const pairs = [];
       if (ace) {
         const withAce = new Map(pool.map((cid) => [cid, A.together(ace, cid)]));
-        pool.forEach((a, i) => pool.slice(i + 1).forEach((b) => pairs.push({ p1: a, p2: b, pts: withAce.get(a) + withAce.get(b) + A.together(a, b) })));
+        const pair = (a, b) => ({ p1: a, p2: b, pts: withAce.get(a) + withAce.get(b) + A.together(a, b) });
+        const mine = x.mine && x.mine.length ? new Set(x.mine.map(Number)) : null;
+        if (mine) pool.filter((a) => mine.has(+a)).forEach((a) => pool.forEach((b) => { if (+a !== +b) pairs.push(pair(a, b)); }));
+        else pool.forEach((a, i) => pool.slice(i + 1).forEach((b) => pairs.push(pair(a, b))));
         pairs.sort((a, b) => b.pts - a.pts);
       }
       // Grandparents for each parent: what each adds with the ace and that parent.

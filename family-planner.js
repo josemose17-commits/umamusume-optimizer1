@@ -32,10 +32,26 @@
       vets = v; vetPairs = null;
       try { if (v.list.length) store().setItem(VETS_KEY, JSON.stringify(v)); else store().removeItem(VETS_KEY); } catch (e) { /* ignore */ }
     }
+    // My umas: the trainee versions you own (ids), kept in this browser. The ace and Parent 1 come
+    // from them; importing veterans ticks every version you've trained.
+    let umas = null;
+    function myUmas() {
+      if (umas) return umas;
+      try { umas = JSON.parse(store().getItem(UMAS_KEY)) || []; } catch (e) { umas = []; }
+      if (!umas.length && veterans().list.length) setUmas(veterans().list.map((v) => v.tid));
+      return umas;
+    }
+    function setUmas(ids) {
+      umas = [...new Set(ids.map(Number))].filter((id) => trainee(id));
+      try { store().setItem(UMAS_KEY, JSON.stringify(umas)); } catch (e) { /* ignore */ }
+    }
+    const mineCids = () => new Set(myUmas().map((id) => trainee(id).cid));
+    const ownVersions = (cid) => { const own = new Set(myUmas()), vs = versions(cid).filter((v) => own.has(v.id)); return vs.length ? vs : versions(cid); };
     function importVeterans(text) {
       try {
         const r = V.parse(text);
         setVeterans({ at: new Date().toISOString().slice(0, 10), list: r.list });
+        setUmas(myUmas().concat(r.list.map((v) => v.tid)));
         ctx.flash(`Imported ${r.list.length} veterans${r.skipped ? ` (${r.skipped} skipped)` : ""}.`);
       } catch (err) { ctx.flash("Couldn't read that: " + err.message); }
       ctx.rerender();
@@ -46,7 +62,7 @@
     function withVet(f, k, v) {
       const out = Object.assign({}, f);
       out[k] = Object.assign(asMember(v.self), { vet: v.id });
-      GRAND[k].forEach((g, i) => { out[g] = asMember(v.parents[i]); });
+      (GRAND[k] || []).forEach((g, i) => { out[g] = asMember(v.parents[i]); });
       return out;
     }
     const vetName = (v) => { const t = trainee(v.tid); return ctx.charName(v.cid) + (t && versions(v.cid).length > 1 ? ` [${t.t}]` : ""); };
@@ -77,23 +93,33 @@
       const t = trainee(f.ace.tid);
       const uniques = rel ? Object.keys(rel.L).filter((id) => /^9\d+$/.test(id) && owners.has(id)).map((id) => ({ id, L: rel.L[id], owners: owners.get(id) })) : [];
       return { race, rel, x: { ace: f.ace.cid ? { cid: f.ace.cid, apt: t ? t.apt : null } : null, race, rel, raceL: rel ? rel.L : {}, offers: ctx.aceOffers(),
-        innate: t ? [].concat(t.is || [], t.as || []) : [], build: ctx.build(race.preset), chars: ctx.chars(), uniques, fam: f } };
+        innate: t ? [].concat(t.is || [], t.as || []) : [], build: ctx.build(race.preset), chars: ctx.chars(), mine: [...mineCids()], uniques, fam: f } };
     }
 
     // ---------- The section ----------
     function html() {
       const f = st(), { race, rel, x } = inputs(f);
-      const vers = f.ace.cid ? versions(f.ace.cid) : [];
-      let out = `<p class="mini">Start from the ace you'll race in the CM, then her parents, then theirs. Her race: <b>${esc(race.preset.name)}</b> · ${esc(race.preset.course.track)} ${race.preset.course.distance}m ${esc(race.preset.course.surface)} · ${STYLE_LABEL[race.style]} (set in <button type="button" class="linkish" data-goto-tab="cm">CM &amp; decks</button>).</p>
-        <div class="pp-form"><label class="field"><span>The ace</span>${ctx.charInput("fp-ace", f.ace.cid, "Ace")}</label>
+      const vers = f.ace.cid ? ownVersions(f.ace.cid) : [];
+      let out = umasHTML() + `<p class="mini">Start from the ace you'll race in the CM, then her parents, then theirs. Her race: <b>${esc(race.preset.name)}</b> · ${esc(race.preset.course.track)} ${race.preset.course.distance}m ${esc(race.preset.course.surface)} · ${STYLE_LABEL[race.style]} (set in <button type="button" class="linkish" data-goto-tab="cm">CM &amp; decks</button>).</p>
+        <div class="pp-form"><label class="field"><span>The ace (your umas)</span>${mineCids().size ? `<input data-pp-char="fp-ace" list="fpMine" value="${esc(ctx.charName(f.ace.cid))}" placeholder="Ace" autocomplete="off"><datalist id="fpMine">${[...mineCids()].map((c) => ctx.charName(c)).sort().map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>` : ctx.charInput("fp-ace", f.ace.cid, "Ace")}</label>
         ${vers.length > 1 ? `<label class="field"><span>Version</span><select data-fp-ace-ver>${vers.map((v) => `<option value="${v.id}"${v.id === +f.ace.tid ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}</div>`;
       if (!f.ace.cid) return out + `<p class="mini">Pick the ace to see what to look for.</p>`;
       if (!rel) return out + `<p class="mini">Loading the race's skill values…</p>`;
       const want = fam.lookFor(x);
       out += lookForHTML(f, want);
       out += vetsHTML(f, x);
-      out += treeHTML(f, x);
+      out += treeHTML(f, x, want);
       return out;
+    }
+
+    // ---------- My umas ----------
+    function umasHTML() {
+      const own = new Set(myUmas()), all = D.DATA.trainees.filter((t) => D.onGlobal(t)).sort((a, b) => a.n.localeCompare(b.n) || a.id - b.id);
+      return `<details class="pred-help" data-pp-open="fpUmas"${ctx.isOpen("fpUmas") ? " open" : ""}><summary><b>My umas</b> · ${own.size ? `${own.size} version${own.size === 1 ? "" : "s"} ticked` : "tick the ones you own"}</summary>
+        <p class="mini">The ace and Parent 1 come from these (Parent 2 can be anyone, as a friend's rental). Importing your veterans ticks every version you've trained; tick the rest here. Kept in this browser.</p>
+        <div class="row-wrap">${veterans().list.length ? `<button type="button" class="btn ghost small" data-fp-umas-vets>Tick my veterans' versions</button>` : ""}${own.size ? `<button type="button" class="btn ghost small" data-fp-umas-clear>Untick all</button>` : ""}</div>
+        <div class="pp-g1grid">${all.map((t) => `<label class="pp-g1"><input type="checkbox" data-fp-uma="${t.id}"${own.has(t.id) ? " checked" : ""}> ${esc(t.n)} <span class="mini">[${esc(t.t)}]</span></label>`).join("")}</div>
+      </details>`;
     }
 
     // ---------- Your veterans ----------
@@ -153,9 +179,22 @@
         return a && b ? `<tr><td>${esc(vetName(a))}<div class="mini">${vetText(a)}</div></td><td>${esc(vetName(b))}<div class="mini">${vetText(b)}</div></td><td class="num">${r.value.toFixed(2)}</td><td class="num">${r.total} ${r.symbol}</td><td><button type="button" class="linkish" data-fp-vets-pair="${r.a},${r.b}">Use both</button></td></tr>` : "";
       }).join("")}</tbody></table></div>`;
     }
+    // Parent 1 is one you'll train: what to build into her run for the ace.
+    function trainForHTML(m, w, x) {
+      if (!w) return "";
+      const u = uniqueOf(trainee(m.tid)), uL = u ? (x.raceL[u] || 0) : 0;
+      const items = [
+        `white sparks: <b>${w.white.slice(0, 5).map((s) => esc(ctx.skillName(s.id))).join(", ")}</b> (learn them, ◎/gold for a better spark chance)`,
+        `blue: <b>${w.blue.map((b) => b.label).join(" or ")}</b> as high as you can (3★)`,
+        w.pink.length ? `pink: <b>${w.pink.map((p) => p.label).join(", ")}</b>` : "",
+        uL > 0.1 ? `green: her unique <b>${esc(ctx.skillName(u))}</b> is worth ${uL.toFixed(2)} L here, so raise its level` : "",
+      ].filter(Boolean);
+      return `<details data-pp-open="fpTrain"${ctx.isOpen("fpTrain") ? " open" : ""}><summary class="mini"><b>Train her for the ace</b></summary><ul class="mini">${items.map((i) => `<li>${i}</li>`).join("")}</ul>
+        <p class="mini">Then import your veterans again to score the result. The parent builder below (② to ④) plans her races and skill buys.</p></details>`;
+    }
     // Your veterans for one parent slot, with the rest of the family as it is.
     function rankVets(f, k, x) {
-      const other = k === "p1" ? f.p2 : f.p1;
+      const other = k === "p1" ? f.p2 : k === "p2" ? f.p1 : {};
       return veterans().list.filter((v) => +v.cid !== +f.ace.cid && +v.cid !== +other.cid)
         .map((v) => { const r = vetFamily(f, k, v); return { v, rent: r.rent, s: fam.score(familyOf(r.fm), x) }; }).filter((r) => !r.s.problems.length)
         .sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total);
@@ -166,8 +205,12 @@
       return `<div class="table-wrap"><table class="plan"><thead><tr><th>Veteran (and her parents)</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(vetName(r.v))}<div class="mini">${vetText(r.v)}${r.v.parents.some(Boolean) ? ` · parents ${r.v.parents.filter(Boolean).map((p) => esc(ctx.charName(p.cid))).join(" + ")}` : ""}${r.rent ? ` · rent ${esc(ctx.charName(r.rent.cid))}` : ""}</div></td><td class="num">${r.s.value.toFixed(2)}</td><td class="num">${r.s.total} ${r.s.symbol}</td><td><button type="button" class="linkish" data-fp-vet="${k},${r.v.id}">Use</button></td></tr>`).join("")}</tbody></table></div>`;
     }
     function vetSlotHTML(f, k, x) {
-      if (!V || !GRAND[k] || !veterans().list.length) return "";
       if (f.rental && k === "p2") return rentalHTML(f);
+      if (!V || !veterans().list.length) return "";
+      // A grandparent slot takes a veteran only when her parent is one you'll train (a veteran or
+      // a rental comes with her own parents).
+      const parent = F.PARENT_OF[k];
+      if (parent && (f[parent].vet != null || !f[parent].cid || (f.rental && parent === "p2"))) return "";
       const rows = rankVets(f, k, x);
       if (!rows.length) return "";
       const id = "fpVet-" + k;
@@ -176,7 +219,7 @@
     }
 
     function lookForHTML(f, w) {
-      const name = ctx.charName;
+      const name = ctx.charName, mine = mineCids().size > 0, vetCids = new Set(veterans().list.map((v) => +v.cid));
       const top = w.white.slice(0, 10), rest = w.white.slice(10);
       const whiteRow = (s) => `<li><b>${esc(ctx.skillName(s.id))}</b> <span class="mini">${s.L.toFixed(2)} L · ${WHY[s.why] || s.why}${s.deck != null ? ` · her deck offers it ${Math.round(s.deck * 100)}%` : ""}${s.own ? " · she has it (innate/awakening)" : ""}</span></li>`;
       const greens = w.green.slice(0, 6);
@@ -188,9 +231,14 @@
         greens.length ? `Green sparks: ${greens.map((g) => ctx.skillName(g.id)).join(", ")}` : "",
       ].filter(Boolean).join("\n");
       return `<details class="pred-help" data-pp-open="fpLook"${ctx.isOpen("fpLook") ? " open" : ""}><summary><b>What to look for</b> (search uma.moe or your own veterans with these)</summary>
-        <h4>Parents</h4><p class="mini">Best pairs for her by affinity (the ace with each parent, and the two together; grandparents and shared G1 wins add more):</p>
-        <div class="row-wrap">${w.pairs.slice(0, 6).map((p) => `<button type="button" class="chip" data-fp-pair="${p.p1},${p.p2}" title="Put them in Parent 1 and Parent 2">${esc(name(p.p1))} + ${esc(name(p.p2))} · ${p.pts}</button>`).join(" ")}</div>
-        ${["p1", "p2"].map((k) => w.grand[k] ? `<p class="mini"><b>${esc(name(f[k].cid))}'s parents</b> (what each adds with the ace and her): ${w.grand[k].slice(0, 6).map((g) => `<button type="button" class="linkish" data-fp-grand="${k},${g.cid}">${esc(name(g.cid))}</button> ${g.pts}`).join(" · ")}</p>` : "").join("")}
+        <h4>Parents</h4><p class="mini">${mine ? "Best pairs for her by affinity: <b>Parent 1 from your umas</b> + Parent 2 as a friend's rental" : "Best pairs for her by affinity (tick <b>My umas</b> to pick Parent 1 from yours)"} (the ace with each parent, and the two together; grandparents and shared G1 wins add more). ★ = you have a veteran of her.</p>
+        <div class="row-wrap">${w.pairs.slice(0, 6).map((p) => `<button type="button" class="chip" data-fp-pair="${p.p1},${p.p2}" title="Put them in Parent 1 and Parent 2">${esc(name(p.p1))}${vetCids.has(+p.p1) ? " ★" : ""} + ${esc(name(p.p2))}${mine ? " (rental)" : ""} · ${p.pts}</button>`).join(" ")}</div>
+        ${["p1", "p2"].map((k) => {
+          if (!w.grand[k]) return "";
+          const chip = (g) => `<button type="button" class="linkish" data-fp-grand="${k},${g.cid}">${esc(name(g.cid))}</button> ${g.pts}`;
+          const own = w.grand[k].filter((g) => vetCids.has(+g.cid)).slice(0, 6), rent = w.grand[k].filter((g) => !vetCids.has(+g.cid)).slice(0, 6);
+          return `<p class="mini"><b>${esc(name(f[k].cid))}'s parents</b> (what each adds with the ace and her): ${own.length ? `your veterans ${own.map(chip).join(" · ")}; ` : ""}${own.length ? "rentals" : ""} ${rent.map(chip).join(" · ")}</p>`;
+        }).join("")}
         <h4>White sparks</h4><p class="mini">Relevant skills for her race, first the ones worth the most that her own deck rarely gives (each fires 3/6/9% per inspiration by stars, × her affinity bonus):</p><ol class="mini">${top.map(whiteRow).join("")}</ol>
         ${rest.length ? `<details><summary class="mini">${rest.length} more</summary><ol class="mini" start="11">${rest.map(whiteRow).join("")}</ol></details>` : ""}
         <h4>Blue sparks</h4><p class="mini"><b>${w.blue.map((b) => b.label).join("</b> or <b>")}</b> (her build's top stats): aim for 6★+ in total across parents and grandparents, ideally 3★ on each parent. Each blue spark adds +5/+12/+21 at the start and fires 70/80/90% per inspiration.</p>
@@ -202,13 +250,13 @@
     }
 
     // The family tree: six cards, ace down, and the family's score.
-    function treeHTML(f, x) {
+    function treeHTML(f, x, w) {
       const s = fam.score(familyOf(f), x);
-      let out = `<h4>Her family</h4><div class="fp-tree">${ORDER.map((k) => cardHTML(f, k, s, x)).join("")}</div>`;
+      let out = `<h4>Her family</h4><div class="fp-tree">${ORDER.map((k) => cardHTML(f, k, s, x, w)).join("")}</div>`;
       out += scoreHTML(s);
       return out;
     }
-    function cardHTML(f, k, s, x) {
+    function cardHTML(f, k, s, x, w) {
       const m = f[k], vers = m.cid ? versions(m.cid) : [], parent = F.PARENT_OF[k];
       const label = parent ? `${SLOT_LABELS[k]}${f[parent].cid ? ` (${esc(ctx.charName(f[parent].cid))}'s)` : ""}` : SLOT_LABELS[k];
       const stars = (key, v) => `<select data-fp-${key}="${k}">${[0, 1, 2, 3].map((n) => `<option value="${n}"${+v === n ? " selected" : ""}>${n ? n + "★" : "–"}</option>`).join("")}</select>`;
@@ -225,6 +273,7 @@
           <details class="pp-wins" data-pp-open="fpWins-${k}"${ctx.isOpen("fpWins-" + k) ? " open" : ""}><summary class="mini">G1 wins · ${m.wins.length ? m.wins.length + " ticked" : "none"}</summary><div class="pp-g1grid">${g1.map((r) => `<label class="pp-g1"><input type="checkbox" data-fp-win="${k}" value="${esc(r)}"${m.wins.indexOf(r) !== -1 ? " checked" : ""}> ${esc(r)}</label>`).join("")}</div></details>
           <div class="row-wrap"><button type="button" class="btn ghost small" data-fp-keep="${k}">Save as a candidate for this slot</button>${m.cid ? `<button type="button" class="btn ghost small" data-fp-clear="${k}">Clear</button>` : ""}</div>` : ""}
         ${m.vet != null ? `<p class="mini">From your veterans${GRAND[k] ? " (her parents filled in below)" : ""}.</p>` : ""}
+        ${k === "p1" && m.cid && m.vet == null ? trainForHTML(m, w, x) : ""}
         ${vetSlotHTML(f, k, x)}
         ${cands.length ? candsHTML(f, k) : ""}</div>`;
     }
@@ -266,6 +315,8 @@
       else if ((el = hit("data-fp-cand-del"))) { const [k, i] = el.dataset.fpCandDel.split(","); f.cands[k].splice(+i, 1); }
       else if ((el = hit("data-fp-vets-import"))) { const ta = el.closest("details").querySelector("[data-fp-vets-text]"); if (!ta.value.trim()) { ctx.flash("Paste the JSON first."); return true; } importVeterans(ta.value); return true; }
       else if ((el = hit("data-fp-vets-clear"))) setVeterans({ at: "", list: [] });
+      else if ((el = hit("data-fp-umas-vets"))) setUmas(myUmas().concat(veterans().list.map((v) => v.tid)));
+      else if ((el = hit("data-fp-umas-clear"))) setUmas([]);
       else if ((el = hit("data-fp-vets-pairs"))) { vetPairs = { key: pairKey(f), rows: rankPairs(f, inputs(f).x) }; }
       else if ((el = hit("data-fp-vets-pair"))) { const [a, b] = el.dataset.fpVetsPair.split(",").map(Number), by = byId(); if (by.get(a) && by.get(b)) Object.assign(f, withVet(withVet(f, "p1", by.get(a)), "p2", by.get(b))); }
       else if ((el = hit("data-fp-vet"))) {
@@ -278,13 +329,19 @@
     }
     const byId = () => new Map(veterans().list.map((v) => [v.id, v]));
     function setChar(f, k, cid) {
-      const vs = cid ? versions(cid) : [];
+      const vs = cid ? (k === "p1" ? ownVersions(cid) : versions(cid)) : [];
       f[k] = Object.assign(blank(), { cid: cid || null, tid: vs.length ? vs[0].id : null });
     }
     function change(e) {
       const f = st(), t = e.target, ds = t.dataset;
       if (ds.fpVetsText != null) return true;
       if (ds.fpRental != null) { f.rental = t.checked; ctx.rerender(); return true; }
+      if (ds.fpUma != null) {
+        const id = +ds.fpUma, own = myUmas().filter((x) => x !== id);
+        setUmas(t.checked ? own.concat(id) : own);
+        ctx.rerender();
+        return true;
+      }
       if (ds.fpVetsFile != null) {
         const file = t.files && t.files[0];
         if (file) { const r = new root.FileReader(); r.onload = () => importVeterans(String(r.result)); r.readAsText(file); }
@@ -293,7 +350,8 @@
       if (ds.ppChar && ds.ppChar.indexOf("fp-") === 0) {
         const key = ds.ppChar.slice(3), v = t.value.trim(), cid = v ? ctx.charId(v) : null;
         if (v && !cid) { ctx.flash("Pick a character from the list."); return true; }
-        if (key === "ace") { const vs = cid ? versions(cid) : []; f.ace = { cid: cid || null, tid: vs.length ? vs[0].id : null }; }
+        if (key === "ace" && cid && mineCids().size && !mineCids().has(+cid)) { ctx.flash("She isn't in My umas: tick her there first."); ctx.rerender(); return true; }
+        if (key === "ace") { const vs = cid ? ownVersions(cid) : []; f.ace = { cid: cid || null, tid: vs.length ? vs[0].id : null }; }
         else setChar(f, key, cid);
       } else if (ds.fpAceVer != null) f.ace.tid = +t.value;
       else if (ds.fpVer) f[ds.fpVer].tid = +t.value;
@@ -312,7 +370,7 @@
     return { html, click, change, note };
   }
 
-  const VETS_KEY = "uma-veterans-v1";
+  const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1";
   const WHY = { L: "race skill", green: "green", recovery: "recovery", debuff: "debuff" };
   const api = { create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

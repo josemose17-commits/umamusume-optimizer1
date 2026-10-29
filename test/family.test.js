@@ -77,3 +77,13 @@ test("family problems: the game's family rules", () => {
   assert.ok(fam.problems({ p1: m(chars[0]), g11: m(chars[0]) }, base).length);
   assert.deepStrictEqual(fam.problems({ p1: m(chars[0]), p2: m(chars[1]), g11: m(chars[2]) }, base), []);
 });
+
+test("parent pairs from your umas: Parent 1 is one you own, Parent 2 anyone (a rental)", () => {
+  const mine = chars.slice(0, 3);
+  const w = fam.lookFor(Object.assign({}, base, { mine }));
+  assert.ok(w.pairs.length > 0);
+  assert.ok(w.pairs.every((p) => mine.includes(p.p1) && p.p2 !== p.p1), "Parent 1 always yours");
+  assert.ok(w.pairs.some((p) => !mine.includes(p.p2)), "Parent 2 can be anyone");
+  const best = Math.max(...mine.flatMap((a) => chars.filter((b) => b !== a).map((b) => A.together(spe.cid, a) + A.together(spe.cid, b) + A.together(a, b))));
+  assert.strictEqual(w.pairs[0].pts, best);
+});
