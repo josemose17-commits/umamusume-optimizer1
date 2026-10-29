@@ -86,7 +86,7 @@
         setRentals(rentalsList().filter((x) => !ids.has(x.friend)).concat(r.list));
         const odd = [...new Set([].concat(...r.list.map((x) => x.unknown)))], fresh = [...ids].filter((id) => !had.has(id)).length, again = ids.size - fresh;
         const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
-        ctx.flash(`${fresh ? `Added ${plural(fresh, "new rental")}` : "No new rentals"}${again ? `${fresh ? "; " : ": "}${plural(again, "friend")} already in the list (updated)` : ""}${r.skipped ? `; ${r.skipped} unreadable` : ""}${odd.length ? `; names not recognised: ${odd.slice(0, 4).join(", ")}` : ""}. ${plural(rentalsList().length, "rental")} in all.`);
+        ctx.flash(`${fresh ? `Added ${plural(fresh, "new rental")}` : "No new rentals"}${again ? `${fresh ? "; " : ": "}${plural(again, "friend")} already in the list (updated)` : ""}${r.skipped.length ? `; couldn't read ${r.skipped.map((x) => `${x.trainer} (${x.why})`).join(", ")}` : ""}${odd.length ? `; names not recognised: ${odd.slice(0, 4).join(", ")}` : ""}. ${plural(rentalsList().length, "rental")} in all.`);
       } catch (err) { ctx.flash("Couldn't read that: " + err.message); }
       ctx.rerender();
     }
@@ -108,15 +108,22 @@
       const fm = Object.assign({}, fr, { p1: Object.assign(blank(), { cid: c.c, tid: (ownVersions(c.c)[0] || {}).id || null }) });
       return { cid: c.c, fm };
     }
+    // Rentals ranked as Parent 2; ones the game wouldn't allow here go to hidden, with why.
     function rankRentals(f, x) {
-      return rentalsList().filter((r) => r.parent && +r.parent.cid !== +f.ace.cid && +r.parent.cid !== +f.p1.cid).map((r) => {
+      const hidden = [], rows = [];
+      rentalsList().forEach((r) => {
+        if (+r.parent.cid === +f.ace.cid) { hidden.push({ r, why: "same character as the ace" }); return; }
+        if (+r.parent.cid === +f.p1.cid) { hidden.push({ r, why: "same character as Parent 1" }); return; }
         const fr = withRental(f, r), p1 = f.p1.cid ? null : bestP1(fr, x);
-        return { r, p1, s: fam.score(familyOf(p1 ? p1.fm : fr), x) };
-      }).filter((row) => !row.s.problems.length).sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total);
+        const s = fam.score(familyOf(p1 ? p1.fm : fr), x);
+        if (s.problems.length) hidden.push({ r, why: s.problems[0] }); else rows.push({ r, p1, s });
+      });
+      rows.sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total);
+      return Object.assign(rows, { hidden });
     }
     function rentalsHTML(f, x) {
       if (!RP || !f.rental) return "";
-      const list = rentalsList(), rows = list.length ? rankRentals(f, x) : [];
+      const list = rentalsList(), rows = list.length ? rankRentals(f, x) : Object.assign([], { hidden: [] });
       const top = (s) => s.white.filter((w) => w.slot === "p2" || w.slot === "g21" || w.slot === "g22").sort((a, b) => b.p * b.L - a.p * a.L).slice(0, 3).map((w) => esc(ctx.skillName(w.id))).join(", ");
       return `<details class="pred-help" data-pp-open="fpRentals"${ctx.isOpen("fpRentals") ? " open" : ""}><summary><b>Rentals from uma.moe</b> · ${list.length ? `${list.length} pasted${rows[0] ? `, best ${esc(rows[0].r.parent ? ctx.charName(rows[0].r.parent.cid) : "")} (${esc(rows[0].r.trainer)})` : ""}` : "paste parents to compare them"}</summary>
         <p class="mini">On uma.moe, select whole parent cards (from the trainer's name to the last race spark), copy, and paste here; you can paste more later. Each is ranked as Parent 2 with her two parents by the family score${f.p1.cid ? ` with ${esc(ctx.charName(f.p1.cid))} as Parent 1` : ", each with the best Parent 1 from your veterans (or your umas)"}. uma.moe gives the family's total stars per spark, so what isn't the rental's own is split between her parents; her parents' G1 wins aren't known.</p>
@@ -128,6 +135,7 @@
             <td>${esc(r.trainer)}<div class="mini">${r.friend.replace(/(\d{3})(?=\d)/g, "$1 ")}</div></td><td class="num">${row.s.value.toFixed(2)}</td><td class="num">${row.s.total} ${row.s.symbol}</td>
             <td><button type="button" class="linkish" data-fp-rent-use="${r.friend}">Use</button> <button type="button" class="linkish" data-fp-rent-del="${r.friend}" aria-label="Remove">✕</button></td></tr>`;
         }).join("")}</tbody></table></div>` : ""}
+        ${rows.hidden.length ? `<p class="mini">Not shown (the game wouldn't allow them in this family): ${rows.hidden.map((h) => `${esc(h.r.trainer)}'s ${esc(h.r.names[0])} (${esc(h.why)})`).join("; ")}.</p>` : ""}
       </details>`;
     }
     const vetText = (v) => `rating ${(v.score || 0).toLocaleString("en-US")} · ${sparkText(v.self)}`;

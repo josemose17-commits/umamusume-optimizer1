@@ -34,7 +34,9 @@
   //      trainees: [{ id, cid, n }] }
   function create(o) {
     const N = o.names, byName = new Map();
-    o.trainees.forEach((t) => { if (!byName.has(key(t.n))) byName.set(key(t.n), t.cid); });
+    // Names match with spacing and punctuation ignored ("Matikane Fukukitaru", "T.M. Opera O").
+    const squash = (n) => key(n).replace(/[^a-z0-9]/g, "");
+    o.trainees.forEach((t) => { if (!byName.has(squash(t.n))) byName.set(squash(t.n), t.cid); });
     const firstVersion = new Map();
     o.trainees.slice().sort((a, b) => a.id - b.id).forEach((t) => { if (!firstVersion.has(t.cid)) firstVersion.set(t.cid, t.id); });
 
@@ -62,7 +64,7 @@
       const before = (word) => { const i = at(word); return i > 0 ? num(lines[i - 1]) : null; };
       const s = at("score"), star = at("★ stars");
       if (s < 0 || star < 0) return null;
-      const who = [lines[s + 1], lines[s + 3], lines[s + 5]].map((n) => byName.get(key(n || "")) || null);
+      const who = [lines[s + 1], lines[s + 3], lines[s + 5]].map((n) => byName.get(squash(n || "")) || null);
       const r = { trainer, friend, affinity: before("affinity"), g1Wins: before("g1 wins"), score: before("score"), names: [lines[s + 1], lines[s + 3], lines[s + 5]], unknown: [], unscored: [] };
       if (!who[0]) { r.unknown.push(lines[s + 1]); return r; }
       const fam = who.map((cid) => (cid ? { cid, tid: firstVersion.get(cid) || null, white: [], blue: [0, 0], pink: [0, 0], green: 0, wins: [] } : null));
@@ -103,19 +105,21 @@
       return r;
     }
 
-    // The pasted text → { list, skipped }: one rental per friend ID, in the order pasted.
+    // The pasted text → { list, skipped }: one rental per friend ID, in the order pasted;
+    // skipped: [{ trainer, why }] for cards it couldn't read.
     function parse(text) {
       const lines = String(text || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const starts = [];
       lines.forEach((l, i) => { if (FRIEND.test(l) && i > 0) starts.push(i); });
       const list = [];
-      let skipped = 0;
+      const skipped = [];
       starts.forEach((i, n) => {
         const end = n + 1 < starts.length ? starts[n + 1] - 1 : lines.length;
         const r = block(lines.slice(i + 1, end), lines[i - 1], lines[i].replace(/ /g, ""));
-        if (r && r.parent) list.push(r); else skipped++;
+        if (r && r.parent) list.push(r);
+        else skipped.push({ trainer: lines[i - 1], why: r ? `character not recognised: ${r.unknown[0]}` : "the card was cut off (no Score or ★ Stars lines)" });
       });
-      if (!list.length) throw new Error(starts.length ? "Couldn't read the parents in that text." : "No uma.moe parents found: copy whole cards, from the trainer's name to the race sparks.");
+      if (!list.length) throw new Error(starts.length ? `couldn't read ${skipped.map((x) => `${x.trainer} (${x.why})`).join(", ")}.` : "no uma.moe parents found: copy whole cards, from the trainer's name to the race sparks.");
       return { list, skipped };
     }
 
