@@ -75,7 +75,7 @@
       return { list, skipped };
     }
 
-    return { parse, member };
+    return { parse, member, whiteOf: (f) => base[String(f)] || null };
   }
 
   const api = { create, SADDLE, PINK };
