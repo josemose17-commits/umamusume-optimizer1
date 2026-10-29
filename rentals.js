@@ -27,7 +27,7 @@
     1108: "Zen-Nippon Junior Yushun", 1109: "Kashiwa Kinen", 1110: "M.C. Nambu Hai",
   };
   const key = (s) => String(s).normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
-  const FRIEND = /^\d{3} \d{3} \d{3} \d{3}$/;
+  const BUTTONS = new Set(["plan", "share", "races", "outdated", "save"]);
   const num = (s) => (/^[\d,]+$/.test(s || "") ? +s.replace(/,/g, "") : null);
 
   // o: { names: data/spark-names.js, whiteOf: (family) → base white id or null (veterans.js),
@@ -109,18 +109,26 @@
     // skipped: [{ trainer, why }] for cards it couldn't read.
     function parse(text) {
       const lines = String(text || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      // Every card has one "<number> / Affinity" pair; above it are the buttons, the friend ID
+      // (any spacing) and the trainer's name.
       const starts = [];
-      lines.forEach((l, i) => { if (FRIEND.test(l) && i > 0) starts.push(i); });
-      const list = [];
-      const skipped = [];
-      starts.forEach((i, n) => {
-        const end = n + 1 < starts.length ? starts[n + 1] - 1 : lines.length;
-        const r = block(lines.slice(i + 1, end), lines[i - 1], lines[i].replace(/ /g, ""));
+      lines.forEach((l, i) => {
+        if (key(l) !== "affinity" || num(lines[i - 1]) == null) return;
+        let h = i - 2;
+        while (h >= 0 && BUTTONS.has(key(lines[h]))) h--;
+        const isId = h >= 0 && /^[\d\s-]{9,}$/.test(lines[h]);
+        const trainer = (isId ? lines[h - 1] : lines[h]) || "?";
+        starts.push({ start: Math.max(0, isId ? h - 1 : h), trainer, friend: isId ? lines[h].replace(/\D/g, "") : "name:" + trainer });
+      });
+      const list = [], skipped = [];
+      starts.forEach((c, n) => {
+        const end = n + 1 < starts.length ? starts[n + 1].start : lines.length;
+        const r = block(lines.slice(c.start, end), c.trainer, c.friend);
         if (r && r.parent) list.push(r);
-        else skipped.push({ trainer: lines[i - 1], why: r ? `character not recognised: ${r.unknown[0]}` : "the card was cut off (no Score or ★ Stars lines)" });
+        else skipped.push({ trainer: c.trainer, why: r ? `character not recognised: ${r.unknown[0]}` : "the card was cut off (no Score or ★ Stars lines)" });
       });
       if (!list.length) throw new Error(starts.length ? `couldn't read ${skipped.map((x) => `${x.trainer} (${x.why})`).join(", ")}.` : "no uma.moe parents found: copy whole cards, from the trainer's name to the race sparks.");
-      return { list, skipped };
+      return { list, skipped, found: starts.length };
     }
 
     return { parse };

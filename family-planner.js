@@ -86,7 +86,7 @@
         setRentals(rentalsList().filter((x) => !ids.has(x.friend)).concat(r.list));
         const odd = [...new Set([].concat(...r.list.map((x) => x.unknown)))], fresh = [...ids].filter((id) => !had.has(id)).length, again = ids.size - fresh;
         const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
-        ctx.flash(`${fresh ? `Added ${plural(fresh, "new rental")}` : "No new rentals"}${again ? `${fresh ? "; " : ": "}${plural(again, "friend")} already in the list (updated)` : ""}${r.skipped.length ? `; couldn't read ${r.skipped.map((x) => `${x.trainer} (${x.why})`).join(", ")}` : ""}${odd.length ? `; names not recognised: ${odd.slice(0, 4).join(", ")}` : ""}. ${plural(rentalsList().length, "rental")} in all.`);
+        ctx.flash(`Found ${plural(r.found, "card")}: ${fresh ? `added ${plural(fresh, "new rental")}` : "no new rentals"}${again ? `${fresh ? "; " : ": "}${plural(again, "friend")} already in the list (updated)` : ""}${r.skipped.length ? `; couldn't read ${r.skipped.map((x) => `${x.trainer} (${x.why})`).join(", ")}` : ""}${odd.length ? `; names not recognised: ${odd.slice(0, 4).join(", ")}` : ""}. ${plural(rentalsList().length, "rental")} in all.`);
       } catch (err) { ctx.flash("Couldn't read that: " + err.message); }
       ctx.rerender();
     }

@@ -83,3 +83,11 @@ test("rentals: cards it can't read are named with the reason, and names match lo
   const spaced = rp.parse(card("E", "111 222 333 445").replace("Nishino Flower", "nishino  flower")).list[0];
   assert.strictEqual(spaced.parent.cid, G.trainees.find((t) => t.n === "Nishino Flower").cid);
 });
+
+test("rentals: cards are found by their Affinity line, whatever the friend ID looks like", () => {
+  const noSpaces = card("F", "111 222 333 446").replace("111 222 333 446", "111222333446");
+  const noId = card("G", "x").replace("\n\nx\n\n", "\n\n");
+  const { list, found } = rp.parse([noSpaces, noId].join("\n"));
+  assert.strictEqual(found, 2);
+  assert.deepStrictEqual(list.map((r) => [r.trainer, r.friend]), [["F", "111222333446"], ["G", "name:G"]]);
+});
