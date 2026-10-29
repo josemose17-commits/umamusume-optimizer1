@@ -138,6 +138,14 @@
         }
       });
       out.pink = [...needs].map((i) => ({ i, label: APT_LABELS[i], p: out.pinkMiss[i] == null ? 0 : 1 - out.pinkMiss[i] }));
+      // Per skill, the chance at least one family member's spark for it fires (white and green):
+      // what the ace can count on getting a hint for.
+      const by = new Map();
+      out.white.concat(out.green).forEach((w) => {
+        const x = by.get(w.id) || { id: w.id, L: w.L, miss: 1, from: [] };
+        x.miss *= 1 - w.p; x.from.push(w.slot); by.set(w.id, x);
+      });
+      out.skills = [...by.values()].map((x) => ({ id: x.id, L: x.L, p: 1 - x.miss, from: x.from })).sort((a, b) => b.p * b.L - a.p * a.L);
       out.value = out.whiteL + out.greenL + out.keyStart / STAT_PER_L + out.pink.reduce((n, p) => n + p.p * APT_L, 0);
       return out;
     }

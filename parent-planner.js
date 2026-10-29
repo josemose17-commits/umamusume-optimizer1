@@ -54,7 +54,28 @@
     const fp = root.UmaFamilyPlanner && root.UmaFamily ? root.UmaFamilyPlanner.create(Object.assign({}, ctx, {
       F: root.UmaFamily, parentsState: () => st(), charInput, charName, charId: (v) => charByName.get(String(v).toLowerCase()) || null,
       chars: () => Array.from(onGlobal), isOpen: (k) => open.has(k), rerender: () => rerender(),
+      toBuilder: (tid, must) => toBuilder(tid, must), undoBuilder: (u) => undoBuilder(u),
     })) : null;
+
+    // The family section's Parent 1, sent here to be built: ① becomes her, ③ races the ace's CM
+    // race as an Ace parent, and her target sparks go into ④'s shop as spark ★. Returns what it
+    // replaced, for undoBuilder.
+    function toBuilder(tid, must) {
+      const s = ctx.state(), p = st(), r = p.rating, race = ctx.aceRace(), t = trainee(tid);
+      const undo = { trainee: p.selfTrainee, pcm: s.pcm ? { goal: s.pcm.goal, preset: s.pcm.preset, style: s.pcm.style } : null, must: r.must.slice(), shop: Object.assign({}, r.shop) };
+      s.pcm = Object.assign(s.pcm || { independent: true }, { goal: "ace", preset: race.preset.id, style: race.style });
+      (must || []).forEach((id) => { id = String(id); if (r.learned.indexOf(id) === -1 && r.shop[id] == null) r.shop[id] = 0; if (r.must.indexOf(id) === -1) r.must.push(id); });
+      if (t) { p.self = t.cid; p.selfTrainee = t.id; p.apt = null; setTraineeLater(t.id); }
+      return undo;
+    }
+    function undoBuilder(u) {
+      const s = ctx.state(), p = st(), r = p.rating;
+      if (u.pcm && s.pcm) Object.assign(s.pcm, u.pcm);
+      r.must = u.must.slice(); r.shop = Object.assign({}, u.shop);
+      const t = trainee(u.trainee);
+      p.self = t ? t.cid : null; p.selfTrainee = t ? t.id : null; p.apt = null;
+      setTraineeLater(t ? t.id : null);
+    }
 
     function apt(p) {
       if (p.apt) return p.apt;

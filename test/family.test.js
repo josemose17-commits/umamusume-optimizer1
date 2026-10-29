@@ -87,3 +87,15 @@ test("parent pairs from your umas: Parent 1 is one you own, Parent 2 anyone (a r
   const best = Math.max(...mine.flatMap((a) => chars.filter((b) => b !== a).map((b) => A.together(spe.cid, a) + A.together(spe.cid, b) + A.together(a, b))));
   assert.strictEqual(w.pairs[0].pts, best);
 });
+
+test("what the ace gets: a skill several members carry combines their chances", () => {
+  const top = fam.lookFor(base).white[0];
+  const m = (cid, white) => ({ cid, white, blue: [0, 0], pink: [0, 0], green: 0, wins: [] });
+  const one = fam.score({ p1: m(chars[0], [[top.id, 3]]) }, base);
+  const two = fam.score({ p1: m(chars[0], [[top.id, 3]]), g11: m(chars[1], [[top.id, 2]]) }, base);
+  const a = one.skills.find((k) => k.id === top.id), b = two.skills.find((k) => k.id === top.id);
+  assert.strictEqual(a.p, one.white[0].p);
+  const ws = two.white.filter((w) => w.id === top.id);
+  assert.ok(Math.abs(b.p - (1 - (1 - ws[0].p) * (1 - ws[1].p))) < 1e-12);
+  assert.deepStrictEqual(b.from.sort(), ["g11", "p1"]);
+});
