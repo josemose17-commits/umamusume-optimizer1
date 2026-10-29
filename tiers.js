@@ -347,26 +347,10 @@
 
   // Target skills for a parent deck, as { skill id: weight in lengths }. A spark is always a
   // white skill's, so targets are whites; a gold hint counts through its white (skillValue).
-  //   ace: white skills that are good on the race (median L for the running style);
-  //   debuff: white debuffs that can trigger on the race's distance/surface with your style
-  //   (each counted like a 1 L skill). rarityOf(id): 1 white, 2 gold, 9 inherited unique.
-  const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4 };
-  const DIST_NO = { Sprint: 1, Mile: 2, Medium: 3, Long: 4 };
-  // Ace parent: see parent-relevance.js (kinds: data/skill-kinds.js, for greens and recoveries).
+  //   ace: white skills that are good on the race (median L for the running style), the greens
+  //   whose condition fits it and, for Mile and longer, its recoveries; never debuffs (see
+  //   parent-relevance.js; kinds: data/skill-kinds.js). rarityOf(id): 1 white, 2 gold, 9 inherited unique.
   function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf, kinds) {
-    const out = {};
-    // Debuffer parent: white debuffs only (they become sparks). Debuffer ace (the runner you
-    // enter to debuff): golds too, counted double since they hit about twice as hard.
-    if (mode === "debuff" || mode === "debuffAce") {
-      Object.entries(debuffs || {}).forEach(([id, d]) => {
-        if (d.dist.length && d.dist.indexOf(DIST_NO[preset.course.dist]) === -1) return;
-        if (d.ground.length && d.ground.indexOf(preset.course.surface === "Dirt" ? 2 : 1) === -1) return;
-        if (d.style.length && d.style.indexOf(STYLE_NO[style]) === -1) return;
-        if (mode === "debuff" ? d.r !== 1 : d.r !== 1 && d.r !== 2) return;
-        out[id] = d.r === 2 ? 2 : 1; // a debuffer lives on these: count each like a strong race skill
-      });
-      return out;
-    }
     const PR = root.UmaParentRelevance || (typeof require !== "undefined" ? require("./parent-relevance.js") : null);
     return PR.aceTargets({ preset, style, raceSkills, debuffs, minL: minL || 0.1, rarityOf, kinds }).targets;
   }

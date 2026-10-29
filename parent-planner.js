@@ -10,7 +10,7 @@
   // Rating per skill point for converting SP: the median white skill's rating ÷ its full cost
   // (1.21; hint discounts raise it). Used only for rough "or this many more SP" readouts.
   const SP_RATING = 1.2;
-  const WHY = { L: "race skill", green: "green", recovery: "recovery", debuff: "debuff" };
+  const WHY = { L: "race skill", green: "green", recovery: "recovery" };
 
   // Rating per skill point for buying these skills: the median of each one's rating at these
   // aptitudes ÷ its full cost (no hint discount). SP_RATING when there are too few to tell.
@@ -242,7 +242,7 @@
       const n = extraCount(p);
       const pred = n != null ? predict(p, n) : null;
       const statsIn = STAT_LABELS.map((l, i) => `<label class="field pp-stat"><span>${l}</span><input type="number" inputmode="numeric" min="0" max="2500" data-pp-stat="${i}" value="${r.stats[i] == null ? "" : r.stats[i]}" placeholder="${pred ? pred.stats[i] : ""}"></label>`).join("");
-      let out = `<p class="mini">${typed ? "Using the stats you typed." : pred ? `Using the predicted stats for ${n} extra race${n === 1 ? "" : "s"} (②, with the deck from ③). Type her real final stats after the run.` : "Type her final stats, or build a deck in ③ to start from predicted ones."} Add the skills in her shop and it picks the buy that reaches SS (${R.SS.toLocaleString()}) with the most ✦ relevant skills for ③'s race, or gets her closest when nothing reaches it.</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Relevant (✦), for an Ace parent: white skills worth more than 0.1 L (median) on ③'s race for her style, greens whose condition fits the race (course, direction, distance, ground, weather, season, style), and for Mile and longer the recoveries that fit it; never debuffs. For a Debuffer parent: the debuffs that work there. Each relevant family counts once: its spark is always the base white skill's hint, and learning ◎ or the gold only raises the chance of getting it (20% for ○, 25% for ◎, 40% for gold; GameTora), so a gold is a good buy, not a lost spark. SS raises the spark's chance of 2★ and 3★ (3★ 5% → 10%). Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
+      let out = `<p class="mini">${typed ? "Using the stats you typed." : pred ? `Using the predicted stats for ${n} extra race${n === 1 ? "" : "s"} (②, with the deck from ③). Type her real final stats after the run.` : "Type her final stats, or build a deck in ③ to start from predicted ones."} Add the skills in her shop and it picks the buy that reaches SS (${R.SS.toLocaleString()}) with the most ✦ relevant skills for ③'s race, or gets her closest when nothing reaches it.</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Relevant (✦), for an Ace parent: white skills worth more than 0.1 L (median) on ③'s race for her style, greens whose condition fits the race (course, direction, distance, ground, weather, season, style), and for Mile and longer the recoveries that fit it; never debuffs. Each relevant family counts once: its spark is always the base white skill's hint, and learning ◎ or the gold only raises the chance of getting it (20% for ○, 25% for ◎, 40% for gold; GameTora), so a gold is a good buy, not a lost spark. SS raises the spark's chance of 2★ and 3★ (3★ 5% → 10%). Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
         <div class="pp-form">${statsIn}
           <label class="field pp-stat"><span>Skill points left</span><input type="number" inputmode="numeric" min="0" data-pp-r="sp" value="${r.sp == null ? "" : r.sp}" placeholder="${pred ? pred.sp : ""}"></label>
           <label class="field pp-stat"><span>Unique skill level</span><input type="number" inputmode="numeric" min="0" max="10" data-pp-r="uniqueLevel" value="${uLv}"></label>
@@ -347,7 +347,7 @@
         ${fp ? section("family", "Family: ace → parents → grandparents", nt.family, fp.html()) : ""}
         ${section("who", "① The parent", nt.who, whoHTML(p))}
         ${section("races", "② Races", nt.races, racesHTML(p))}
-        ${section("deck", "③ Deck", "ace or debuffer parent", ctx.deckHTML())}
+        ${section("deck", "③ Deck", "ace parent", ctx.deckHTML())}
         ${section("rating", "④ After the run", nt.rating, ratingHTML(p))}
       </div>`;
     }

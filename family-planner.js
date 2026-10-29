@@ -465,7 +465,7 @@
 
   const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1", RENTALS_KEY = "uma-rentals-v1";
   const FROM = { p1: "Parent 1", p2: "Parent 2", g11: "P1's parent", g12: "P1's parent", g21: "P2's parent", g22: "P2's parent" };
-  const WHY = { L: "race skill", green: "green", recovery: "recovery", debuff: "debuff" };
+  const WHY = { L: "race skill", green: "green", recovery: "recovery" };
   const api = { create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamilyPlanner = api;
