@@ -679,3 +679,4 @@ table.pred .over { color: var(--accent); }
 .fp-pair { display: flex; gap: 4px; }
 .fp-skill { width: 160px; max-width: 100%; }
 .fp-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+.fp-vets { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; margin: 6px 0; }

@@ -18,6 +18,41 @@
     const owners = new Map();
     D.DATA.trainees.forEach((t) => { const u = uniqueOf(t); if (u) { if (!owners.has(u)) owners.set(u, []); owners.get(u).push(t); } });
 
+    // Your veterans (veterans.js), kept in this browser under their own key so the app's state
+    // stays small; each import replaces them.
+    const V = root.UmaVeterans ? root.UmaVeterans.create(ctx.SB.DATA.skills) : null;
+    let vets = null, vetPairs = null;
+    const store = () => { try { return root.localStorage || null; } catch (e) { return null; } };
+    function veterans() {
+      if (vets) return vets;
+      try { vets = JSON.parse(store().getItem(VETS_KEY)) || null; } catch (e) { vets = null; }
+      return vets || (vets = { at: "", list: [] });
+    }
+    function setVeterans(v) {
+      vets = v; vetPairs = null;
+      try { if (v.list.length) store().setItem(VETS_KEY, JSON.stringify(v)); else store().removeItem(VETS_KEY); } catch (e) { /* ignore */ }
+    }
+    function importVeterans(text) {
+      try {
+        const r = V.parse(text);
+        setVeterans({ at: new Date().toISOString().slice(0, 10), list: r.list });
+        ctx.flash(`Imported ${r.list.length} veterans${r.skipped ? ` (${r.skipped} skipped)` : ""}.`);
+      } catch (err) { ctx.flash("Couldn't read that: " + err.message); }
+      ctx.rerender();
+    }
+    // A veteran in a parent slot brings her own two parents as the grandparents.
+    const GRAND = { p1: ["g11", "g12"], p2: ["g21", "g22"] };
+    const asMember = (m) => (m ? { cid: m.cid, tid: m.tid, white: m.white.map((w) => w.slice()), blue: m.blue.slice(), pink: m.pink.slice(), green: m.green, wins: m.wins.slice() } : blank());
+    function withVet(f, k, v) {
+      const out = Object.assign({}, f);
+      out[k] = Object.assign(asMember(v.self), { vet: v.id });
+      GRAND[k].forEach((g, i) => { out[g] = asMember(v.parents[i]); });
+      return out;
+    }
+    const vetName = (v) => { const t = trainee(v.tid); return ctx.charName(v.cid) + (t && versions(v.cid).length > 1 ? ` [${t.t}]` : ""); };
+    // Her sparks, with her rating to tell two of the same uma apart.
+    const vetText = (v) => `rating ${(v.score || 0).toLocaleString("en-US")} · ${sparkText(v.self)}`;
+
     function st() {
       const p = ctx.parentsState();
       if (!p.family) p.family = {};
@@ -55,8 +90,53 @@
       if (!rel) return out + `<p class="mini">Loading the race's skill values…</p>`;
       const want = fam.lookFor(x);
       out += lookForHTML(f, want);
+      out += vetsHTML(f, x);
       out += treeHTML(f, x);
       return out;
+    }
+
+    // ---------- Your veterans ----------
+    function vetsHTML(f, x) {
+      if (!V) return "";
+      const v = veterans(), n = v.list.length;
+      const key = pairKey(f);
+      const pairs = vetPairs && vetPairs.key === key ? vetPairs.rows : null;
+      return `<details class="pred-help" data-pp-open="fpVets"${ctx.isOpen("fpVets") ? " open" : ""}><summary><b>Your veterans</b> · ${n ? `${n} imported${v.at ? " " + esc(v.at) : ""}` : "import them from umaextractor"}</summary>
+        <p class="mini">Paste the veterans JSON from umaextractor (or pick the file). Each import replaces the list; it stays in this browser. Her sparks, G1 wins and her two parents (your grandparents when she's a parent) come with her, and each parent card below ranks them.</p>
+        <textarea class="fp-vets" data-fp-vets-text rows="3" placeholder="Paste the umaextractor veterans JSON here"></textarea>
+        <div class="row-wrap"><button type="button" class="btn small" data-fp-vets-import>Import</button><label class="btn ghost small">Pick the file<input type="file" accept=".json,application/json" data-fp-vets-file hidden></label>${n ? `<button type="button" class="btn ghost small" data-fp-vets-clear>Remove them</button>` : ""}</div>
+        ${n > 1 ? `<h4>Best pair of your veterans</h4><p class="mini">Both parents from your own list, each with her own parents, ranked by the family score. Usually one parent is a friend's rental: then use the lists on the parent cards instead.</p>
+          ${pairs ? pairsHTML(pairs) : `<button type="button" class="btn ghost small" data-fp-vets-pairs>Rank every pair</button>`}` : ""}
+      </details>`;
+    }
+    const pairKey = (f) => { const r = ctx.aceRace(); return [f.ace.tid, r.preset.id, r.style, veterans().list.length, veterans().at].join("|"); };
+    function rankPairs(f, x) {
+      const list = veterans().list.filter((v) => +v.cid !== +f.ace.cid), rows = [];
+      list.forEach((a, i) => list.slice(i + 1).forEach((b) => {
+        if (+a.cid === +b.cid) return;
+        const fm = withVet(withVet(f, "p1", a), "p2", b), s = fam.score(familyOf(fm), x);
+        if (!s.problems.length) rows.push({ a: a.id, b: b.id, value: s.value, total: s.total, symbol: s.symbol });
+      }));
+      return rows.sort((p, q) => q.value - p.value || q.total - p.total).slice(0, 8);
+    }
+    function pairsHTML(rows) {
+      const by = new Map(veterans().list.map((v) => [v.id, v]));
+      return `<div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th>Parent 2</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((r) => {
+        const a = by.get(r.a), b = by.get(r.b);
+        return a && b ? `<tr><td>${esc(vetName(a))}<div class="mini">${vetText(a)}</div></td><td>${esc(vetName(b))}<div class="mini">${vetText(b)}</div></td><td class="num">${r.value.toFixed(2)}</td><td class="num">${r.total} ${r.symbol}</td><td><button type="button" class="linkish" data-fp-vets-pair="${r.a},${r.b}">Use both</button></td></tr>` : "";
+      }).join("")}</tbody></table></div>`;
+    }
+    // Your veterans for one parent slot, with the rest of the family as it is.
+    function vetSlotHTML(f, k, x) {
+      if (!V || !GRAND[k]) return "";
+      const other = k === "p1" ? f.p2 : f.p1;
+      const rows = veterans().list.filter((v) => +v.cid !== +f.ace.cid && +v.cid !== +other.cid)
+        .map((v) => ({ v, s: fam.score(familyOf(withVet(f, k, v)), x) })).filter((r) => !r.s.problems.length)
+        .sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total).slice(0, 6);
+      if (!rows.length) return "";
+      const id = "fpVet-" + k;
+      return `<details data-pp-open="${id}"${ctx.isOpen(id) ? " open" : ""}><summary class="mini">Your best veterans here: ${esc(vetName(rows[0].v))} · ${rows[0].s.value.toFixed(2)}</summary>
+        <div class="table-wrap"><table class="plan"><thead><tr><th>Veteran (and her parents)</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(vetName(r.v))}<div class="mini">${vetText(r.v)}${r.v.parents.some(Boolean) ? ` · parents ${r.v.parents.filter(Boolean).map((p) => esc(ctx.charName(p.cid))).join(" + ")}` : ""}</div></td><td class="num">${r.s.value.toFixed(2)}</td><td class="num">${r.s.total} ${r.s.symbol}</td><td><button type="button" class="linkish" data-fp-vet="${k},${r.v.id}">Use</button></td></tr>`).join("")}</tbody></table></div></details>`;
     }
 
     function lookForHTML(f, w) {
@@ -88,11 +168,11 @@
     // The family tree: six cards, ace down, and the family's score.
     function treeHTML(f, x) {
       const s = fam.score(familyOf(f), x);
-      let out = `<h4>Her family</h4><div class="fp-tree">${ORDER.map((k) => cardHTML(f, k, s)).join("")}</div>`;
+      let out = `<h4>Her family</h4><div class="fp-tree">${ORDER.map((k) => cardHTML(f, k, s, x)).join("")}</div>`;
       out += scoreHTML(s);
       return out;
     }
-    function cardHTML(f, k, s) {
+    function cardHTML(f, k, s, x) {
       const m = f[k], vers = m.cid ? versions(m.cid) : [], parent = F.PARENT_OF[k];
       const label = parent ? `${SLOT_LABELS[k]}${f[parent].cid ? ` (${esc(ctx.charName(f[parent].cid))}'s)` : ""}` : SLOT_LABELS[k];
       const stars = (key, v) => `<select data-fp-${key}="${k}">${[0, 1, 2, 3].map((n) => `<option value="${n}"${+v === n ? " selected" : ""}>${n ? n + "★" : "–"}</option>`).join("")}</select>`;
@@ -108,6 +188,8 @@
           <input class="fp-skill" data-fp-white-name="${k}" list="ppSkills" placeholder="White spark" autocomplete="off"><select data-fp-white-stars="${k}">${[1, 2, 3].map((n) => `<option value="${n}">${n}★</option>`).join("")}</select><button type="button" class="btn ghost small" data-fp-white-add="${k}">Add</button></div>
           <details class="pp-wins" data-pp-open="fpWins-${k}"${ctx.isOpen("fpWins-" + k) ? " open" : ""}><summary class="mini">G1 wins · ${m.wins.length ? m.wins.length + " ticked" : "none"}</summary><div class="pp-g1grid">${g1.map((r) => `<label class="pp-g1"><input type="checkbox" data-fp-win="${k}" value="${esc(r)}"${m.wins.indexOf(r) !== -1 ? " checked" : ""}> ${esc(r)}</label>`).join("")}</div></details>
           <div class="row-wrap"><button type="button" class="btn ghost small" data-fp-keep="${k}">Save as a candidate for this slot</button>${m.cid ? `<button type="button" class="btn ghost small" data-fp-clear="${k}">Clear</button>` : ""}</div>` : ""}
+        ${m.vet != null ? `<p class="mini">From your veterans${GRAND[k] ? " (her parents filled in below)" : ""}.</p>` : ""}
+        ${vetSlotHTML(f, k, x)}
         ${cands.length ? candsHTML(f, k) : ""}</div>`;
     }
 
@@ -117,7 +199,7 @@
       const rows = f.cands[k].map((m, i) => ({ i, m, s: fam.score(familyOf(f, { slot: k, m }), x) })).sort((a, b) => b.s.value - a.s.value);
       return `<div class="table-wrap"><table class="plan"><thead><tr><th>Candidate</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(ctx.charName(r.m.cid))}<div class="mini">${sparkText(r.m)}</div></td><td class="num">${r.s.value.toFixed(2)}</td><td class="num">${r.s.total} ${r.s.symbol}</td><td><button type="button" class="linkish" data-fp-use="${k},${r.i}">Use</button> <button type="button" class="linkish" data-fp-cand-del="${k},${r.i}" aria-label="Remove">✕</button></td></tr>`).join("")}</tbody></table></div>`;
     }
-    const sparkText = (m) => [m.blue[1] ? `${F.STAT_LABELS[m.blue[0]]} ${m.blue[1]}★` : "", m.pink[1] ? `${F.APT_LABELS[m.pink[0]]} ${m.pink[1]}★` : "", m.green ? `green ${m.green}★` : "", m.white.length ? `${m.white.length} white` : ""].filter(Boolean).join(" · ");
+    const sparkText = (m) => [m.blue[1] ? `${F.STAT_LABELS[m.blue[0]]} ${m.blue[1]}★` : "", m.pink[1] ? `${F.APT_LABELS[m.pink[0]]} ${m.pink[1]}★` : "", m.green ? `green ${m.green}★` : "", m.white.length ? `${m.white.length} white` : "", m.wins && m.wins.length ? `${m.wins.length} G1` : ""].filter(Boolean).join(" · ");
 
     function scoreHTML(s) {
       if (s.problems.length) return `<p class="mini warn">${s.problems.map(esc).join(" ")}</p>`;
@@ -146,16 +228,28 @@
       else if ((el = hit("data-fp-clear"))) f[el.dataset.fpClear] = blank();
       else if ((el = hit("data-fp-use"))) { const [k, i] = el.dataset.fpUse.split(","); f[k] = JSON.parse(JSON.stringify(f.cands[k][+i])); }
       else if ((el = hit("data-fp-cand-del"))) { const [k, i] = el.dataset.fpCandDel.split(","); f.cands[k].splice(+i, 1); }
+      else if ((el = hit("data-fp-vets-import"))) { const ta = el.closest("details").querySelector("[data-fp-vets-text]"); if (!ta.value.trim()) { ctx.flash("Paste the JSON first."); return true; } importVeterans(ta.value); return true; }
+      else if ((el = hit("data-fp-vets-clear"))) setVeterans({ at: "", list: [] });
+      else if ((el = hit("data-fp-vets-pairs"))) { vetPairs = { key: pairKey(f), rows: rankPairs(f, inputs(f).x) }; }
+      else if ((el = hit("data-fp-vets-pair"))) { const [a, b] = el.dataset.fpVetsPair.split(",").map(Number), by = byId(); if (by.get(a) && by.get(b)) Object.assign(f, withVet(withVet(f, "p1", by.get(a)), "p2", by.get(b))); }
+      else if ((el = hit("data-fp-vet"))) { const [k, id] = el.dataset.fpVet.split(","), v = byId().get(+id); if (v) Object.assign(f, withVet(f, k, v)); }
       else return false;
       ctx.rerender();
       return true;
     }
+    const byId = () => new Map(veterans().list.map((v) => [v.id, v]));
     function setChar(f, k, cid) {
       const vs = cid ? versions(cid) : [];
       f[k] = Object.assign(blank(), { cid: cid || null, tid: vs.length ? vs[0].id : null });
     }
     function change(e) {
       const f = st(), t = e.target, ds = t.dataset;
+      if (ds.fpVetsText != null) return true;
+      if (ds.fpVetsFile != null) {
+        const file = t.files && t.files[0];
+        if (file) { const r = new root.FileReader(); r.onload = () => importVeterans(String(r.result)); r.readAsText(file); }
+        return true;
+      }
       if (ds.ppChar && ds.ppChar.indexOf("fp-") === 0) {
         const key = ds.ppChar.slice(3), v = t.value.trim(), cid = v ? ctx.charId(v) : null;
         if (v && !cid) { ctx.flash("Pick a character from the list."); return true; }
@@ -178,6 +272,7 @@
     return { html, click, change, note };
   }
 
+  const VETS_KEY = "uma-veterans-v1";
   const WHY = { L: "race skill", green: "green", recovery: "recovery", debuff: "debuff" };
   const api = { create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

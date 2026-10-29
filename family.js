@@ -96,14 +96,17 @@
     // A family's score for the ace's run. fam: { p1, p2, g11, g12, g21, g22 }, each
     // { cid, unique (inherited id), white: [[skill id, stars]], blue: [stat, stars],
     // pink: [aptitude index, stars], green: stars, wins: [G1 names] }.
+    // The race's side of a score (relevant families, what to look for) depends only on x, so it's
+    // kept per x: ranking many families against one ace stays fast.
+    const cache = new WeakMap();
     function score(fam, x) {
-      const fams = families(x.rel), raceL = x.raceL || {};
+      if (!cache.has(x)) cache.set(x, { fams: families(x.rel), want: lookFor(Object.assign({}, x, { chars: [], fam: {} })) });
+      const { fams, want } = cache.get(x), raceL = x.raceL || {};
       const L = { trainee: x.ace && x.ace.cid };
       SLOTS.forEach((k) => { L[k] = fam[k] && fam[k].cid; });
       const wins = {};
       SLOTS.forEach((k) => { if (fam[k]) wins[k] = fam[k].wins || []; });
       const total = A.total(L, wins), own = A.individual(L, wins);
-      const want = lookFor(Object.assign({}, x, { chars: [], fam: {} }));
       const keyStats = new Set(want.blue.map((b) => b.i)), needs = new Set(want.pink.map((p) => p.i));
       const out = { total: total.total, symbol: total.symbol, own, white: [], green: [], hints: 0, whiteL: 0, greenL: 0, start: [0, 0, 0, 0, 0], keyStart: 0, pinkMiss: {}, problems: problems(fam, x) };
       SLOTS.forEach((k) => {
