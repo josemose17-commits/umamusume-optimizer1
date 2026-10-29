@@ -348,7 +348,8 @@
   //   (each counted like a 1 L skill). rarityOf(id): 1 white, 2 gold, 9 inherited unique.
   const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4 };
   const DIST_NO = { Sprint: 1, Mile: 2, Medium: 3, Long: 4 };
-  function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf) {
+  // Ace parent: see parent-relevance.js (kinds: data/skill-kinds.js, for greens and recoveries).
+  function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf, kinds) {
     const out = {};
     // Debuffer parent: white debuffs only (they become sparks). Debuffer ace (the runner you
     // enter to debuff): golds too, counted double since they hit about twice as hard.
@@ -362,12 +363,8 @@
       });
       return out;
     }
-    Object.entries(raceSkills || {}).forEach(([id, L]) => {
-      if (L < (minL || 0.1) || id[0] === "9") return;
-      if (rarityOf && rarityOf(id) !== 1) return;
-      out[id] = L;
-    });
-    return out;
+    const PR = root.UmaParentRelevance || (typeof require !== "undefined" ? require("./parent-relevance.js") : null);
+    return PR.aceTargets({ preset, style, raceSkills, debuffs, minL: minL || 0.1, rarityOf, kinds }).targets;
   }
 
   const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };

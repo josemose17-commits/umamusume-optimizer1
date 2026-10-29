@@ -195,6 +195,27 @@ test("parent decks with stat targets: 'A little' keeps the skills and still gets
   assert.ok(T.deckSkills(opts, r.cards).value >= 0.9 * T.deckSkills(opts, start).value, "skills mostly kept");
 });
 
+test("parent decks with Reach SS: the predicted rating doesn't fall, and every deck reports it", () => {
+  const O = require("../optimizer.js");
+  const R = require("../rating.js");
+  const { SCENARIOS } = require("../scenarios.js");
+  const X = require("../data/debuffs.js");
+  const P = require("../data/presets.js");
+  const pr = P.list.find((p) => p.course.dist === "Long");
+  const targets = T.parentTargets("debuff", pr, "Senkou", {}, X);
+  const pool = glob.filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
+  // Out of reach on purpose, so every swap is judged by how close it gets.
+  const reachSS = { ss: 40000, unique: R.uniqueBonus(3, 3), spRating: 1.2, ignoreFit: true };
+  const opts = { scenario: "GL", parent: { targets, statsWeight: 0.1, reachSS }, independent: true };
+  const start = T.buildDeck(opts, pool, []).cards;
+  const s = O.targetSearch(opts, { scenario: SCENARIOS.find((x) => x.id === "grandlive"), build: "long", raceShare: 0.25 }, start, pool, []);
+  while (s.next());
+  const r = s.result();
+  assert.ok(Number.isFinite(r.before.rating) && Number.isFinite(r.after.rating));
+  assert.ok(r.after.rating >= r.before.rating);
+  assert.strictEqual(r.after.rating, R.statsScore(r.after.stats) + Math.round(r.after.sp * 1.2) + reachSS.unique);
+});
+
 test("Independent Training: no Specialty Priority, manual-career bonuses scaled, initial stats boosted", () => {
   const e = CARDS.find((c) => c.id === 30028 && c.limit_break === 4);
   const half = T.itEntry(e, 0.5);

@@ -796,6 +796,12 @@
     // 40%); within that, the closest stats win. skillWeight is the racing slider.
     const sw = opts.parent ? 1 : opts.skillWeight != null ? opts.skillWeight : 1;
     const giveUp = opts.parent ? Math.min(0.4, 0.4 * (opts.parent.statsWeight || 0)) : null;
+    // Reach SS (parent decks): a deck whose predicted rating (stats' score, skill points at
+    // spRating each, unique) reaches SS beats any that doesn't, and a short one loses 10 per
+    // rating point missing, so the closest comes next; skills decide among the rest. The
+    // skill floor above doesn't apply: SS comes first.
+    const ss = opts.parent && opts.parent.reachSS;
+    const Ra = ss ? root.UmaRating || (typeof require !== "undefined" ? require("./rating.js") : null) : null;
     let floor = -Infinity;
     const cache = new Map();
     const testedDecks = new Map();
@@ -805,7 +811,12 @@
       const sk = Tr.deckSkills(opts, deck);
       const over = sk.value < floor - 1e-9 ? 1e9 : 0;
       const skillScore = c.sc.id === "grandlive" && !opts.parent ? s.skillValue : sk.value;
-      return Object.assign({}, s, { value: fit.value + sw * skillScore + sk.mustValue - over, short: fit.short, skill: skillScore });
+      let value = (ss && ss.ignoreFit ? 0 : fit.value) + sw * skillScore + sk.mustValue - over, rating = null;
+      if (ss) {
+        rating = Ra.statsScore(s.stats) + Math.round(s.sp * ss.spRating) + ss.unique;
+        value += rating >= ss.ss ? 1e6 : -10 * (ss.ss - rating);
+      }
+      return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating });
     };
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
@@ -816,7 +827,7 @@
       return cache.get(k);
     };
     let deck = start.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
-    if (giveUp != null) floor = (1 - giveUp) * Tr.deckSkills(opts, deck).value;
+    if (giveUp != null && !ss) floor = (1 - giveUp) * Tr.deckSkills(opts, deck).value;
     let cur = score(deck);
     const nOf = (cards, t) => cards.filter((x) => D.card(x.id).ty === t).length;
     const cap = opts.parent ? 2 : 1;
