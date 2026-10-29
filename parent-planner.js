@@ -27,7 +27,7 @@
       const s = ctx.state();
       if (!s.parents) s.parents = {};
       const p = s.parents;
-      const d = { self: null, selfTrainee: null, apt: null, races: [], rating: {} };
+      const d = { self: null, selfTrainee: null, apt: null, races: [], rating: {}, runs: [], useRuns: true };
       Object.keys(d).forEach((k) => { if (p[k] === undefined) p[k] = d[k]; });
       const r = p.rating;
       const rd = { stats: [null, null, null, null, null], sp: null, uniqueLevel: null, learned: [], shop: {}, must: [] };
@@ -77,6 +77,42 @@
     // How many of the simulated careers reach SS, each rated like predictedRating: [hit, of].
     const ssCount = (p, x) => { const f = x.finals || []; return [f.filter((c) => predictedRating(p, c) >= R.SS).length, f.length]; };
 
+    // ---------- Your real runs ----------
+    // Each saved run keeps what was predicted for it and what she really got. Their ratio (all
+    // runs pooled, held to ×0.7..×1.3) corrects each stat and the skill points in later
+    // predictions, when "Correct predictions with my runs" is on.
+    function factors(p) {
+      const runs = (p.runs || []).filter((x) => x.pred && x.real);
+      if (!p.useRuns || !runs.length) return null;
+      const ratio = (get) => { const a = runs.reduce((n, x) => n + get(x.real), 0), b = runs.reduce((n, x) => n + get(x.pred), 0); return b > 0 ? Math.max(0.7, Math.min(1.3, a / b)) : 1; };
+      return { stats: [0, 1, 2, 3, 4].map((i) => ratio((x) => x.stats[i])), sp: ratio((x) => x.sp), n: runs.length };
+    }
+    function calibrate(p, x) {
+      const f = x && factors(p);
+      if (!f) return x;
+      const caps = ctx.caps();
+      const fix = (c) => ({ stats: c.stats.map((v, i) => Math.round(Math.min(caps ? caps[i] : Infinity, v * f.stats[i]))), sp: Math.round(c.sp * f.sp) });
+      return Object.assign({}, x, fix(x), { finals: (x.finals || []).map(fix), calibrated: f.n });
+    }
+    // The prediction for k extra races, corrected by your runs.
+    const predict = (p, k) => calibrate(p, ctx.predict(k));
+
+    function runsHTML(p, n, typed) {
+      const r = p.rating, raw = n != null ? ctx.predict(n) : null, f = factors(p);
+      const sum = (a) => a.reduce((x, y) => x + y, 0);
+      let out = `${typed && raw ? '<div class="row-wrap"><button type="button" class="btn ghost small" data-pp-act="saveRun">Save this run (corrects later predictions)</button></div>' : ""}<details class="pred-help" data-pp-open="runs"${open.has("runs") ? " open" : ""}><summary>My real runs (${p.runs.length})${f ? ` · predictions corrected by ${f.n}` : ""}</summary>
+        <p class="mini">After a run, type her real final stats and the skill points she had left above, then save it: the app compares it with what it predicted for that deck and race count, and corrects later predictions (each stat and the skill points by your runs' total ÷ the predicted total). Skill points earned are counted as the ones left plus the full price of the skills she learned, so hint discounts make it read a little high.</p>
+        ${typed && raw ? "" : `<p class="mini">${raw ? "Type her real final stats above to save a run." : "Build a deck in ③ first, so there's a prediction to compare with."}</p>`}`;
+      if (p.runs.length) {
+        out += `<label class="chip-toggle"><input type="checkbox" data-pp-use-runs ${p.useRuns ? "checked" : ""}> Correct predictions with my runs</label>`;
+        if (f) out += `<p class="mini">Corrections: ${STAT_LABELS.map((l, i) => `${l} ×${f.stats[i].toFixed(2)}`).join(", ")}, skill points ×${f.sp.toFixed(2)}.</p>`;
+        out += `<div class="table-wrap"><table class="plan"><thead><tr><th>Run</th><th>Stats (real / predicted)</th><th>SP</th><th></th></tr></thead><tbody>${p.runs.map((x, i) => `<tr><td>${esc(x.at)}<div class="mini">${x.races} extra race${x.races === 1 ? "" : "s"}${x.deck ? " · " + esc(x.deck) : ""}</div></td><td class="num">${sum(x.real.stats).toLocaleString()} / ${sum(x.pred.stats).toLocaleString()}</td><td class="num">${x.real.sp.toLocaleString()} / ${x.pred.sp.toLocaleString()}</td><td><button type="button" class="linkish" data-pp-run-del="${i}" aria-label="Remove">✕</button></td></tr>`).join("")}</tbody></table></div>`;
+      }
+      return out + "</details>";
+    }
+    // Skill points she earned in the run: those left plus the full price of what she learned.
+    const earnedSp = (r) => (+r.sp || 0) + r.learned.reduce((n, id) => n + (SB.baseCost(id) || 0), 0);
+
     function charInput(key, value, placeholder) {
       return `<input data-pp-char="${key}" list="ppChars" value="${esc(charName(value))}" placeholder="${esc(placeholder || "Character")}" autocomplete="off">`;
     }
@@ -120,19 +156,19 @@
       const missing = counts.filter((k) => !ctx.predict(k));
       if (missing.length) ctx.queuePredict(missing, () => rerender());
       const row = (k) => {
-        const x = ctx.predict(k);
+        const x = predict(p, k);
         if (!x) return `<tr${k === n ? ' class="cur"' : ""}><td class="num">${k}</td><td colspan="8" class="mini">simulating…</td></tr>`;
         const rt = predictedRating(p, x);
         return `<tr${k === n ? ' class="cur"' : ""}><td class="num">${k}${k === n ? " ←" : ""}</td>${x.stats.map((v) => `<td class="num">${v}</td>`).join("")}<td class="num">${x.sp}</td><td class="num"><b>${rt.toLocaleString()}</b></td><td>${rt >= R.SS ? "SS ✓" : `${(R.SS - rt).toLocaleString()} short`}${ssCount(p, x)[1] ? `<div class="mini">SS in ${ssCount(p, x).join("/")}</div>` : ""}</td></tr>`;
       };
-      return `<p class="mini"><b>What the races cost</b> (${esc(src)}, Independent Training, average of 16 simulated careers, and how many of them reach SS; rating counts all skill points spent on her relevant skills at ~${spRate(p).toFixed(2)} each, before inheritance):</p>
+      return `<p class="mini"><b>What the races cost</b> (${esc(src)}, Independent Training, average of 16 simulated careers, and how many of them reach SS; rating counts all skill points spent on her relevant skills at ~${spRate(p).toFixed(2)} each, before inheritance${factors(p) ? `; corrected by your ${factors(p).n} real run${factors(p).n === 1 ? "" : "s"} (④)` : ""}):</p>
         <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th>Extra races</th>${STAT_LABELS.map((l) => `<th>${l.slice(0, 3)}</th>`).join("")}<th>SP</th><th>Rating</th><th>SS</th></tr></thead><tbody>${counts.map(row).join("")}</tbody></table></div>${missing.length ? "" : maxRacesHTML(p, counts, n)}`;
     }
 
     // The most extra races that still reach SS: the last simulated count that does, and the
     // straight line from it to the next one that doesn't.
     function maxRacesHTML(p, counts, n) {
-      const pts = counts.map((k) => [k, predictedRating(p, ctx.predict(k))]);
+      const pts = counts.map((k) => [k, predictedRating(p, predict(p, k))]);
       const ok = pts.filter(([, rt]) => rt >= R.SS);
       if (!ok.length) return `<p class="pp-max"><b>Even with no extra races she falls short of SS</b> on the prediction: ④ shows what to change.</p>`;
       const [k, rt] = ok[ok.length - 1];
@@ -178,7 +214,7 @@
       // (shown greyed in the boxes).
       const typed = r.stats.some((x) => x != null);
       const n = extraCount(p);
-      const pred = n != null ? ctx.predict(n) : null;
+      const pred = n != null ? predict(p, n) : null;
       const statsIn = STAT_LABELS.map((l, i) => `<label class="field pp-stat"><span>${l}</span><input type="number" inputmode="numeric" min="0" max="2500" data-pp-stat="${i}" value="${r.stats[i] == null ? "" : r.stats[i]}" placeholder="${pred ? pred.stats[i] : ""}"></label>`).join("");
       let out = `<p class="mini">${typed ? "Using the stats you typed." : pred ? `Using the predicted stats for ${n} extra race${n === 1 ? "" : "s"} (②, with the deck from ③). Type her real final stats after the run.` : "Type her final stats, or build a deck in ③ to start from predicted ones."} Add the skills in her shop and it picks the buy that reaches SS (${R.SS.toLocaleString()}) with the most ✦ relevant skills for ③'s race, or gets her closest when nothing reaches it.</p><details class="pred-help"><summary>How this works</summary><p class="mini">Rating = each stat's score (it rises steeply: 1000 → 1200 Speed is worth more than 400 → 600) + each learned skill's rating (more for skills that fit her aptitudes; a gold replaces its white) + the unique skill's level × ${stars(p) >= 3 ? 170 : 120}. SS starts at ${R.SS.toLocaleString()} and doubles her white sparks' 3★ chance. Relevant (✦), for an Ace parent: white skills worth more than 0.1 L (median) on ③'s race for her style, greens whose condition fits the race (course, direction, distance, ground, weather, season, style), and for Mile and longer the recoveries that fit it; never debuffs. For a Debuffer parent: the debuffs that work there. Each relevant family counts once: its spark is always the base white skill's hint, and learning ◎ or the gold only raises the chance of getting it (20% for ○, 25% for ◎, 40% for gold; GameTora), so a gold is a good buy, not a lost spark. SS raises the spark's chance of 2★ and 3★ (3★ 5% → 10%). Stat scores: UmaTools' rating guide; skill ratings: UmaTools' skill table.</p></details>
         <div class="pp-form">${statsIn}
@@ -227,7 +263,7 @@
         out += `<p>✦ <b>${have + more} relevant skill${have + more === 1 ? "" : "s"}</b> to pass down (${have} learned${buy ? ` + ${more} from this buy` : ""}) for ${esc(rel.race)} as a ${esc(rel.style)} runner: about <b>${expect.toFixed(1)}</b> relevant white sparks expected (20% each for ○, 25% for ◎, 40% for gold).</p>`;
       } else out += `<p class="mini">Pick the race and style in ③ to count her relevant skills${ctx.relevantLoading() ? " (loading the race's skill values…)" : ""}.</p>`;
       if (after < R.SS) out += shortHTML(p, a, levels, sp, gap, after, stats, n, pred, typed);
-      return out + "</div>";
+      return out + "</div>" + runsHTML(p, n, typed);
     }
 
     // Short of SS: which spark ★ to let go, how many fewer races, or how many more stats.
@@ -238,7 +274,7 @@
         const x = solver(p, a, r.must.filter((m) => m !== id)).s.solveSS(levels, sp, { gap, relevant: relT });
         if (x.reached) tips.push(`unmark ★ <b>${esc(ctx.skillName(id))}</b> (then she reaches SS)`);
       });
-      const zero = !typed && n > 0 ? ctx.predict(0) : null;
+      const zero = !typed && n > 0 ? predict(p, 0) : null;
       if (zero && pred) {
         const per = (predictedRating(p, zero) - predictedRating(p, pred)) / n;
         if (per > 0) { const k = Math.ceil((R.SS - after) / per); if (k <= n) tips.push(`about <b>${k} fewer extra race${k === 1 ? "" : "s"}</b> in ② (each costs about ${Math.round(per)} rating)`); }
@@ -339,6 +375,12 @@
         if (a === "addMust") ctx.cmMust().forEach((id) => { id = String(id); if (r.learned.indexOf(id) === -1 && r.shop[id] == null) r.shop[id] = 0; if (r.must.indexOf(id) === -1) r.must.push(id); });
         // Every relevant white the ③ deck can give, at Lv0: remove the ones her shop doesn't show.
         if (a === "addRelevant") (ctx.deckRelevant() || []).forEach((id) => { id = String(id); if (r.shop[id] == null && r.learned.indexOf(id) === -1) r.shop[id] = 0; });
+        if (a === "saveRun") {
+          const n = extraCount(p), raw = n != null ? ctx.predict(n) : null;
+          if (!raw || !r.stats.some((x) => x != null)) { ctx.flash("Type her real final stats first."); return true; }
+          p.runs.push({ at: new Date().toISOString().slice(0, 10), races: n, deck: ctx.predictSource(), pred: { stats: raw.stats.slice(), sp: raw.sp }, real: { stats: r.stats.map((x) => +x || 0), sp: earnedSp(r) } });
+          open.add("runs");
+        }
         if (a === "addInnate") { const tr = trainee(p.selfTrainee); if (tr) (tr.is || []).concat(tr.as || []).forEach((id) => { id = String(id); if (r.shop[id] == null && r.learned.indexOf(id) === -1) r.shop[id] = 0; }); }
         if (a === "shopAdd" || a === "learnAdd") {
           const id = ctx.skillIdByName(ctx.container().querySelector("#ppSkill").value);
@@ -353,6 +395,8 @@
       if (m) { const id = m.dataset.ppMust; const i = r.must.indexOf(id); if (i === -1) r.must.push(id); else r.must.splice(i, 1); rerender(); return true; }
       const sd = t.closest("[data-pp-shop-del]");
       if (sd) { delete r.shop[sd.dataset.ppShopDel]; r.must = r.must.filter((id) => id !== sd.dataset.ppShopDel); rerender(); return true; }
+      const rd = t.closest("[data-pp-run-del]");
+      if (rd) { p.runs.splice(+rd.dataset.ppRunDel, 1); rerender(); return true; }
       const ld = t.closest("[data-pp-learn-del]");
       if (ld) { r.learned = r.learned.filter((id) => id !== ld.dataset.ppLearnDel); rerender(); return true; }
       return false;
@@ -378,6 +422,8 @@
           p.apt = null;
           setTraineeLater(p.selfTrainee);
         }
+      } else if (ds.ppUseRuns != null) {
+        p.useRuns = t.checked;
       } else if (ds.ppRace != null) {
         const i = p.races.indexOf(t.value);
         if (t.checked && i === -1) p.races.push(t.value);
