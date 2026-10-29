@@ -59,6 +59,7 @@
       const f = p.family;
       if (!f.ace) f.ace = { cid: null, tid: null };
       if (!f.cands) f.cands = {};
+      if (f.rental == null) f.rental = true;
       F.SLOTS.forEach((k) => { if (!f[k]) f[k] = blank(); });
       return f;
     }
@@ -105,9 +106,35 @@
         <p class="mini">Paste the veterans JSON from umaextractor (or pick the file). Each import replaces the list; it stays in this browser. Her sparks, G1 wins and her two parents (your grandparents when she's a parent) come with her, and each parent card below ranks them.</p>
         <textarea class="fp-vets" data-fp-vets-text rows="3" placeholder="Paste the umaextractor veterans JSON here"></textarea>
         <div class="row-wrap"><button type="button" class="btn small" data-fp-vets-import>Import</button><label class="btn ghost small">Pick the file<input type="file" accept=".json,application/json" data-fp-vets-file hidden></label>${n ? `<button type="button" class="btn ghost small" data-fp-vets-clear>Remove them</button>` : ""}</div>
-        ${n > 1 ? `<h4>Best pair of your veterans</h4><p class="mini">Both parents from your own list, each with her own parents, ranked by the family score. Usually one parent is a friend's rental: then use the lists on the parent cards instead.</p>
+        ${n ? `<label class="mini"><input type="checkbox" data-fp-rental${f.rental ? " checked" : ""}> Parent 2 is a friend's rental (Parent 1 comes from your veterans)</label>` : ""}
+        ${n && f.rental ? `<h4>Best Parent 1 from your veterans</h4><p class="mini">Each with her own parents, ranked by the family score${f.p2.cid ? ` with ${esc(ctx.charName(f.p2.cid))} as the rental` : "; until you pick the rental, each is paired with the rental character that suits her and the ace best (sparks unknown)"}.</p>${vetRowsHTML(f, "p1", x, 8)}` : ""}
+        ${n > 1 && !f.rental ? `<h4>Best pair of your veterans</h4><p class="mini">Both parents from your own list, each with her own parents, ranked by the family score.</p>
           ${pairs ? pairsHTML(pairs) : `<button type="button" class="btn ghost small" data-fp-vets-pairs>Rank every pair</button>`}` : ""}
       </details>`;
+    }
+    // Rental characters for Parent 2: affinity with the ace and with Parent 1 (G1 wins they share
+    // come on top, once you know the rental's).
+    function rentals(f, p1) {
+      const ace = f.ace.cid;
+      return ctx.chars().filter((c) => +c !== +ace && +c !== +p1).map((c) => ({ cid: c, pts: A.together(ace, c) + A.together(p1, c) })).sort((a, b) => b.pts - a.pts);
+    }
+    // The family with veteran v in slot k; with no rental picked yet, the best rental character.
+    function vetFamily(f, k, v) {
+      const out = withVet(f, k, v);
+      let rent = null;
+      if (f.rental && k === "p1" && !f.p2.cid) {
+        rent = rentals(f, v.cid)[0] || null;
+        if (rent) out.p2 = Object.assign(blank(), { cid: rent.cid, tid: (versions(rent.cid)[0] || {}).id || null });
+      }
+      return { fm: out, rent };
+    }
+    function rentalHTML(f) {
+      const top = rentals(f, f.p1.cid).slice(0, 8);
+      if (!top.length) return "";
+      const id = "fpRent";
+      return `<details data-pp-open="${id}"${ctx.isOpen(id) ? " open" : ""}><summary class="mini">Rentals to look for: ${top.slice(0, 3).map((r) => esc(ctx.charName(r.cid))).join(", ")}</summary>
+        <p class="mini">Affinity with the ace${f.p1.cid ? ` and ${esc(ctx.charName(f.p1.cid))}` : ""} (shared G1 wins add 3 each). Pick one, then enter the rental's sparks and parents from the friend list to compare.</p>
+        <div class="row-wrap">${top.map((r) => `<button type="button" class="chip" data-fp-rent="${r.cid}">${esc(ctx.charName(r.cid))} · ${r.pts}</button>`).join(" ")}</div></details>`;
     }
     const pairKey = (f) => { const r = ctx.aceRace(); return [f.ace.tid, r.preset.id, r.style, veterans().list.length, veterans().at].join("|"); };
     function rankPairs(f, x) {
@@ -127,16 +154,25 @@
       }).join("")}</tbody></table></div>`;
     }
     // Your veterans for one parent slot, with the rest of the family as it is.
-    function vetSlotHTML(f, k, x) {
-      if (!V || !GRAND[k]) return "";
+    function rankVets(f, k, x) {
       const other = k === "p1" ? f.p2 : f.p1;
-      const rows = veterans().list.filter((v) => +v.cid !== +f.ace.cid && +v.cid !== +other.cid)
-        .map((v) => ({ v, s: fam.score(familyOf(withVet(f, k, v)), x) })).filter((r) => !r.s.problems.length)
-        .sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total).slice(0, 6);
+      return veterans().list.filter((v) => +v.cid !== +f.ace.cid && +v.cid !== +other.cid)
+        .map((v) => { const r = vetFamily(f, k, v); return { v, rent: r.rent, s: fam.score(familyOf(r.fm), x) }; }).filter((r) => !r.s.problems.length)
+        .sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total);
+    }
+    function vetRowsHTML(f, k, x, count, rows) {
+      rows = (rows || rankVets(f, k, x)).slice(0, count);
+      if (!rows.length) return `<p class="mini">None of your veterans fits here.</p>`;
+      return `<div class="table-wrap"><table class="plan"><thead><tr><th>Veteran (and her parents)</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(vetName(r.v))}<div class="mini">${vetText(r.v)}${r.v.parents.some(Boolean) ? ` · parents ${r.v.parents.filter(Boolean).map((p) => esc(ctx.charName(p.cid))).join(" + ")}` : ""}${r.rent ? ` · rent ${esc(ctx.charName(r.rent.cid))}` : ""}</div></td><td class="num">${r.s.value.toFixed(2)}</td><td class="num">${r.s.total} ${r.s.symbol}</td><td><button type="button" class="linkish" data-fp-vet="${k},${r.v.id}">Use</button></td></tr>`).join("")}</tbody></table></div>`;
+    }
+    function vetSlotHTML(f, k, x) {
+      if (!V || !GRAND[k] || !veterans().list.length) return "";
+      if (f.rental && k === "p2") return rentalHTML(f);
+      const rows = rankVets(f, k, x);
       if (!rows.length) return "";
       const id = "fpVet-" + k;
       return `<details data-pp-open="${id}"${ctx.isOpen(id) ? " open" : ""}><summary class="mini">Your best veterans here: ${esc(vetName(rows[0].v))} · ${rows[0].s.value.toFixed(2)}</summary>
-        <div class="table-wrap"><table class="plan"><thead><tr><th>Veteran (and her parents)</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(vetName(r.v))}<div class="mini">${vetText(r.v)}${r.v.parents.some(Boolean) ? ` · parents ${r.v.parents.filter(Boolean).map((p) => esc(ctx.charName(p.cid))).join(" + ")}` : ""}</div></td><td class="num">${r.s.value.toFixed(2)}</td><td class="num">${r.s.total} ${r.s.symbol}</td><td><button type="button" class="linkish" data-fp-vet="${k},${r.v.id}">Use</button></td></tr>`).join("")}</tbody></table></div></details>`;
+        ${vetRowsHTML(f, k, x, 6, rows)}</details>`;
     }
 
     function lookForHTML(f, w) {
@@ -232,7 +268,10 @@
       else if ((el = hit("data-fp-vets-clear"))) setVeterans({ at: "", list: [] });
       else if ((el = hit("data-fp-vets-pairs"))) { vetPairs = { key: pairKey(f), rows: rankPairs(f, inputs(f).x) }; }
       else if ((el = hit("data-fp-vets-pair"))) { const [a, b] = el.dataset.fpVetsPair.split(",").map(Number), by = byId(); if (by.get(a) && by.get(b)) Object.assign(f, withVet(withVet(f, "p1", by.get(a)), "p2", by.get(b))); }
-      else if ((el = hit("data-fp-vet"))) { const [k, id] = el.dataset.fpVet.split(","), v = byId().get(+id); if (v) Object.assign(f, withVet(f, k, v)); }
+      else if ((el = hit("data-fp-vet"))) {
+        const [k, id] = el.dataset.fpVet.split(","), v = byId().get(+id);
+        if (v) { const r = vetFamily(f, k, v); Object.assign(f, withVet(f, k, v)); if (r.rent) setChar(f, "p2", r.rent.cid); }
+      } else if ((el = hit("data-fp-rent"))) setChar(f, "p2", +el.dataset.fpRent);
       else return false;
       ctx.rerender();
       return true;
@@ -245,6 +284,7 @@
     function change(e) {
       const f = st(), t = e.target, ds = t.dataset;
       if (ds.fpVetsText != null) return true;
+      if (ds.fpRental != null) { f.rental = t.checked; ctx.rerender(); return true; }
       if (ds.fpVetsFile != null) {
         const file = t.files && t.files[0];
         if (file) { const r = new root.FileReader(); r.onload = () => importVeterans(String(r.result)); r.readAsText(file); }
