@@ -202,6 +202,8 @@
     const R = ctx.runs;
     let total = 0, spTotal = 0, rainbowTotal = 0;
     const statSum = [0, 0, 0, 0, 0];
+    // Each career's final stats and skill points, for chances like reaching SS.
+    const finals = [];
     const hints = deck.map(() => 0);
     const bondAt = deck.map(() => 0);
     const train = [0, 0, 0, 0, 0];
@@ -476,6 +478,7 @@
       total += statsValue(ctx, x) + (purchase ? 0 : sp * SP_VALUE);
       spTotal += sp;
       for (let i = 0; i < 5; i++) statSum[i] += x[i];
+      finals.push({ stats: x.map(Math.round), sp: Math.round(sp) });
     }
     ctx.helloSkillEvents = helloSkillEvents;
     ctx.eventExposures = eventExposures;
@@ -491,6 +494,7 @@
       skillBudget: budget && budget.summary,
       stats: statSum.map((s) => Math.round(s / R)),
       sp: Math.round(spTotal / R),
+      finals,
       rainbows: rainbowTotal / R,
       raceBonus,
       hints: inputCards.map(c => hints[cards.indexOf(c)] / R),
@@ -796,10 +800,10 @@
     // 40%); within that, the closest stats win. skillWeight is the racing slider.
     const sw = opts.parent ? 1 : opts.skillWeight != null ? opts.skillWeight : 1;
     const giveUp = opts.parent ? Math.min(0.4, 0.4 * (opts.parent.statsWeight || 0)) : null;
-    // Reach SS (parent decks): a deck whose predicted rating (stats' score, skill points at
-    // spRating each, unique) reaches SS beats any that doesn't, and a short one loses 10 per
-    // rating point missing, so the closest comes next; skills decide among the rest. The
-    // skill floor above doesn't apply: SS comes first.
+    // Reach SS (parent decks): each simulated career's rating (stats' score, skill points at
+    // spRating each, unique). The deck where the most careers reach SS wins; then an average
+    // short of SS loses 10 per point missing, so the closest comes next; skills decide among
+    // the rest. The skill floor above doesn't apply: SS comes first.
     const ss = opts.parent && opts.parent.reachSS;
     const Ra = ss ? root.UmaRating || (typeof require !== "undefined" ? require("./rating.js") : null) : null;
     let floor = -Infinity;
@@ -811,12 +815,13 @@
       const sk = Tr.deckSkills(opts, deck);
       const over = sk.value < floor - 1e-9 ? 1e9 : 0;
       const skillScore = c.sc.id === "grandlive" && !opts.parent ? s.skillValue : sk.value;
-      let value = (ss && ss.ignoreFit ? 0 : fit.value) + sw * skillScore + sk.mustValue - over, rating = null;
+      let value = (ss && ss.ignoreFit ? 0 : fit.value) + sw * skillScore + sk.mustValue - over, rating = null, ssShare = null;
       if (ss) {
         rating = Ra.statsScore(s.stats) + Math.round(s.sp * ss.spRating) + ss.unique;
-        value += rating >= ss.ss ? 1e6 : -10 * (ss.ss - rating);
+        ssShare = s.finals.filter((f) => Ra.statsScore(f.stats) + Math.round(f.sp * ss.spRating) + ss.unique >= ss.ss).length / s.finals.length;
+        value += 1e6 * ssShare - 10 * Math.max(0, ss.ss - rating);
       }
-      return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating });
+      return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating, ssShare });
     };
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");

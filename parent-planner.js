@@ -74,6 +74,8 @@
     const spRate = (p) => { const rel = ctx.relevant(); return rel ? spRating(Object.keys(rel.targets), apt(p), R, SB) : SP_RATING; };
     // Her rating from predicted stats and skill points (all spent, ~spRate each) and her unique.
     const predictedRating = (p, x) => R.statsScore(x.stats) + Math.round((x.sp || 0) * spRate(p)) + R.uniqueBonus(stars(p), stars(p));
+    // How many of the simulated careers reach SS, each rated like predictedRating: [hit, of].
+    const ssCount = (p, x) => { const f = x.finals || []; return [f.filter((c) => predictedRating(p, c) >= R.SS).length, f.length]; };
 
     function charInput(key, value, placeholder) {
       return `<input data-pp-char="${key}" list="ppChars" value="${esc(charName(value))}" placeholder="${esc(placeholder || "Character")}" autocomplete="off">`;
@@ -121,9 +123,9 @@
         const x = ctx.predict(k);
         if (!x) return `<tr${k === n ? ' class="cur"' : ""}><td class="num">${k}</td><td colspan="8" class="mini">simulating…</td></tr>`;
         const rt = predictedRating(p, x);
-        return `<tr${k === n ? ' class="cur"' : ""}><td class="num">${k}${k === n ? " ←" : ""}</td>${x.stats.map((v) => `<td class="num">${v}</td>`).join("")}<td class="num">${x.sp}</td><td class="num"><b>${rt.toLocaleString()}</b></td><td>${rt >= R.SS ? "SS ✓" : `${(R.SS - rt).toLocaleString()} short`}</td></tr>`;
+        return `<tr${k === n ? ' class="cur"' : ""}><td class="num">${k}${k === n ? " ←" : ""}</td>${x.stats.map((v) => `<td class="num">${v}</td>`).join("")}<td class="num">${x.sp}</td><td class="num"><b>${rt.toLocaleString()}</b></td><td>${rt >= R.SS ? "SS ✓" : `${(R.SS - rt).toLocaleString()} short`}${ssCount(p, x)[1] ? `<div class="mini">SS in ${ssCount(p, x).join("/")}</div>` : ""}</td></tr>`;
       };
-      return `<p class="mini"><b>What the races cost</b> (${esc(src)}, Independent Training, average of 16 simulated careers; rating counts all skill points spent on her relevant skills at ~${spRate(p).toFixed(2)} each, before inheritance):</p>
+      return `<p class="mini"><b>What the races cost</b> (${esc(src)}, Independent Training, average of 16 simulated careers, and how many of them reach SS; rating counts all skill points spent on her relevant skills at ~${spRate(p).toFixed(2)} each, before inheritance):</p>
         <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th>Extra races</th>${STAT_LABELS.map((l) => `<th>${l.slice(0, 3)}</th>`).join("")}<th>SP</th><th>Rating</th><th>SS</th></tr></thead><tbody>${counts.map(row).join("")}</tbody></table></div>${missing.length ? "" : maxRacesHTML(p, counts, n)}`;
     }
 
