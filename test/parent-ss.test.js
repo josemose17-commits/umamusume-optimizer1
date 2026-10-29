@@ -136,3 +136,15 @@ test("SS buy: spark chance comes before rating among equal relevant counts, neve
   // ...unless SS needs the ○'s rating.
   assert.deepStrictEqual(s.solveSS({}, 400, { gap: 180, relevant: rel }).selected.map((o) => o.id), ["200012"]);
 });
+
+test("parent decks: a white target is worth more when the deck can also give its gold (40% spark)", () => {
+  const T = require("../tiers.js");
+  // SSR Special Week's events can give a gold (200511) whose white (200512) is the target.
+  const opts = { scenario: "GL", parent: { targets: { "200512": 1 }, statsWeight: 0.1 } };
+  const deck = [{ id: 30001, lb: 4 }];
+  const offer = T.describeDeck(opts, deck, [], []).skills.find((x) => String(x.id) === "200512");
+  const gold = 1 - offer.prerequisiteSources.reduce((m, r) => m * (1 - r.p), 1);
+  assert.ok(gold > 0);
+  // 60 per length; without the gold the white alone is worth p × 60 (plus a hint discount).
+  assert.ok(T.deckSkills(opts, deck).value >= offer.p * 60 * (1 + gold / offer.p) - 1e-6);
+});
