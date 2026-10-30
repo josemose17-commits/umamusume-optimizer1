@@ -841,6 +841,13 @@
         }
         return;
       }
+      if (e.target.dataset.ownTrainee) {
+        const id = +e.target.dataset.ownTrainee, mine = myUmas();
+        if (e.target.checked) mine.add(id); else mine.delete(id);
+        setMyUmas(mine);
+        if (db().town) renderDbList();
+        return;
+      }
       const k = e.target.dataset.db; if (!k) return;
       const d = db();
       d[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -1595,6 +1602,7 @@
     return `<div class="db-controls">
       <label class="field grow"><span>Search</span><input data-db="tq" value="${esc(d.tq)}" placeholder="Name or title" autocomplete="off"></label>
       <label class="field"><span>Best distance</span><select data-db="tdist">${opt([["", "Any"], ["2", "Sprint"], ["3", "Mile"], ["4", "Medium"], ["5", "Long"], ["1", "Dirt"]], d.tdist || "")}</select></label>
+      <label class="field"><span>Collection</span><select data-db="town">${opt([["", "All umas"], ["yes", "Umas I own"], ["no", "Umas I don't own"]], d.town || "")}</select></label>
       <label class="chip-toggle"><input type="checkbox" data-db="global" ${d.global ? "checked" : ""}> Global only</label>
     </div><div id="dbList"></div>`;
   }
@@ -1627,13 +1635,20 @@
       const rank = (g) => "GFEDCBAS".indexOf(g);
       let list = D.DATA.trainees.filter((t) => (!d.global || D.onGlobal(t, TODAY)) && (!q || (t.n + " " + t.t).toLowerCase().indexOf(q) !== -1));
       if (d.tdist) list = list.filter((t) => rank(t.apt[+d.tdist]) >= rank("A"));
+      const mine = myUmas();
+      if (d.town) list = list.filter((t) => (d.town === "yes") === mine.has(t.id));
       list.sort((a, b) => a.n.localeCompare(b.n));
-      el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}.</p>
-        <div class="table-wrap"><table class="trainees"><thead><tr><th>Trainee</th><th>Aptitudes (surface · distance · style)</th><th>Growth</th><th>Unique skill</th><th></th></tr></thead><tbody>
-        ${list.map((t) => `<tr${state.deck.trainee === t.id ? ' class="cur"' : ""}><td><b>${esc(t.n)}</b><div class="jp">${esc(t.t)} · ${"★".repeat(t.r)}${t.en ? " · Global " + t.en : " · JP " + t.jp}</div></td><td>${aptChips(t)}</td><td>${growthText(t)}</td><td>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</td><td><button type="button" class="btn ghost small" data-use-trainee="${t.id}">Use</button></td></tr>`).join("")}
+      el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}. Tick <b>Own</b> on the umas you have (${mine.size} ticked): the Parents tab picks the ace and Parent 1 from them. Importing your veterans there ticks the versions you've trained.</p>
+        <div class="table-wrap"><table class="trainees"><thead><tr><th>Own</th><th>Trainee</th><th>Aptitudes (surface · distance · style)</th><th>Growth</th><th>Unique skill</th><th></th></tr></thead><tbody>
+        ${list.map((t) => `<tr${state.deck.trainee === t.id ? ' class="cur"' : ""}><td><input type="checkbox" data-own-trainee="${t.id}" aria-label="I own ${esc(t.n)} [${esc(t.t)}]"${mine.has(t.id) ? " checked" : ""}></td><td><b>${esc(t.n)}</b><div class="jp">${esc(t.t)} · ${"★".repeat(t.r)}${t.en ? " · Global " + t.en : " · JP " + t.jp}</div></td><td>${aptChips(t)}</td><td>${growthText(t)}</td><td>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</td><td><button type="button" class="btn ghost small" data-use-trainee="${t.id}">Use</button></td></tr>`).join("")}
         </tbody></table></div>`;
     }
   }
+
+  // The umas you own (trainee version ids), shared with the Parents tab (family-planner.js).
+  const UMAS_KEY = "uma-my-umas-v1";
+  function myUmas() { try { return new Set(JSON.parse(localStorage.getItem(UMAS_KEY)) || []); } catch (e) { return new Set(); } }
+  function setMyUmas(set) { try { localStorage.setItem(UMAS_KEY, JSON.stringify([...set])); } catch (e) { /* ignore */ } }
 
   function ownedSummary() {
     const ids = ownedIds();
@@ -2144,6 +2159,8 @@
     if (deckHost() === "parents" && !state.pcm) state.pcm = { goal: "ace", independent: true };
     const c = deckHost() === "parents" ? state.pcm : state.cm;
     if (deckHost() === "parents" && PARENT_GOALS.indexOf(c.goal) === -1) c.goal = "ace";
+    // An ace parent is built for the ace's race: CM & decks' race and style, set there only.
+    if (deckHost() === "parents") { if (state.cm.preset) c.preset = state.cm.preset; if (state.cm.style) c.style = state.cm.style; }
     // Parents are trained in Independent Training here, so its race count always applies.
     if (deckHost() === "parents") c.independent = true;
     if (deckHost() === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
@@ -2790,7 +2807,8 @@
         loadSkillValues(p.id);
         euReady();
         // The race's skill table (must-have ☆, Global-only releases) in a closed box.
-        return `<div class="cm">${cmHeader(p, c)}${cmOptimizer(p, c)}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), Global releases only</summary>${cmSkills(p, c)}</details></div>`;
+        const race = `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-goto-tab="cm">change it in CM &amp; decks</button>).</p>`;
+        return `<div class="cm">${race}${cmOptimizer(p, c)}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), Global releases only</summary>${cmSkills(p, c)}</details></div>`;
       },
       // ② Races sets ③ Deck's Independent Training race count (no re-render: the page is drawing).
       setItRaces: (n) => { const c = cm(); if (n == null) delete c.itRaces; else c.itRaces = n; },

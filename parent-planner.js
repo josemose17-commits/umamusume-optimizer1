@@ -21,7 +21,7 @@
 
   function create(ctx) {
     const { D, A, R, SB, esc } = ctx;
-    const open = new Set(["family", "fpLook", "who", "races", "deck", "rating"]);
+    const open = new Set(["ace", "family", "who", "races", "deck", "rating"]);
 
     function st() {
       const s = ctx.state();
@@ -333,9 +333,11 @@
       return JSON.stringify([n, p.selfTrainee]);
     }
 
-    const notes = (p) => { const n = extraCount(p); return { family: fp ? fp.note() : "", who: p.self ? esc(charName(p.self)) : "pick your uma", races: n == null ? "the G1s she'll run" : `${n} extra race${n === 1 ? "" : "s"}`, rating: "skills to buy, reach SS" }; };
-    const bodies = { who: whoHTML, races: racesHTML, rating: ratingHTML };
-    if (fp) bodies.family = () => fp.html();
+    const notes = (p) => { const n = extraCount(p), f = fp ? fp.notes() : {}; return { ace: f.ace || "", family: f.family || "", who: p.self ? esc(charName(p.self)) : "pick your uma", races: n == null ? "the G1s she'll run" : `${n} extra race${n === 1 ? "" : "s"}`, rating: "skills to buy, reach SS" }; };
+    // ① starts with what to build into Parent 1 for the ace (family-planner.js).
+    const whoBody = (p) => (fp ? `<div class="fp-train">${fp.trainHTML()}</div>` : "") + whoHTML(p);
+    const bodies = { who: whoBody, races: racesHTML, rating: ratingHTML };
+    if (fp) { bodies.ace = () => fp.aceHTML(); bodies.family = () => fp.parentsHTML(); }
 
     function render(el) {
       const p = st();
@@ -343,9 +345,9 @@
       deckSig = syncDeck(p);
       const nt = notes(p);
       el.innerHTML = `<div class="parents">
-        <p class="mini pp-intro">Plan the ace's family from the top down, then build each parent in order: who she is, the G1s she'll run, the deck, then the skills to buy so she reaches SS. More races mean fewer training turns, so ② shows what they cost.</p>
-        ${fp ? section("family", "Family: ace → parents → grandparents", nt.family, fp.html()) : ""}
-        ${section("who", "① The parent", nt.who, whoHTML(p))}
+        <p class="mini pp-intro">Three steps: pick the ace, pick her parents (one of yours and a friend's rental), then train Parent 1: who she is, the G1s she'll run, the deck, and the skills to buy so she reaches SS.</p>
+        ${fp ? `${section("ace", "1 · The ace", nt.ace, fp.aceHTML())}${section("family", "2 · Her parents", nt.family, fp.parentsHTML())}<h3 class="pp-step">3 · Train Parent 1</h3>` : ""}
+        ${section("who", "① The parent", nt.who, whoBody(p))}
         ${section("races", "② Races", nt.races, racesHTML(p))}
         ${section("deck", "③ Deck", "ace parent", ctx.deckHTML())}
         ${section("rating", "④ After the run", nt.rating, ratingHTML(p))}

@@ -680,3 +680,6 @@ table.pred .over { color: var(--accent); }
 .fp-skill { width: 160px; max-width: 100%; }
 .fp-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
 .fp-vets { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; margin: 6px 0; }
+.pp-step { margin: 18px 0 6px; font-size: 15px; letter-spacing: .02em; }
+.fp-fam .fp-grandrow td:first-child { padding-left: 18px; }
+.fp-train { margin-bottom: 8px; }
