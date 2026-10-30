@@ -148,3 +148,19 @@ test("parent decks: a white target is worth more when the deck can also give its
   // 60 per length; without the gold the white alone is worth p × 60 (plus a hint discount).
   assert.ok(T.deckSkills(opts, deck).value >= offer.p * 60 * (1 + gold / offer.p) - 1e-6);
 });
+
+test("skills that need her in the other half of the pack don't count for her style", () => {
+  const POS = require("../data/skill-positions.js");
+  // Leap Forward: late, overtaking, order_rate >= 50 (back half). The Umalator still charts it for Pace.
+  assert.ok(POS.back.includes("202402"));
+  assert.ok(!PR.positionFits(POS, "202402", "Senkou") && !PR.positionFits(POS, "202402", "Nige"));
+  assert.ok(PR.positionFits(POS, "202402", "Sasi") && PR.positionFits(POS, "202402", "Oikomi"));
+  const front = POS.front[0];
+  assert.ok(!PR.positionFits(POS, front, "Oikomi") && PR.positionFits(POS, front, "Sasi") && PR.positionFits(POS, front, "Senkou"));
+  const p = preset((x) => x.id === "cm22"), L = values(p, "Senkou");
+  assert.ok(L["202402"] > 0.1, "charted for Pace on this course");
+  const t = PR.aceTargets({ preset: p, style: "Senkou", raceSkills: L, debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
+  assert.ok(!t.targets["202402"], "but not a Pace parent's target");
+  const late = PR.aceTargets({ preset: p, style: "Sasi", raceSkills: values(p, "Sasi"), debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
+  assert.ok(late.targets["202402"] > 0.1, "a Late Surger's");
+});

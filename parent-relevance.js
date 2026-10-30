@@ -34,7 +34,8 @@
   // recoveries. why() says which rule let a skill in.
   function aceTargets(o) {
     const minL = o.minL == null ? 0.1 : o.minL, out = {}, why = {};
-    const white = (id) => id[0] !== "9" && (!o.rarityOf || o.rarityOf(id) === 1) && !(o.debuffs && o.debuffs[id]);
+    // o.positions (data/skill-positions.js): skills that need her where her style doesn't run are out.
+    const white = (id) => id[0] !== "9" && (!o.rarityOf || o.rarityOf(id) === 1) && !(o.debuffs && o.debuffs[id]) && positionFits(o.positions, id, o.style);
     Object.entries(o.raceSkills || {}).forEach(([id, L]) => {
       if (L > minL && white(id)) { out[id] = L; why[id] = "L"; }
     });
@@ -52,7 +53,17 @@
     return { targets: out, why };
   }
 
-  const api = { raceFacts, fits, aceTargets };
+  // Whether a skill can fire for this running style, by where in the pack it needs her
+  // (data/skill-positions.js): back-half skills never fit Front Runners or Pace Chasers, and
+  // front-half skills never fit End Closers; Late Surgers move through the pack, so both fit.
+  const BACK_NO = { Nige: 1, Senkou: 1 }, FRONT_NO = { Oikomi: 1 };
+  function positionFits(pos, id, style) {
+    if (!pos) return true;
+    if (!pos.sets) pos.sets = { back: new Set(pos.back.map(String)), front: new Set(pos.front.map(String)) };
+    return !(BACK_NO[style] && pos.sets.back.has(String(id))) && !(FRONT_NO[style] && pos.sets.front.has(String(id)));
+  }
+
+  const api = { raceFacts, fits, aceTargets, positionFits };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaParentRelevance = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

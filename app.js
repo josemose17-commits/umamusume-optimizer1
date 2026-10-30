@@ -2183,14 +2183,18 @@
   const skillInfo = (id) => (SV && SV.skills[id]) || [D.DATA.skills[id] || "#" + id, D.skillCost(id) || 0, 1, 1];
 
   // Skills ranked by median length gain for a preset and style. Your pasted Umalator results win.
+  // A race's skill values for a style. The Umalator runs one horse without a pack, so skills that
+  // need her in the other half of the field (Leap Forward for a Pace Chaser) are left out here,
+  // for every use: data/skill-positions.js, parent-relevance.js positionFits.
   function skillRows(pid, style) {
+    const fits = (r) => window.UmaParentRelevance.positionFits(window.UmaSkillPositions, r.id, style);
     const mine = pasted[pid] && pasted[pid][style];
     if (mine) {
-      return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).sort((a, b) => b.L - a.L);
+      return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).filter(fits).sort((a, b) => b.L - a.L);
     }
     const data = svCache[pid];
     if (!data || typeof data === "string" || !data[style]) return [];
-    return data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
+    return data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 })).filter(fits);
   }
 
   function skillMap(pid, style) {
@@ -2262,7 +2266,7 @@
   // why naming the rule ("L", "green", "recovery"). Global releases only if set.
   function parentTargetsFor(c, p) {
     const sv = skillMap(p.id, c.style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
-    const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds });
+    const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: window.UmaSkillPositions });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id)) { delete out.targets[id]; delete out.why[id]; } });
     return out;
   }
@@ -2760,7 +2764,7 @@
         loadSkillValues(id);
         if (!(pasted[id] && pasted[id][race.style]) && typeof svCache[id] !== "object") return null;
         const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
-        const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds });
+        const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: window.UmaSkillPositions });
         if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x)) { delete out.targets[x]; delete out.why[x]; } });
         return Object.assign(out, { L });
       },
