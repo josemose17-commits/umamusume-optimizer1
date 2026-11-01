@@ -69,7 +69,19 @@
     return !(BACK_NO[style] && pos.sets.back.has(String(id))) && !(FRONT_NO[style] && pos.sets.front.has(String(id)));
   }
 
-  const api = { raceFacts, fits, aceTargets, positionFits };
+  // A cup's own positions: data/skill-positions.js (Global's skill versions) with a JP-dated cup's
+  // changes (data/skillvalues/index.js meta.variants[...].positions: { back|front: { add, del } }),
+  // for the conditions JP changed by then and the skills only JP has.
+  function positionsWith(base, changes) {
+    if (!base || !changes) return base;
+    const adj = (k) => {
+      const d = changes[k] || {}, del = new Set((d.del || []).map(String));
+      return base[k].map(String).filter((id) => !del.has(id)).concat((d.add || []).map(String));
+    };
+    return { back: adj("back"), front: adj("front") };
+  }
+
+  const api = { raceFacts, fits, aceTargets, positionFits, positionsWith };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaParentRelevance = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

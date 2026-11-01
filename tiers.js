@@ -16,6 +16,7 @@
   const ParentPrerequisites = root.UmaParentPrerequisites || (typeof require !== "undefined" ? require("./parent-prerequisites.js") : null);
   const purchases = root.UmaSkillPurchases || (typeof require !== "undefined" ? require("./data/skill-purchases.js") : null);
   const skillInfo = root.UmaSkillValues || (typeof require !== "undefined" ? require("./data/skillvalues/index.js") : null);
+  const Release = root.UmaSkillRelease || (typeof require !== "undefined" ? require("./skill-release.js") : null);
   const parentRoutes = ParentPrerequisites.create(purchases.skills);
 
   // Euophrys' Global scenario presets, and which one each coach scenario uses.
@@ -182,7 +183,8 @@
     if (parent) {
       ctx.parentGlobal = !!parent.globalOnly;
       ctx.today = parent.today;
-      ctx.allowSkill = id => !ctx.parentGlobal || !!(skillInfo.skills[id] && skillInfo.skills[id][3]);
+      // Global only: out on Global by the ace's cup (skill-release.js; skillsBy null = out now).
+      ctx.allowSkill = id => !ctx.parentGlobal || Release.outBy(skillInfo.skills[id], parent.skillsBy || null);
       [...ctx.known].forEach(id => parentRoutes.whites(id).forEach(white => ctx.known.add(white)));
     }
     // A must-have the trainee already has needs no card.

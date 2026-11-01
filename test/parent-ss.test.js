@@ -157,12 +157,27 @@ test("skills that need her in the other half of the pack don't count for her sty
   assert.ok(PR.positionFits(POS, "202402", "Sasi") && PR.positionFits(POS, "202402", "Oikomi"));
   const front = POS.front[0];
   assert.ok(!PR.positionFits(POS, front, "Oikomi") && PR.positionFits(POS, front, "Sasi") && PR.positionFits(POS, front, "Senkou"));
-  const p = preset((x) => x.id === "cm22"), L = values(p, "Senkou");
-  assert.ok(L["202402"] > 0.1, "charted for Pace on this course");
-  const t = PR.aceTargets({ preset: p, style: "Senkou", raceSkills: L, debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
-  assert.ok(!t.targets["202402"], "but not a Pace parent's target");
-  const late = PR.aceTargets({ preset: p, style: "Sasi", raceSkills: values(p, "Sasi"), debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
-  assert.ok(late.targets["202402"] > 0.1, "a Late Surger's");
+  // A chart that credits a back-half skill to a Pace Chaser (one runner, no pack) doesn't make it
+  // a Pace parent's target.
+  const p = preset((x) => x.id === "cm21");
+  const t = PR.aceTargets({ preset: p, style: "Senkou", raceSkills: { 202402: 1 }, debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
+  assert.ok(!t.targets["202402"], "not a Pace parent's target");
+  const q = preset((x) => x.id === "cm22");
+  const late = PR.aceTargets({ preset: q, style: "Sasi", raceSkills: values(q, "Sasi"), debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
+  assert.ok(late.targets["202402"] > 0.1, "Leap Forward is a Late Surger's target");
+});
+
+test("a JP-dated cup splits the pack by its own skill versions", () => {
+  const POS = require("../data/skill-positions.js");
+  const own = (id) => PR.positionsWith(POS, SV.meta.variants[SV.meta.sims[id]].positions);
+  // CM 22 runs Global's Leap Forward (order_rate >= 50): back half, and the Pace chart gives it nothing.
+  assert.ok(!PR.positionFits(own("cm22"), "202402", "Senkou"));
+  assert.ok(!(values(preset((x) => x.id === "cm22"), "Senkou")["202402"] > 0.1));
+  // JP's 5.5th anniversary (2026-08-24) made it order_rate >= 40, which a Pace Chaser in 4th of 9
+  // meets: from LoH 5 it counts for her.
+  assert.ok(PR.positionFits(own("cm49"), "202402", "Senkou"));
+  // Skills only JP has are split too.
+  assert.ok(own("cm49").back.length > POS.back.length - 20 && own("cm49").front.length > POS.front.length);
 });
 
 test("skills that wait for others to fire (Groundwork) have values, and count where they're worth it", () => {
