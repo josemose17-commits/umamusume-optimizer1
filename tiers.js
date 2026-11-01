@@ -350,9 +350,9 @@
   //   ace: white skills that are good on the race (median L for the running style), the greens
   //   whose condition fits it and, for Mile and longer, its recoveries; never debuffs (see
   //   parent-relevance.js; kinds: data/skill-kinds.js). rarityOf(id): 1 white, 2 gold, 9 inherited unique.
-  function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf, kinds) {
+  function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf, kinds, positions) {
     const PR = root.UmaParentRelevance || (typeof require !== "undefined" ? require("./parent-relevance.js") : null);
-    return PR.aceTargets({ preset, style, raceSkills, debuffs, minL: minL || 0.1, rarityOf, kinds }).targets;
+    return PR.aceTargets({ preset, style, raceSkills, debuffs, minL: minL || 0.1, rarityOf, kinds, positions }).targets;
   }
 
   const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };

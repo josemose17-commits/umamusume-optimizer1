@@ -1,7 +1,9 @@
 // Which white skills are relevant for a parent built for one CM race and running style, to pass
 // down as sparks:
 // skills worth more than 0.1 L (median) there, the greens (passive stat skills) whose conditions
-// fit the race, and for Mile and longer the recoveries that fit it. Never debuffs.
+// fit the race, for Mile and longer the recoveries that fit it, and the position skills (lane
+// speed, vision: Prudent Positioning, Go with the Flow...) that fit it, which the Umalator can't
+// value. Greens, recoveries and position skills count at least 0.1 L. Never debuffs.
 // Greens and recoveries come from data/skill-kinds.js; a green whose condition depends on
 // something unknown before the race (gate, popularity, the other runners) doesn't count, and a
 // recovery's in-race conditions (position, phase, corners) are taken as met.
@@ -34,17 +36,22 @@
   // recoveries. why() says which rule let a skill in.
   function aceTargets(o) {
     const minL = o.minL == null ? 0.1 : o.minL, out = {}, why = {};
-    const white = (id) => id[0] !== "9" && (!o.rarityOf || o.rarityOf(id) === 1) && !(o.debuffs && o.debuffs[id]);
+    // o.positions (data/skill-positions.js): skills that need her where her style doesn't run are out.
+    const white = (id) => id[0] !== "9" && (!o.rarityOf || o.rarityOf(id) === 1) && !(o.debuffs && o.debuffs[id]) && positionFits(o.positions, id, o.style);
     Object.entries(o.raceSkills || {}).forEach(([id, L]) => {
       if (L > minL && white(id)) { out[id] = L; why[id] = "L"; }
     });
     const kinds = o.kinds && o.kinds.skills;
     if (kinds) {
       const facts = raceFacts(o.preset, o.style, o.kinds.tracks);
+      // The kinds list is white skills only, including ones the race charts lack (so no rarity).
+      const ok = (id) => id[0] !== "9" && !(o.debuffs && o.debuffs[id]) && positionFits(o.positions, id, o.style);
       Object.entries(kinds).forEach(([id, k]) => {
-        if (out[id] || !white(id)) return;
+        if (out[id] || !ok(id)) return;
         if (k[0] === "recovery" && !(facts.distance_type >= 2)) return;
-        if (!fits(k[1], facts, k[0] === "recovery")) return;
+        // In-race clauses (position, lanes, being blocked) count as met for recoveries and
+        // position skills; they're about the race as it goes.
+        if (!fits(k[1], facts, k[0] === "recovery" || k[0] === "position")) return;
         out[id] = Math.max(minL, (o.raceSkills || {})[id] || 0);
         why[id] = k[0];
       });
@@ -52,7 +59,17 @@
     return { targets: out, why };
   }
 
-  const api = { raceFacts, fits, aceTargets };
+  // Whether a skill can fire for this running style, by where in the pack it needs her
+  // (data/skill-positions.js): back-half skills never fit Front Runners or Pace Chasers, and
+  // front-half skills never fit End Closers; Late Surgers move through the pack, so both fit.
+  const BACK_NO = { Nige: 1, Senkou: 1 }, FRONT_NO = { Oikomi: 1 };
+  function positionFits(pos, id, style) {
+    if (!pos) return true;
+    if (!pos.sets) pos.sets = { back: new Set(pos.back.map(String)), front: new Set(pos.front.map(String)) };
+    return !(BACK_NO[style] && pos.sets.back.has(String(id))) && !(FRONT_NO[style] && pos.sets.front.has(String(id)));
+  }
+
+  const api = { raceFacts, fits, aceTargets, positionFits };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaParentRelevance = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

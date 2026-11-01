@@ -24,7 +24,7 @@ test("ace parent: skills over 0.1 L count, debuffs never do", () => {
   assert.ok(Object.keys(L).some((id) => X[id] && L[id] > 0.1), "the race's chart has debuffs worth L");
   assert.ok(Object.keys(targets).every((id) => !X[id]));
   assert.ok(Object.keys(targets).every((id) => why[id] !== "L" || L[id] > 0.1));
-  assert.ok(Object.keys(targets).every((id) => rarityOf(id) === 1 && id[0] !== "9"), "white skills only");
+  assert.ok(Object.keys(targets).every((id) => (rarityOf(id) === 1 || K.skills[id]) && id[0] !== "9"), "white skills only (the kinds list is white only)");
 });
 
 test("greens count when their condition fits the race", () => {
@@ -147,4 +147,37 @@ test("parent decks: a white target is worth more when the deck can also give its
   assert.ok(gold > 0);
   // 60 per length; without the gold the white alone is worth p × 60 (plus a hint discount).
   assert.ok(T.deckSkills(opts, deck).value >= offer.p * 60 * (1 + gold / offer.p) - 1e-6);
+});
+
+test("skills that need her in the other half of the pack don't count for her style", () => {
+  const POS = require("../data/skill-positions.js");
+  // Leap Forward: late, overtaking, order_rate >= 50 (back half). The Umalator still charts it for Pace.
+  assert.ok(POS.back.includes("202402"));
+  assert.ok(!PR.positionFits(POS, "202402", "Senkou") && !PR.positionFits(POS, "202402", "Nige"));
+  assert.ok(PR.positionFits(POS, "202402", "Sasi") && PR.positionFits(POS, "202402", "Oikomi"));
+  const front = POS.front[0];
+  assert.ok(!PR.positionFits(POS, front, "Oikomi") && PR.positionFits(POS, front, "Sasi") && PR.positionFits(POS, front, "Senkou"));
+  const p = preset((x) => x.id === "cm22"), L = values(p, "Senkou");
+  assert.ok(L["202402"] > 0.1, "charted for Pace on this course");
+  const t = PR.aceTargets({ preset: p, style: "Senkou", raceSkills: L, debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
+  assert.ok(!t.targets["202402"], "but not a Pace parent's target");
+  const late = PR.aceTargets({ preset: p, style: "Sasi", raceSkills: values(p, "Sasi"), debuffs: X, minL: 0.1, rarityOf, kinds: K, positions: POS });
+  assert.ok(late.targets["202402"] > 0.1, "a Late Surger's");
+});
+
+test("skills that wait for others to fire (Groundwork) have values, and count where they're worth it", () => {
+  const p = preset((x) => x.id === "cm21");
+  assert.ok(values(p, "Sasi")["201601"] > 0.1, "Groundwork for a Late Surger");
+  assert.ok(ace(p, "Sasi", values(p, "Sasi")).targets["201601"] > 0.1);
+  assert.ok(values(p, "Senkou")["201611"] > 0.1, "Tail Held High");
+});
+
+test("position skills (lane speed, vision) count by their condition; racecourse greens even off the charts", () => {
+  const p = preset((x) => x.id === "cm21"), t = ace(p, "Senkou", values(p, "Senkou"));
+  assert.strictEqual(t.why["200452"], "position", "Prudent Positioning");
+  assert.strictEqual(t.why["200502"], "position", "Go with the Flow");
+  assert.ok(!t.targets["201432"], "Studious is for Late Surgers");
+  assert.strictEqual(ace(p, "Sasi", values(p, "Sasi")).why["201432"], "position");
+  // cm21 is at Chukyo: its racecourse green counts though no chart lists it.
+  assert.ok(!SV.skills["200072"] && t.why["200072"] === "green");
 });
