@@ -336,12 +336,13 @@
         greens.length ? `Green sparks: ${greens.map((g) => ctx.skillName(g.id)).join(", ")}` : "",
       ].filter(Boolean).join("\n");
       return `<details class="pred-help" data-pp-open="fpLook"${ctx.isOpen("fpLook") ? " open" : ""}><summary><b>What to look for</b> in parents (to search uma.moe or your veterans)</summary>
-        <h4>White sparks</h4><p class="mini">Relevant skills for her race, first the ones worth the most that her own deck rarely gives (each fires 3/6/9% per inspiration by stars, × her affinity bonus):</p><ol class="mini">${top.map(whiteRow).join("")}</ol>
+        <h4>White sparks</h4><p class="mini">Relevant skills for her race, first the ones worth the most that her own deck rarely gives (each fires 3/6/9% per inspiration by stars, × her affinity bonus). Lane/vision skills (Prudent Positioning, Go with the Flow…) and greens count at 0.1 L when they fit, since the simulator can't value them; skills that wait for others to fire (Groundwork, Tail Held High) were simulated with that met:</p><ol class="mini">${top.map(whiteRow).join("")}</ol>
         ${rest.length ? `<details><summary class="mini">${rest.length} more</summary><ol class="mini" start="11">${rest.map(whiteRow).join("")}</ol></details>` : ""}
         <h4>Blue sparks</h4><p class="mini"><b>${w.blue.map((b) => b.label).join("</b> or <b>")}</b> (her build's top stats): aim for 6★+ in total across parents and grandparents, ideally 3★ on each parent. Each blue spark adds +5/+12/+21 at the start and fires 70/80/90% per inspiration.</p>
         <h4>Pink sparks</h4><p class="mini">${w.pink.length ? `She needs <b>${w.pink.map((p) => `${p.label} (${p.grade} now)`).join(", ")}</b>: pink sparks for it fire 2/3/5% per inspiration, and the family's pink stars also raise her starting aptitude.` : "None needed: her aptitudes for this race are A or better."}</p>
         <h4>Green sparks</h4><p class="mini">${greens.length ? `Inherited uniques strong on this race (5/10/15% per inspiration): ${greens.map((g) => `<b>${esc(ctx.skillName(g.id))}</b> ${g.L.toFixed(2)} L (${esc([...new Set(g.owners.map((t) => t.n + " [" + t.t + "]"))].slice(0, 2).join(", "))})`).join("; ")}.` : "No inherited unique is worth more than 0.1 L here."}</p>
         <p class="mini">G1 wins: every G1 both parents won adds 3 affinity, and so does each one a parent shares with her own parent.</p>
+        ${ctx.unvalued && ctx.unvalued().length ? `<p class="mini">No race value in the app yet (not in the race simulator's data, or under 0.05 L on every course), so they never count here: ${ctx.unvalued().map((id) => esc(ctx.skillName(id))).join(", ")}.</p>` : ""}
         <details><summary class="mini">As text, to copy</summary><pre class="mini fp-text">${esc(text)}</pre></details>
       </details>`;
     }
@@ -458,7 +459,7 @@
 
   const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1", RENTALS_KEY = "uma-rentals-v1";
   const FROM = { p1: "Parent 1", p2: "Parent 2", g11: "P1's parent", g12: "P1's parent", g21: "P2's parent", g22: "P2's parent" };
-  const WHY = { L: "race skill", green: "green", recovery: "recovery" };
+  const WHY = { L: "race skill", green: "green", recovery: "recovery", position: "lane/vision" };
   const api = { create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamilyPlanner = api;

@@ -2786,6 +2786,10 @@
         return Object.assign(out, { L });
       },
       // How likely the racing deck built in CM & decks offers each skill, or null.
+      // White skills the app has no race value for (none in the Umalator's data, or under 0.05 L
+      // on every chart) and that aren't counted by condition either: named, so you know.
+      unvalued: () => Object.keys(window.UmaSkillBudget.DATA.skills).filter((id) => window.UmaSkillBudget.DATA.skills[id][3] === 1 && /^20/.test(id) && !SV.skills[id]
+        && !(window.UmaSkillKinds && window.UmaSkillKinds.skills[id]) && !(window.UmaDebuffs && window.UmaDebuffs[id]) && D.DATA.skills[id]),
       aceOffers: () => {
         const r = state.tab === "cm" ? optResult : hostStash.cm && hostStash.cm.optResult;
         return r && r.goal === "race" && r.skills ? Object.fromEntries(r.skills.map((x) => [String(x.id), x.p])) : null;

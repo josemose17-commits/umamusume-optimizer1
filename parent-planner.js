@@ -10,7 +10,7 @@
   // Rating per skill point for converting SP: the median white skill's rating ÷ its full cost
   // (1.21; hint discounts raise it). Used only for rough "or this many more SP" readouts.
   const SP_RATING = 1.2;
-  const WHY = { L: "race skill", green: "green", recovery: "recovery" };
+  const WHY = { L: "race skill", green: "green", recovery: "recovery", position: "lane/vision" };
 
   // Rating per skill point for buying these skills: the median of each one's rating at these
   // aptitudes ÷ its full cost (no hint discount). SP_RATING when there are too few to tell.
