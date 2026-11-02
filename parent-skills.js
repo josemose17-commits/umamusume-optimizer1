@@ -2,6 +2,7 @@
 // target scoring and its event-choice/availability estimates.
 (function (root) {
   const Prerequisites = root.UmaParentPrerequisites || (typeof require !== "undefined" ? require("./parent-prerequisites.js") : null);
+  const Release = root.UmaSkillRelease || (typeof require !== "undefined" ? require("./skill-release.js") : null);
   function build(cards, opts = {}) {
     const info = opts.skills || {}, purchase = opts.purchases || {};
     const events = opts.events || {cards: {}, events: {}};
@@ -12,7 +13,8 @@
       id = String(id);
       if (!byId.has(id)) {
         const m = info[id];
-        byId.set(id, {id, rarity: m ? m[2] : null, release: m ? !!m[3] : null,
+        // Released: out on Global (by the ace's cup with opts.skillsBy, a JP date; else now).
+        byId.set(id, {id, rarity: m ? m[2] : null, release: m ? Release.outBy(m, opts.skillsBy || null) : null,
           spark: !!(m && m[2] === 1 && !id.startsWith('9')), target: (opts.targets || {})[id] > 0,
           must: must.has(id), sources: []});
       }
@@ -29,7 +31,7 @@
         return;
       }
       // An excluded or unknown-release gold cannot establish a Global white route.
-      if (opts.globalOnly && !(info[id] && info[id][3])) return;
+      if (opts.globalOnly && !Release.outBy(info[id], opts.skillsBy || null)) return;
       canonical.unlocks(id).forEach(other => {
         const throughGold = isGold && canonical.whites(id).includes(other);
         add(other, card, Object.assign({}, route, {via:id, purchase:throughGold ? 'prerequisite' : 'upgrade'}));

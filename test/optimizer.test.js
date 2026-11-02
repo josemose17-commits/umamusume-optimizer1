@@ -86,7 +86,8 @@ test("presets: every CM has a course, dates and a build; Global dates run in ord
   for (let i = 1; i < cms.length; i++) assert.ok(cms[i].global.start > cms[i - 1].global.start, cms[i].id + " is out of order");
   const sag = cms.find((p) => p.no === 20);
   assert.strictEqual(sag.name, "Sagittarius Cup 2");
-  assert.strictEqual(sag.global.start, "2026-10-07");
+  // GameTora's record of the race start (the Umalator's preset said 2026-10-07, its announcement).
+  assert.strictEqual(sag.global.start, "2026-10-10");
   assert.strictEqual(sag.course.track, "Nakayama");
   assert.strictEqual(sag.course.distance, 2500);
   assert.ok(!sag.global.est);

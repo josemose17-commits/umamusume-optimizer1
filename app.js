@@ -2187,6 +2187,37 @@
     return p.name + " · " + p.course.track + " " + p.course.distance + "m " + p.course.surface + " · " + (p.global.est ? "~" : "") + fmtDate(p.global.start);
   }
 
+  const monthYear = (s) => MONTHS[+s.slice(5, 7) - 1] + " " + s.slice(0, 4);
+  // The simulator a cup's skill values came from (data/skillvalues/index.js meta.sims): "global",
+  // "jp", or a JP-only cup's variant { syoubu, changed } (tools/build_skill_versions.js).
+  function simVariant(p) {
+    const name = SV && SV.meta && SV.meta.sims ? SV.meta.sims[p.id] : null;
+    const v = name && SV.meta.variants ? SV.meta.variants[name] : null;
+    return v ? Object.assign({ kind: "variant" }, v) : { kind: name || (p.sim === "global" ? "global" : "jp") };
+  }
+  // Which half of the pack each skill needs on this cup (parent-relevance.js positionsWith).
+  const posCache = {};
+  function positionsFor(p) {
+    const v = p ? simVariant(p) : {};
+    if (!v.positions) return window.UmaSkillPositions;
+    return posCache[p.id] || (posCache[p.id] = window.UmaParentRelevance.positionsWith(window.UmaSkillPositions, v.positions));
+  }
+  function simNote(p) {
+    const v = simVariant(p);
+    if (v.kind === "global") return "Run on the Global Umalator: Global's skills as they are now.";
+    if (v.kind !== "variant") return "Run on the JP Umalator.";
+    const n = Object.keys(v.changed || {}).length;
+    return `Run on the JP Umalator${SV.meta.jpBuild ? " (build of " + fmtDate(SV.meta.jpBuild) + ")" : ""} as JP's game was on this cup's JP date, ${fmtDate(p.jp.start)}: Global runs JP's calendar in order. Skills have the versions JP's balance updates had given them by then${n ? `, so ${n} of the skills on Global now are valued at a newer version than Global has (marked “JP version”)` : ", which for every skill on Global now is the version Global has"}. Stamina showdown (JP added it on Aug 24, 2023) is ${v.syoubu ? "on" : "off"}${v.syoubuLong ? ", at the strength JP gave long races on Oct 29, 2024 (distance factor 1.5 up to 2600 m and 1.8 beyond, as players measured it; the Umalator has 1.2 and 1.5)" : ""}.`;
+  }
+  // Release label for a skill row: none when out on Global now, "By then" when JP had it by this
+  // cup's JP date, "JP" otherwise.
+  function releasePill(info, p, cut) {
+    const st = window.UmaSkillRelease.status(info, cut);
+    if (st === "global") return "";
+    if (st === "by") return ` <span class="pill" title="Not on Global yet. JP released it on ${fmtDate(info[4])}, before this cup's JP date (${fmtDate(p.jp.start)}), so it should be out on Global by this cup.">By then</span>`;
+    return ` <span class="pill" title="${info[4] ? "JP released it on " + fmtDate(info[4]) + (cut ? ", after this cup's JP date (" + fmtDate(p.jp.start) + "), so it won't be out on Global by this cup" : "; not on Global yet") : "Not on Global yet"}.">JP</span>`;
+  }
+
   function loadSkillValues(id) {
     if (svCache[id]) return;
     if (!SV || SV.ready.indexOf(id) === -1) { svCache[id] = "missing"; return; }
@@ -2204,7 +2235,8 @@
   // need her in the other half of the field (Leap Forward for a Pace Chaser) are left out here,
   // for every use: data/skill-positions.js, parent-relevance.js positionFits.
   function skillRows(pid, style) {
-    const fits = (r) => window.UmaParentRelevance.positionFits(window.UmaSkillPositions, r.id, style);
+    const pos = positionsFor(presetById(pid));
+    const fits = (r) => window.UmaParentRelevance.positionFits(pos, r.id, style);
     const mine = pasted[pid] && pasted[pid][style];
     if (mine) {
       return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).filter(fits).sort((a, b) => b.L - a.L);
@@ -2228,7 +2260,7 @@
     if (c.goal !== "race") {
       const inventory = window.UmaParentSkills.build(ids.map(id => D.card(id)).filter(card => D.onGlobal(card, TODAY)), {
         skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
-        globalOnly: c.globalSkills, today: TODAY
+        globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(presetById(c.preset))
       });
       inventory.skills.forEach(skill => { out[skill.id] = skill.sources.map(source => D.card(source.card)); });
     } else {
@@ -2268,8 +2300,8 @@
     const sv = skillMap(p.id, c.style);
     const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +cm().itManual, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace") {
-      o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY };
-      if (c.globalSkills) o.must = o.must.filter(released);
+      o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(p) };
+      if (c.globalSkills) o.must = o.must.filter((id) => released(id, p));
       // Reach SS: the search keeps a deck whose predicted rating reaches SS, then the most skills.
       if (c.reachSS && window.UmaRating) {
         const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null, stars = t ? t.r : 3;
@@ -2278,13 +2310,16 @@
     }
     return o;
   }
-  const released = (id) => !!(SV.skills[id] && SV.skills[id][3]);
+  // Out on Global for this cup (skill-release.js): Global's skills now, or for a cup Global hasn't
+  // reached yet, also every skill JP released by that cup's JP date.
+  const skillsBy = (p) => window.UmaSkillRelease.cutoff(p, TODAY);
+  const released = (id, p) => window.UmaSkillRelease.outBy(SV.skills[id], skillsBy(p));
   // The parent's relevant skills for a race and style (parent-relevance.js): { targets, why },
   // why naming the rule ("L", "green", "recovery"). Global releases only if set.
   function parentTargetsFor(c, p) {
     const sv = skillMap(p.id, c.style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
-    const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: window.UmaSkillPositions });
-    if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id)) { delete out.targets[id]; delete out.why[id]; } });
+    const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(p) });
+    if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id, p)) { delete out.targets[id]; delete out.why[id]; } });
     return out;
   }
   // Rating per skill point when the parent buys her relevant skills: the median of their rating
@@ -2379,7 +2414,7 @@
         } catch (err) { est = null; }
       }
       if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills;
-      const result = Object.assign(r, { key, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      const result = Object.assign(r, { key, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       optRun = null;
       // You moved to the other deck tab while it ran: keep the result with the tab it's for.
       if (host !== shownHost) { hostStash[host] = { optResult: result }; if (state.tab === "cm" || state.tab === "parents") renderCM(); return; }
@@ -2577,7 +2612,7 @@
         <div class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + p.course.layout + ")" : ""} · ${p.course.dist}</div>
         <div>${esc(p.conditions)}</div>
         <div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div>
-        ${p.global.note ? `<div class="mini">${esc(p.global.note)}</div>` : p.global.est ? `<div class="mini">Global runs Champions Meetings in JP's order, lately about every 3 weeks, so this date is an estimate.</div>` : ""}
+        ${p.global.note ? `<div class="mini">${esc(p.global.note)}</div>` : p.global.est ? `<div class="mini">Global runs Champions Meetings in JP's order, so this date is an estimate: ${p.global.by === "GameTora forecast" ? `GameTora's forecast of Global's calendar, at Global's measured pace (about ${P.meta.forecast ? P.meta.forecast.jpDaysPerGlobalDay.toFixed(1) : "1.4"} JP days per Global day)` : "about 3 weeks after the cup before"}.</div>` : ""}
       </div>
       <div class="row-wrap">
         <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
@@ -2661,9 +2696,9 @@
     let sourceIds = [...new Set(D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).flatMap((x) => (x.hs || []).concat(x.es || [])))];
     if (c.goal !== "race") {
       sourceIds = sourceIds.map(String);
-      if (c.globalSkills) sourceIds = sourceIds.filter(id => SV.skills[id] && SV.skills[id][3]);
+      if (c.globalSkills) sourceIds = sourceIds.filter(id => released(id, presetById(c.preset)));
       sourceIds = [...new Set(sourceIds.flatMap(id => [id, ...parentPurchaseRoutes.whites(id)]))];
-      if (c.globalSkills) sourceIds = sourceIds.filter(id => SV.skills[id] && SV.skills[id][3]);
+      if (c.globalSkills) sourceIds = sourceIds.filter(id => released(id, presetById(c.preset)));
       [...known].forEach(id => parentPurchaseRoutes.whites(id).forEach(white => known.add(white)));
     }
     const names = sourceIds.map(id => debuffOrSkillName(id)).sort();
@@ -2781,8 +2816,8 @@
         loadSkillValues(id);
         if (!(pasted[id] && pasted[id][race.style]) && typeof svCache[id] !== "object") return null;
         const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
-        const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: window.UmaSkillPositions });
-        if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x)) { delete out.targets[x]; delete out.why[x]; } });
+        const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(race.preset) });
+        if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x, race.preset)) { delete out.targets[x]; delete out.why[x]; } });
         return Object.assign(out, { L });
       },
       // How likely the racing deck built in CM & decks offers each skill, or null.
@@ -2800,7 +2835,7 @@
         const r = deckHost() === "parents" ? optResult : hostStash.parents && hostStash.parents.optResult;
         if (!r || !r.cards || !r.parentConfig) return null;
         const pool = window.UmaParentSkills.build(r.cards.map((x) => D.card(x.id)), { skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
-          targets: r.parentConfig.targets, must: r.parentConfig.must, globalOnly: r.parentConfig.globalOnly, today: TODAY });
+          targets: r.parentConfig.targets, must: r.parentConfig.must, globalOnly: r.parentConfig.globalOnly, today: TODAY, skillsBy: r.parentConfig.skillsBy || null });
         return pool.skills.filter((x) => x.target && x.spark).map((x) => x.id);
       },
       setTrainee: (id) => setTrainee(id),
@@ -2812,7 +2847,7 @@
         euReady();
         // The race's skill table (must-have ☆, Global-only releases) in a closed box.
         const race = `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-goto-tab="cm">change it in CM &amp; decks</button>).</p>`;
-        return `<div class="cm">${race}${cmOptimizer(p, c)}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), Global releases only</summary>${cmSkills(p, c)}</details></div>`;
+        return `<div class="cm">${race}${cmOptimizer(p, c)}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), ${skillsBy(p) ? "skills out on Global by this cup" : "Global releases only"}</summary>${cmSkills(p, c)}</details></div>`;
       },
       // ② Races sets ③ Deck's Independent Training race count (no re-render: the page is drawing).
       setItRaces: (n) => { const c = cm(); if (n == null) delete c.itRaces; else c.itRaces = n; },
@@ -2890,7 +2925,7 @@
     const config = r.parentConfig;
     const pool = window.UmaParentSkills.build(r.cards.map(x => D.card(x.id)), {
       skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
-      targets: config.targets, must: config.must, globalOnly: config.globalOnly, today: TODAY
+      targets: config.targets, must: config.must, globalOnly: config.globalOnly, today: TODAY, skillsBy: config.skillsBy || null
     });
     const name = id => skillNameHTML(id);
     const modeledAvailability = id => {
@@ -3066,9 +3101,11 @@
     const trn = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
     const known = new Set(trn ? trn.us.concat(trn.is, trn.as) : []);
     const q = (c.sq || "").trim().toLowerCase();
+    const cut = skillsBy(p), REL = window.UmaSkillRelease;
+    const changed = mine ? {} : simVariant(p).changed || {};
     rows = rows.filter((r) => {
       const info = skillInfo(r.id);
-      if (c.globalSkills && !info[3]) return false;
+      if (c.globalSkills && !REL.outBy(info, cut)) return false;
       if (q && info[0].toLowerCase().indexOf(q) === -1) return false;
       if (c.sfilter === "cards" && !src[r.id]) return false;
       if (c.sfilter === "deck" && !(src[r.id] || []).some((x) => deckIds.has(x.id)) && !D.DATA.supports.some((x) => deckIds.has(x.id) && (x.hs || []).concat(x.es || []).indexOf(r.id) !== -1)) return false;
@@ -3082,11 +3119,11 @@
       : "No skills match.";
     return `<section class="panel cm-skills">
       <h3>Skills for this race · ${STYLE_LABEL[c.style]}</h3>
-      <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill.`} SP totals include every required tier before hints. L per 100 SP uses that full price. The affordable-skill result applies the hints available in each simulated career.</p>
+      <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill. ${simNote(p)}`} SP totals include every required tier before hints. L per 100 SP uses that full price. The affordable-skill result applies the hints available in each simulated career.</p>
       <div class="db-controls">
         <label class="field grow"><span>Search</span><input data-cm="sq" value="${esc(c.sq || "")}" placeholder="Skill name" autocomplete="off"></label>
         <label class="field"><span>Show</span><select data-cm="sfilter">${opt([["all", "All skills"], ["cards", c.ownedOnly && ownedIds().length ? "Skills my cards can give" : "Skills Global cards can give"], ["deck", "Skills my coach deck can give"]], c.sfilter)}</select></label>
-        <label class="chip-toggle"><input type="checkbox" data-cm="globalSkills" ${c.globalSkills ? "checked" : ""}> On Global only</label>
+        <label class="chip-toggle" ${cut ? `title="Skills on Global now, plus the ones JP had by this cup's JP date (${fmtDate(p.jp.start)}): Global releases in JP's order."` : ""}><input type="checkbox" data-cm="globalSkills" ${c.globalSkills ? "checked" : ""}> ${cut ? "Out on Global by this cup" : "On Global only"}</label>
       </div>
       <div id="cmSkillTable">${shown.length ? `<div class="table-wrap"><table class="skills"><thead><tr><th>Skill</th><th class="num">Median</th>${mine ? "" : '<th class="num opt-col">Mean</th>'}<th class="num">SP total</th><th class="num">L / 100 SP</th><th class="opt-col">From cards</th></tr></thead><tbody>
         ${shown.map((r) => {
@@ -3095,7 +3132,7 @@
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
           const must = c.must.indexOf(String(r.id)) !== -1;
-          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       <details class="paste">
