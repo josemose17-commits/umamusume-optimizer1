@@ -1,11 +1,14 @@
-# Handoff: skill values by cup date (prompt for the next assistant)
+# Skill values by cup date: model, state and rebuild (handoff)
 
-Copy everything below the line into the next assistant (GPT or another Claude) as its prompt. It is
-written so it can finish the work with no access to the previous session.
+**Status (2026-11-02 01:50 UTC): finished.** Every cup from CM 22 on (CM 50 included) and every
+League of Heroes is simulated on its JP-dated simulator, the count-skill and metadata passes ran,
+and all 434 tests pass. This file records the model and how to rebuild it from scratch. If you
+give it to another assistant (GPT or another Claude), copy everything below the line; section 4b
+rebuilds everything.
 
 ---
 
-You are continuing a half-finished change in the GitHub repository
+You are working on a change (finished on 2026-11-02; use this to rebuild or extend it) in the GitHub repository
 `josemose17-commits/umamusume-optimizer1` ("Uma Turn Coach", a static browser app for *Umamusume:
 Pretty Derby*: open `index.html`, no build step). Work on the branch
 `claude/funny-brahmagupta-a7v8n2`. **Never push to `main`**: `.github/workflows/auto-merge.yml`
@@ -118,16 +121,13 @@ Code and tools (all committed):
   `test/skill-versions.test.js` (new), updates in `test/parent-ss.test.js`,
   `test/optimizer.test.js`; `index.html` cache stamps bumped to `?v=20261101versions`.
 
-Data state at the last update (2026-11-02 01:20 UTC): every simulation job is cached except
-cm47's Pace/Late/End jobs (running). 61 of the jobs came from a parallel session's checkpoint
-(`Uma_Skill_Values_Checkpoint_2026-11-01.zip`: a faster "native" runner plus reuse of unchanged
-earlier values); on the 38 jobs both sessions computed, the composed data is identical except for
-three skill-count rows that the count pass replaces anyway. That checkpoint's `changes.patch`
-(the `--metadata-only` compose pass and its test) is applied. Next: compose, count pass,
-metadata-only pass, tests, push. **The three tests that fail until
-then are expected**: "every cup Global hasn't reached ran on its own JP-dated simulator", "a cup is
-never valued behind Global's current skills…", "a JP-dated cup splits the pack by its own skill
-versions". Everything else (430 tests) passes.
+Final data state: all 34 JP-dated cups (cm22–cm50, LoH 1–5) simulated. 61 of the 136 simulation
+jobs came from a parallel session's checkpoint (`Uma_Skill_Values_Checkpoint_2026-11-01.zip`:
+a faster "native" runner plus reuse of unchanged earlier values); on the 38 jobs both sessions
+ran, the composed data was identical apart from three skill-count rows that the count pass
+replaces. That checkpoint's `changes.patch` (the `--metadata-only` pass and its test) is in.
+Then: compose → `build_count_skills.js --variants` (all 45 cups, 17 count skills worth ≥ 0.05 L)
+→ `--metadata-only` → 434/434 tests → checks in 4c (all passed).
 
 ## 4. How to finish
 
