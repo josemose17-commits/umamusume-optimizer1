@@ -272,12 +272,16 @@ Champions Meeting and League of Heroes presets (`data/presets.js`) come from Gam
 python3 tools/build_presets.py <GameTora cache dir> <umalator-global bundle.js> <umalator bundle.js> <umalator course_data.json> presets.json
 ```
 
-Skill values (`data/skillvalues/`) come from running alpha123's [Umalator](https://alpha123.github.io/uma-tools/umalator-global/) headless: `tools/umalator_run.js` loads its `simulator.worker.js` in Node and runs the same skill chart as the site, for every skill, preset and running style, with a strong Global stat line for the distance. The values match the website's own skill chart exactly for the same setup. uma-tools is GPL-3.0 and none of its code is included here: the runner loads a downloaded copy at build time, and only the resulting numbers are committed. Cups Global has announced use the Global Umalator; later cups and League of Heroes use the JP one, which has every course. To rebuild (takes a few hours on 4 cores, and resumes if stopped):
+Skill values (`data/skillvalues/`) come from running alpha123's [Umalator](https://alpha123.github.io/uma-tools/umalator-global/) headless: `tools/umalator_run.js` loads its `simulator.worker.js` in Node and uses the website's skill-chart sampling, with a fixed stat line for each distance. Global cups through CM21 use Global's current simulator. CM22 onward and League of Heroes use a simulator with each cup's JP-dated skill versions, never older than Global's current versions, and that date's supported stamina-showdown rules (see the CM & decks section). uma-tools is GPL-3.0; its code is downloaded at build time, and only the resulting numbers are committed. To rebuild, first prepare the simulator variants and input files as described in `docs/skill-values-handoff.md`, then run:
 
 ```
-node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --workers=4
-node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --compose=data/skillvalues --skills=<GameTora skills.json>
+node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --workers=4 --variants=<variants dir>
+node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --compose=data/skillvalues --gametora=<GameTora cache dir> --variants=<variants dir>
+node tools/build_count_skills.js <umalator-global dir> <umalator dir> <GameTora skills.json> --workers=4 --variants=<variants dir>
+node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --compose=data/skillvalues --gametora=<GameTora cache dir> --variants=<variants dir> --metadata-only
 ```
+
+The last pass refreshes names and JP release dates for skills inserted by the count-skill pass. It preserves those skill values and each cup's simulator provenance. Simulation jobs are cached, so an interrupted rebuild can resume.
 
 When releasing a change to the site, bump the `?v=` number on the file links in `index.html` so browsers fetch the new files instead of cached ones.
 

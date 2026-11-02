@@ -5,6 +5,8 @@
 // Usage: node tools/build_skillvalues.js <presets.json> <umalator-global dir> <umalator jp dir>
 //        <cache dir> [--workers=4] [--only=cm20,cm21] [--variants=<dir from build_skill_versions.js>]
 //   --variants: cups listed there run on their own simulator (JP's game as of that cup's JP date).
+//   --metadata-only with --compose refreshes names and release dates from existing charts,
+//   including count-dependent skills inserted by build_count_skills.js; no chart is rewritten.
 //   Then write data/skillvalues.js from whatever is cached so far (cups without a cache keep the
 //   values already in data/skillvalues):
 //        node tools/build_skillvalues.js <same args> --compose=data/skillvalues --gametora=<dir>
@@ -61,6 +63,7 @@ function specKey(spec) { return crypto.createHash('sha1').update(JSON.stringify(
 // of [skill id, median L x100, mean L x100], loaded when that preset is picked.
 function compose() {
   const outDir = flags.compose;
+  const metadataOnly = Object.prototype.hasOwnProperty.call(flags, 'metadata-only');
   fs.mkdirSync(outDir, { recursive: true });
   const G = (f) => JSON.parse(fs.readFileSync(path.join(flags.gametora, f), 'utf8'));
   const gt = G('skills.json');
@@ -81,6 +84,16 @@ function compose() {
   const sims = {};
   let missing = 0, kept = 0;
   for (const p of presets) {
+    const file = path.join(outDir, p.id + '.json');
+    if (metadataOnly) {
+      if (old.ready.indexOf(p.id) !== -1 && fs.existsSync(file)) {
+        Object.values(JSON.parse(fs.readFileSync(file, 'utf8'))).forEach((rows) => rows.forEach(([id]) => used.add(String(id))));
+        ready.push(p.id);
+        sims[p.id] = (old.meta.sims && old.meta.sims[p.id]) || (p.sim === 'global' ? 'global' : 'jp');
+        kept++;
+      }
+      continue;
+    }
     const per = {};
     for (const strategy of STRATEGIES) {
       const f = path.join(cacheDir, specKey({ sim: p.sim, courseId: p.course.id, racedef: p.racedef, stats: p.stats, strategy }) + '.json');
@@ -92,7 +105,6 @@ function compose() {
         .map(([id, v]) => { used.add(id); return [+id, Math.round(v[0] * 100), Math.round(v[1] * 100)]; })
         .sort((a, b) => b[1] - a[1]);
     }
-    const file = path.join(outDir, p.id + '.json');
     if (Object.keys(per).length === STRATEGIES.length) {
       fs.writeFileSync(file, JSON.stringify(per));
       ready.push(p.id);
@@ -164,6 +176,7 @@ function compose() {
     // JP-only cup's variant (tools/build_skill_versions.js): JP's game as of that cup's JP date.
     sims,
   };
+  if (metadataOnly && old.meta.countSkills) meta.countSkills = old.meta.countSkills;
   if (VARIANTS) {
     meta.jpBuild = VARIANTS.jpBuild;
     // Per variant: stamina showdown on or off, and the skills out on Global now that it runs at

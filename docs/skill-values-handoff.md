@@ -118,9 +118,13 @@ Code and tools (all committed):
   `test/skill-versions.test.js` (new), updates in `test/parent-ss.test.js`,
   `test/optimizer.test.js`; `index.html` cache stamps bumped to `?v=20261101versions`.
 
-Data state at the last update (2026-11-02 00:15 UTC): cm22–cm28 and cm50 recomputed and
-committed (without the count-skill pass, which `finalize` runs over every cup at the end); cm29–cm49
-and LoH 1–5 still simulating (`grep ok` in the run log; nearest Global cups go first). **The three tests that fail until
+Data state at the last update (2026-11-02 01:20 UTC): every simulation job is cached except
+cm47's Pace/Late/End jobs (running). 61 of the jobs came from a parallel session's checkpoint
+(`Uma_Skill_Values_Checkpoint_2026-11-01.zip`: a faster "native" runner plus reuse of unchanged
+earlier values); on the 38 jobs both sessions computed, the composed data is identical except for
+three skill-count rows that the count pass replaces anyway. That checkpoint's `changes.patch`
+(the `--metadata-only` compose pass and its test) is applied. Next: compose, count pass,
+metadata-only pass, tests, push. **The three tests that fail until
 then are expected**: "every cup Global hasn't reached ran on its own JP-dated simulator", "a cup is
 never valued behind Global's current skills…", "a JP-dated cup splits the pack by its own skill
 versions". Everything else (430 tests) passes.
@@ -170,8 +174,13 @@ setsid nohup node tools/build_skillvalues.js $S/presets.json $S/uma/global $S/um
 # wait until $S/run.log says "all done" (resumable: cached jobs are skipped on a restart), then:
 node tools/build_skillvalues.js $S/presets.json $S/uma/global $S/uma/jp $S/cache --variants=$S/variants --compose=data/skillvalues --gametora=$S/gt
 node tools/build_count_skills.js $S/uma/global $S/uma/jp $S/gt/skills.json --variants=$S/variants --workers=$(nproc)
+node tools/build_skillvalues.js $S/presets.json $S/uma/global $S/uma/jp $S/cache --variants=$S/variants --compose=data/skillvalues --gametora=$S/gt --metadata-only
 node --test test/*.test.js
 ```
+
+The last metadata-only pass is required: the count-skill pass can insert inherited skills that
+the standalone chart did not include. It refreshes their names and first JP release dates from
+the same sources without replacing the corrected count-skill values or their simulator labels.
 
 Notes: the Umalator's newest data may have moved on since 2026-11-01; that's fine (the tools read
 history and today's builds), but if the JP build gains a new balance patch, add its date to
