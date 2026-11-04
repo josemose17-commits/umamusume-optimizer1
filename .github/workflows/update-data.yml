@@ -50,6 +50,12 @@ jobs:
         continue-on-error: true
         run: python3 tools/build_parent_data.py
 
+      # Global's banners and GameTora's forecast of the next ones, for the pull planner. If
+      # GameTora can't be reached, the last data is kept.
+      - name: Rebuild banner calendar (GameTora)
+        continue-on-error: true
+        run: python3 tools/build_banners.py
+
       - name: Check for changes
         id: diff
         run: |

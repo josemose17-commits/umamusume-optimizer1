@@ -12,7 +12,9 @@
 // Each uma also has her own affinity (individual()), which is what her sparks' chances scale
 // with: a spark's chance × (1 + her affinity / 100), capped at 100% (GameTora's inheritance
 // chances). Checked against GameTora's own code on 1,500 random families: totals and every
-// uma's own affinity match.
+// uma's own affinity match. A family with a character not on Global yet takes JP's groups for the
+// pairs and trios that include her (data/parent-data.js affinityJp; JP's points match Global's on
+// every group they share), so future characters get their affinity too.
 (function (root) {
   "use strict";
   const WIN_POINTS = 3;
@@ -21,17 +23,21 @@
   const pdata = () => root.UmaParentData || (typeof require === "function" ? require("./data/parent-data.js") : null);
   const gdata = () => root.UmaData || (typeof require === "function" ? require("./data/gametora.js") : null);
 
-  let index = null;
+  const build = (list) => {
+    const m = new Map();
+    list.forEach(([pts, members], i) => members.forEach((c) => {
+      if (!m.has(c)) m.set(c, []);
+      m.get(c).push(i);
+    }));
+    return m;
+  };
+  let index = null, indexJp = null;
   function groupsOf(cid) {
-    if (!index) {
-      index = new Map();
-      pdata().affinity.forEach(([pts, members], i) => members.forEach((m) => {
-        if (!index.has(m)) index.set(m, []);
-        index.get(m).push(i);
-      }));
-    }
+    if (!index) index = build(pdata().affinity);
     return index.get(+cid) || [];
   }
+  // On Global: in one of Global's groups (every Global character is).
+  const onGlobal = (cid) => (groupsOf(cid), index.has(+cid));
 
   // Points from every group all of these characters belong to (kept per set: families are
   // ranked by the thousand).
@@ -44,11 +50,14 @@
   }
   function groupPoints(cids) {
     const P = pdata();
-    const first = groupsOf(cids[0]);
+    const future = !!(P.affinityJp && cids.some((c) => !onGlobal(c)));
+    const list = future ? P.affinityJp : P.affinity;
+    if (future && !indexJp) indexJp = build(P.affinityJp);
+    const first = future ? indexJp.get(+cids[0]) || [] : groupsOf(cids[0]);
     let sum = 0;
     first.forEach((i) => {
-      const m = P.affinity[i][1];
-      if (cids.every((c) => m.indexOf(+c) !== -1)) sum += P.affinity[i][0];
+      const m = list[i][1];
+      if (cids.every((c) => m.indexOf(+c) !== -1)) sum += list[i][0];
     });
     return sum;
   }
