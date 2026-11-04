@@ -683,3 +683,13 @@ table.pred .over { color: var(--accent); }
 .pp-step { margin: 18px 0 6px; font-size: 15px; letter-spacing: .02em; }
 .fp-fam .fp-grandrow td:first-child { padding-left: 18px; }
 .fp-train { margin-bottom: 8px; }
+
+/* Pull planner */
+.pulls { display: grid; gap: 14px; }
+.pulls h2 { margin: 0; }
+.pull-team { display: grid; gap: 6px; }
+.pull-team h4 { margin: 6px 0 0; }
+.pull-team-row { align-items: center; }
+.pull-team-row .mini { flex: 1 1 220px; }
+.pulls td.num, .pulls th.num { text-align: right; white-space: nowrap; }
+.pulls details > summary { cursor: pointer; }

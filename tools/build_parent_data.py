@@ -7,6 +7,9 @@ works offline.
 
 - Affinity groups (succession_relation / succession_relation_member, Global) and the rank
   thresholds (single_mode_rank) come from GameTora (https://gametora.com/umamusume).
+- affinityJp: JP's groups that include a character not on Global yet, so families with future
+  characters (the pull planner, the Parents tab) get their affinity. JP's points match Global's
+  for every group the two share; a family of Global characters only uses Global's groups.
 - Each skill's rating value, with its aptitude-dependent values, comes from UmaTools' skill
   table (https://daftuyda.moe, data from GameTora and GameWith). Only the numbers are taken;
   rows are matched to GameTora skill ids by English or Japanese name.
@@ -52,6 +55,13 @@ def main():
     groups = [[r["relation_point"], sorted(set(by_type.get(r["relation_type"], [])))]
               for r in sorted(relation, key=lambda r: r["relation_type"])]
     groups = [g for g in groups if len(g[1]) > 1]
+    global_chars = {m["chara_id"] for m in members}
+    by_type_jp = {}
+    for m in gametora(manifest, "db-files/succession_relation_member"):
+        by_type_jp.setdefault(m["relation_type"], []).append(m["chara_id"])
+    groups_jp = [[r["relation_point"], sorted(set(by_type_jp.get(r["relation_type"], [])))]
+                 for r in sorted(gametora(manifest, "db-files/succession_relation"), key=lambda r: r["relation_type"])]
+    groups_jp = [g for g in groups_jp if len(g[1]) > 1 and any(c not in global_chars for c in g[1])]
 
     # Skill rating values. Columns: base value, then the value at S/A, B/C, D/E/F and G
     # aptitude for the skill's role (distance, style or surface); blank when it doesn't vary.
@@ -91,6 +101,7 @@ def main():
         "meta": {"built": datetime.date.today().isoformat(), "source": "GameTora; skill ratings from UmaTools (daftuyda.moe)",
                  "unmatched": len(unmatched)},
         "affinity": groups,
+        "affinityJp": groups_jp,
         "ranks": [r["min_value"] for r in sorted(ranks, key=lambda r: r["id"])],
         "skillRating": rating,
     }
@@ -100,7 +111,7 @@ def main():
         f.write(json.dumps(data, separators=(",", ":"), ensure_ascii=False))
         f.write(";\n  if (typeof module !== \"undefined\" && module.exports) module.exports = DATA;\n"
                 "  else root.UmaParentData = DATA;\n})(typeof window !== \"undefined\" ? window : globalThis);\n")
-    print("affinity groups %d, ranks %d, skill ratings %d, unmatched %d" % (len(groups), len(ranks), len(rating), len(unmatched)))
+    print("affinity groups %d (+%d JP with future characters), ranks %d, skill ratings %d, unmatched %d" % (len(groups), len(groups_jp), len(ranks), len(rating), len(unmatched)))
 
 
 if __name__ == "__main__":
