@@ -14,6 +14,13 @@ Sources (GameTora, gametora.com/umamusume):
     from Global's pace against JP, featured cards from JP's banners). Rates are assumed to follow
     the same rule as Global's banners so far.
   - en/foresight/predicted_releases: each JP card's and trainee's forecast Global release.
+  - gacha/support-standard (JP's banners): the anniversaries. JP's game opened on 2021-02-24 and
+    holds an anniversary every Feb 24 and a half anniversary every Aug 24, each with its
+    selectors (uma.guide's selector overview: a free support selector from the anniversary
+    missions, and $20.99 and $69.99 ones for support cards and umas). Global runs JP's campaigns
+    in the same order on its own, faster calendar (its 1.5 Anniversary came in 2026), so each
+    anniversary's Global date is that of the JP banner that opened it: Global's own when it's
+    announced, else GameTora's forecast.
 Game data (c) Cygames, Inc.
 """
 import datetime
@@ -86,6 +93,31 @@ def main():
                               "est": bool(b.get("is_estimated", True)), "pick": sorted(pick, key=lambda x: -x[1])})
     for kind in out:
         out[kind].sort(key=lambda b: (b["start"], b["id"]))
+    # The anniversaries on Global's calendar.
+    jp_start = {}
+    for b in get("gacha/support-standard"):
+        if b.get("start"):
+            jp_start.setdefault(day(b["start"]), []).append(b["id"])
+    announced = {b["id"]: b for b in get("en/gacha/support-standard")}
+    forecast = {b["id"]: b for b in timeline.get("future_support_banners", [])}
+    events = []
+    for year in range(2022, 2040):
+        for md, half in (("02-24", 0), ("08-24", 0.5)):
+            jp = "%d-%s" % (year, md)
+            ids = sorted(jp_start.get(jp, []))
+            if not ids:
+                continue
+            g = next((announced[i] for i in ids if i in announced), None)
+            f = next((forecast[i] for i in ids if i in forecast), None)
+            if g and g.get("start"):
+                start, est = day(g["start"]), False
+            elif f:
+                start, est = day(f["display_start"]), bool(f.get("is_estimated", True))
+            else:
+                continue
+            n = year - 2021 + half
+            name = ("%g" % n) + ({1: "st", 2: "nd", 3: "rd"}.get(int(n), "th") if n == int(n) else "") + " Anniversary"
+            events.append({"id": "anniv%g" % n, "kind": "anniversary", "name": name, "jp": jp, "start": start, "est": est})
     predicted = get("en/foresight/predicted_releases")
     release = {
         "cards": {k: v["release_date"] for k, v in sorted(predicted.get("support_cards", {}).items())},
@@ -97,7 +129,7 @@ def main():
             "source": "GameTora (gametora.com): Global banners with their rates, and GameTora's forecast of Global's banners and releases",
             "pullCarats": PULL_CARATS, "spark": SPARK, "featured": {k: {str(r): v for r, v in d.items()} for k, d in FEATURED.items()},
         },
-        "support": out["support"], "trainee": out["trainee"], "release": release,
+        "support": out["support"], "trainee": out["trainee"], "release": release, "events": events,
     }
     body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     # Keep the old build date when nothing else changed, so scheduled rebuilds stay quiet.
@@ -117,7 +149,7 @@ def main():
         f.write("(function (root) {\n  const BANNERS = " + body + ";\n")
         f.write('  if (typeof module !== "undefined" && module.exports) module.exports = BANNERS;\n  else root.UmaBanners = BANNERS;\n')
         f.write('})(typeof window !== "undefined" ? window : globalThis);\n')
-    print("wrote", OUT, os.path.getsize(OUT), "bytes;", len(out["support"]), "support banners,", len(out["trainee"]), "trainee banners")
+    print("wrote", OUT, os.path.getsize(OUT), "bytes;", len(out["support"]), "support banners,", len(out["trainee"]), "trainee banners,", len(events), "anniversaries")
     return 0
 
 

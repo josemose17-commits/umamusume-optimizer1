@@ -67,3 +67,39 @@ test("a required trainee is planned first, tickets pay for pulls, and the 90% pl
   const poor = PP.plan(items, Object.assign({ luck: "mean" }, base, { carats: 1000 }));
   assert.deepEqual(poor.missed, ["uma"], "an unaffordable required trainee is reported");
 });
+
+test("fixed pulls: 200 or 400 on a banner, the packs' carats on their dates, free picks first and one per selector", () => {
+  const items = [
+    { key: "early", kind: "support", date: "2026-11-10", most: 2, pullsAt: (k) => 200 * k },
+    { key: "late", kind: "support", date: "2027-01-10", most: 2, pullsAt: (k) => 200 * k },
+    { key: "pickA", kind: "selector", date: "2026-12-01", group: "sel1", most: 1, pullsAt: () => 0 },
+    { key: "pickB", kind: "selector", date: "2026-12-01", group: "sel1", most: 1, pullsAt: () => 0 },
+  ];
+  const value = values({ early: [100, 150], late: [120, 300], pickA: [50], pickB: [80] });
+  // 30,000 carats now and 27,000 a month: 200 pulls on the early banner, and by January 400 on the
+  // late one, but only with the pack's 1,500 carats on top.
+  const o = { today: "2026-11-04", carats: 30000, perMonth: 27000, bonus: [{ date: "2026-12-01", carats: 1500 }], value };
+  const p = PP.plan(items, o);
+  assert.equal(p.chosen.get("pickB"), 1, "the bigger free pick");
+  assert.ok(!p.chosen.get("pickA"), "one pick per selector");
+  assert.equal(p.chosen.get("late"), 2, "400 pulls: worth more than twice 200");
+  assert.equal(p.chosen.get("early"), 1, "200 pulls: all the carats there are by then");
+  const steps = new Map(p.steps.map((s) => [s.key, s]));
+  assert.equal(steps.get("early").pulls, 200);
+  assert.equal(steps.get("late").pulls, 400);
+  assert.equal(steps.get("pickB").carats, 0);
+  assert.ok(p.steps.every((s) => s.left >= -1e-6));
+  const noPack = PP.plan(items, Object.assign({}, o, { bonus: [] }));
+  assert.equal(noPack.chosen.get("late"), 2);
+  assert.ok(!noPack.chosen.get("early"), "without the pack's carats both don't fit");
+});
+
+test("copies after a fixed number of pulls: the spark plus Bin(n, r), capped at the last limit break", () => {
+  const d = PP.outcomes(200, r, 0, 200);
+  assert.equal(d[0], 0, "the spark makes one copy certain");
+  assert.ok(Math.abs(d.reduce((a, x) => a + x, 0) - 1) < 1e-9);
+  assert.ok(Math.abs(d[1] - Math.pow(1 - r, 200)) < 1e-12, "one copy: the spark and no pulled copy");
+  assert.equal(PP.likely(d), 2, "200 pulls likely end at two copies (LB1)");
+  assert.equal(PP.likely(PP.outcomes(400, r, 0, 200)), 5, "400 pulls likely reach LB4");
+  assert.equal(PP.outcomes(200, r, 4, 200)[5], 1, "from LB3, one spark always reaches LB4");
+});
