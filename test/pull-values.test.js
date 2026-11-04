@@ -95,8 +95,36 @@ test("the route: selector picks first and free, only 200 or 400 pulls, never bel
   const v = make({ reuse: prepared() });
   v.pairs.forEach((pair) => v.buildPair(pair));
   v.prepare();
-  const plan = PP.plan(v.items, { today, carats: 30000, perMonth: 3000, bonus: v.bonus, value: (k, n) => v.value(k, n), onStep: (s) => v.commit(s.key, s.k) });
+  const rt = v.route(PP, { today, carats: 30000, perMonth: 3000 });
+  while (rt.step());
+  const { plan, gains, runners } = rt.result();
   assert.ok(plan.steps.length > 0);
+  // No pick goes to a card the pulls (or earlier picks) already bring to LB4.
+  plan.steps.forEach((s) => {
+    const it = v.byKey.get(s.key);
+    if (it.kind !== "selector" || it.pick !== "support") return;
+    const sameDay = plan.steps.filter((x) => { const y = v.byKey.get(x.key); return y.kind === "selector" && y.pick === "support" && y.date === it.date && y.id === it.id; }).length;
+    assert.ok(v.copiesBy(it.id, it.date, s.key) + sameDay <= 5, "no wasted pick: " + s.key);
+    assert.ok(gains.get(s.key) > 0, "every pick adds something");
+  });
+  // A selector's runners-up: its other picks, best first, none worth more than the pick.
+  assert.ok(runners.size > 0);
+  runners.forEach((alt, key) => {
+    const dv = gains.get(key);
+    const it = v.byKey.get(key);
+    alt.forEach((x, i) => {
+      assert.notEqual(x.key, key);
+      assert.equal(v.byKey.get(x.key).group, it.group, "same selector");
+      assert.ok(x.value <= dv + 1e-6, "the pick is the best there");
+      if (i) assert.ok(x.value <= alt[i - 1].value + 1e-9, "best first");
+    });
+  });
+  // A banner's notes tell the sparked card from the copies that came with the pulls.
+  plan.steps.forEach((s) => {
+    const it = v.byKey.get(s.key), c = v.committed.get(s.key);
+    if (it.kind === "support") c.notes.forEach((x) => assert.equal(x.side, c.spark.indexOf(x.id) === -1, x.id + " on " + s.key));
+    if (it.kind === "selector" && it.pick === "support") c.notes.forEach((x) => assert.equal(x.side, false));
+  });
   assert.ok(plan.steps.every((s) => s.left >= -1e-6), "carats at every banner");
   plan.steps.forEach((s) => {
     const it = v.byKey.get(s.key);
