@@ -305,7 +305,8 @@
       return g;
     }
     // Puts new copies of a card into the decks they improve (from date on) and rescores those.
-    function placeCard(id, date, notes) {
+    // side: the copies came with the pulls for another card (not the spark's target).
+    function placeCard(id, date, notes, side) {
       pairs.forEach((pair) => {
         if (!pair.deck || pair.date <= date) return;
         const have = copiesBy(id, pair.date);
@@ -322,7 +323,7 @@
           pair.deck[bi] = Object.assign({}, pair.alt);
         }
         pair.deck[s.slot] = { id, lb, borrowed: false, score: s.score };
-        if (notes) notes.push({ pair, id, lb, gain: s.gain, pct: s.base > 0 ? s.gain / s.base : 0, replaced: replaced.id === id ? null : replaced.id, upgrade: replaced.id === id, clear: s.gain >= minPct * s.base - 1e-9 });
+        if (notes) notes.push({ pair, id, lb, gain: s.gain, pct: s.base > 0 ? s.gain / s.base : 0, replaced: replaced.id === id ? null : replaced.id, upgrade: replaced.id === id, clear: s.gain >= minPct * s.base - 1e-9, side: !!side });
         slotScores(pair);
         altBorrow(pair, !s.via);
         rescore(pair, s.slot, types);
@@ -540,6 +541,69 @@
       addSelectors();
       pairs.forEach((pair) => scorePair(pair));
     }
+    // Your decks and their gains before the route (snapshot), and back to them (reset).
+    function snapshot() {
+      pairs.forEach((p) => {
+        if (p.deck) p.snap = { deck: p.deck.map((c) => Object.assign({}, c)), gains: new Map(p.gains), live: new Set(p.live || []), alt: p.alt ? Object.assign({}, p.alt) : null, altLoss: p.altLoss };
+      });
+    }
+    function reset() {
+      committed.clear();
+      memo.clear();
+      items.forEach((it) => { delete it.pre; });
+      pairs.forEach((p) => {
+        if (!p.snap) return;
+        p.deck = p.snap.deck.map((c) => Object.assign({}, c));
+        p.gains = new Map(p.snap.gains);
+        p.live = new Set(p.snap.live);
+        p.alt = p.snap.alt ? Object.assign({}, p.snap.alt) : null;
+        p.altLoss = p.snap.altLoss;
+      });
+    }
+    // The route, in two passes. First the planner's step-by-step pass (free selector picks first,
+    // then the pulls with the most points per carat). The free picks went first, so a later pull
+    // can max a card a pick went to. So, second: back to your decks now, the same pulls in date
+    // order, then the selector picks (and any pull the carats still allow) on top of them.
+    // o: pull-planner.js options (today, carats, perMonth, tickets, pullCarats, spark).
+    // step() runs one move (false when done); result(): { plan, gains (key → points it adds),
+    // runners (a selector pick → the next best picks there) }.
+    function route(PP, o) {
+      const opts = (onStep) => Object.assign({}, o, { bonus: o.bonus || bonus, value: (key, k) => value(key, k), onStep });
+      const gains = new Map(), runners = new Map();
+      snapshot();
+      let pass = 1, moves = 0, replay = null;
+      let pl = PP.planner(items, opts((s) => commit(s.key, s.k)));
+      function step() {
+        if (pass === 1) {
+          if (pl.step()) { moves++; return true; }
+          replay = [...pl.result().chosen].filter(([key, k]) => k > 0 && byKey.get(key).kind !== "selector")
+            .sort((a, b) => (byKey.get(a[0]).date < byKey.get(b[0]).date ? -1 : byKey.get(a[0]).date > byKey.get(b[0]).date ? 1 : 0));
+          reset();
+          pass = 2;
+          return true;
+        }
+        if (pass === 2) {
+          if (replay.length) {
+            const [key, k] = replay.shift();
+            gains.set(key, value(key, k));
+            commit(key, k);
+            return true;
+          }
+          pl = PP.planner(items, opts((s) => {
+            if (byKey.get(s.key).kind === "selector") runners.set(s.key, alternatives(s.key, 3));
+            commit(s.key, s.k);
+            gains.set(s.key, (gains.get(s.key) || 0) + (s.dv || 0));
+          }));
+          committed.forEach((x, key) => pl.chosen.set(key, x.k));
+          pass = 3;
+          return true;
+        }
+        if (pass === 3 && pl.step()) { moves++; return true; }
+        pass = 4;
+        return false;
+      }
+      return { step, pass: () => pass, moves: () => moves, result: () => ({ plan: pl.result(), gains, runners }) };
+    }
 
     // ---- the planner's callbacks ----
     // What an item at a level adds, given the route so far. A banner the route already pulls on
@@ -576,7 +640,7 @@
         x.dist = new Map(plan.tabs.map((t) => [t.f.id, t.dist]));
         committed.set(key, x);
         memo.clear();
-        copies.forEach((n, id) => { if (n > (before.get(id) || 0)) placeCard(id, it.date, x.notes); });
+        copies.forEach((n, id) => { if (n > (before.get(id) || 0)) placeCard(id, it.date, x.notes, to.indexOf(id) === -1); });
       } else if (it.kind === "trainee") {
         // The sparks on the ones worth most; the pulls likely bring the others too.
         const plan = traineePlan(it, k);
@@ -649,12 +713,29 @@
       });
       return best;
     }
+    // Copies of a card by a selector's date, its earlier picks that day included.
+    const copiesAtPick = (id, date) => {
+      let n = copiesBy(id, date);
+      committed.forEach((c, k) => { const y = byKey.get(k); if (y.kind === "selector" && y.pick === "support" && y.date === date && y.id === id) n++; });
+      return Math.min(5, n);
+    };
+    // The other picks on an item's selector, best first, as they stand now (ask before the pick
+    // is committed): their points by your rules, the cups they'd be clearly stronger in, and the
+    // clear gains even when those are in too few cups.
+    function alternatives(key, n) {
+      const it = byKey.get(key);
+      if (!it || !it.group) return [];
+      return items.filter((x) => x.group === it.group && x.key !== key && !committed.has(x.key)).map((x) => {
+        const r = x.pick === "support" ? cardRows(x.id, x.date, x.key)[1] : parentRows([x.id], x.date, x.key);
+        return { key: x.key, id: x.id, pick: x.pick, value: r.value, cups: r.cups, gain: r.gain, have: x.pick === "support" ? copiesAtPick(x.id, x.date) : 0 };
+      }).filter((x) => x.gain > 0).sort((a, b) => b.value - a.value || b.gain - a.gain).slice(0, n || 3);
+    }
     const deckScore = (deck) => (deck || []).reduce((a, c) => a + (c.score || 0), 0);
 
     return {
       GROUPS, groupOf, cups, pairs, items, byKey, unscorable, selectors, bonus, minCups, minPct, team,
-      buildPair, addSelectors, scorePair: (pair) => scorePair(pair), prepare, value, commit, committed,
-      copiesBy, copiesDist, review, selectorFallback, deckScore, parentValue, parentAffinity, bestParent,
+      buildPair, addSelectors, scorePair: (pair) => scorePair(pair), prepare, value, commit, committed, route, snapshot, reset,
+      copiesBy, copiesAtPick, copiesDist, review, selectorFallback, alternatives, deckScore, parentValue, parentAffinity, bestParent,
       poolFor, borrowFor, shortlist, binom, median,
     };
   }

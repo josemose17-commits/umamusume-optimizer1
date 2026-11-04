@@ -87,23 +87,24 @@
           await tick();
           v.scorePair(pair);
         }
-        const gains = new Map(); // what each step adds, in points
-        const pl = PP.planner(v.items, {
-          today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth), bonus: v.bonus,
+        // The route: the step-by-step pass, then the same pulls in date order with the selector
+        // picks on top (pull-values.js route()).
+        const rt = v.route(PP, {
+          today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth),
           tickets: { support: num(p.sTickets), trainee: num(p.tTickets) },
           pullCarats: B.meta.pullCarats, spark: B.meta.spark,
-          value: (key, k) => v.value(key, k),
-          onStep: (s) => { v.commit(s.key, s.k); gains.set(s.key, (gains.get(s.key) || 0) + (s.dv || 0)); },
         });
-        let moves = 0;
         for (;;) {
-          job = { stage: "Choosing the route (" + moves + " picks so far)…", f: 0.7 + 0.3 * (1 - Math.exp(-moves / 8)) };
+          const pass = rt.pass(), m = rt.moves();
+          job = pass === 1 ? { stage: "Choosing the pulls (" + m + " picks so far)…", f: 0.7 + 0.2 * (1 - Math.exp(-m / 8)) }
+            : pass === 2 ? { stage: "Checking the pulls in date order…", f: 0.9 }
+            : { stage: "Choosing the selector picks on top of the pulls…", f: 0.95 };
           ctx.rerender();
           await tick();
-          if (!pl.step()) break;
-          moves++;
+          if (!rt.step()) break;
         }
-        result = { key: inputsKey(p), deckKey: dk, until: end, v, plan: pl.result(), gains, at: ctx.today };
+        const out = rt.result();
+        result = { key: inputsKey(p), deckKey: dk, until: end, v, plan: out.plan, gains: out.gains, runners: out.runners, at: ctx.today };
       } catch (err) {
         ctx.flash(err.message || String(err));
       }
@@ -175,18 +176,25 @@
     }
 
     // ---- the route ----
-    // The decks a step makes clearly stronger, cup by cup.
+    // The decks a step makes clearly stronger, cup by cup (naming the card when the step brings
+    // more than one; a card that came with the pulls for another is marked so).
     function decksText(notes, kind) {
       const clear = (notes || []).filter((x) => (kind === "trainee" ? true : x.clear));
       if (!clear.length) return { n: 0, cups: 0, html: "" };
+      const named = kind !== "trainee" && new Set(clear.map((x) => x.id)).size > 1;
       const by = new Map();
       clear.forEach((x) => { const k = x.pair.cup.id; if (!by.has(k)) by.set(k, { cup: x.pair.cup, list: [] }); by.get(k).list.push(x); });
       const html = [...by.values()].map(({ cup, list }) => `<li>${esc(est(cup.global) + fmtDate(cup.global.start))} ${esc(cup.name)}: ${list.map((x) => esc(x.pair.trainee.n) + (kind === "trainee"
         ? " (" + esc(D.trainee(x.id) ? D.trainee(x.id).n : "") + " as Parent 1" + (x.pct != null ? ", +" + pct(x.pct) : "") + ")"
-        : " +" + pct(x.pct) + (x.upgrade ? " (limit break)" : x.replaced ? " over " + esc(cardShort(x.replaced)) : ""))).join(", ")}</li>`).join("");
+        : (named ? ": " + esc(cardShort(x.id)) + (x.side ? " (came with the pulls)" : "") : "") + " +" + pct(x.pct) + (x.upgrade ? " (limit break)" : x.replaced ? " over " + esc(cardShort(x.replaced)) : ""))).join(", ")}</li>`).join("");
       return { n: clear.length, cups: by.size, html };
     }
-    function stepRow(s) {
+    // A card's chances after the pulls, from what you'd have: [have … LB4] with their shares.
+    function spreadText(dist, have, from) {
+      return [0, 1, 2, 3, 4, 5].filter((k) => k >= from && dist[k] > 0.005)
+        .map((k) => (k === have ? (have ? "no new copy" : "none") : lb(k)) + " " + pct(dist[k])).join(" · ");
+    }
+    function stepRow(s, seen) {
       const v = result.v, it = v.byKey.get(s.key), c = v.committed.get(s.key);
       if (!it || !c) return "";
       const adds = result.gains.get(s.key) || 0;
@@ -197,29 +205,35 @@
         const s0 = it.sel, e = s0.event;
         let got;
         if (it.pick === "support") {
-          const have = v.copiesBy(it.id, it.date, s.key);
+          // Copies by then, with this anniversary's earlier pick of the same card.
+          const k = it.date + "|" + it.id, have = Math.min(5, v.copiesBy(it.id, it.date, s.key) + (seen.get(k) || 0));
+          seen.set(k, (seen.get(k) || 0) + 1);
           got = `<b>${esc(cardName(it.id))}</b>: ${have ? lb(have) + " → " + lb(have + 1) : "new, LB0"}`;
         } else got = `<b>${esc(umaName(it.id))}</b> (for Parent 1)`;
+        const alt = (result.runners && result.runners.get(s.key)) || [];
+        const altText = alt.length
+          ? `<div class="mini">Next best here: ${alt.map((x) => esc(x.pick === "support" ? cardShort(x.id) + " " + (x.have ? lb(x.have) + " → " + lb(x.have + 1) : "LB0") : umaName(x.id)) + " " + (x.value > 0 ? "+" + fmtN(x.value) + " (" + x.cups + " cup" + (x.cups === 1 ? "" : "s") + ")" : "clearly stronger in only " + x.cups + " cup" + (x.cups === 1 ? "" : "s"))).join(" · ")}</div>`
+          : `<div class="mini">Nothing else here makes a deck clearly stronger.</div>`;
         return `<tr><td>${esc(est(e) + fmtDate(e.start))}</td><td>${esc(e.name)}: ${esc(s0.label)}</td><td class="num">${s0.price ? "$" + s0.price.toFixed(2) + `<div class="mini">+${fmtN(s0.carats)} carats</div>` : "free"}</td>
-          <td>Pick ${got}</td><td>${decks}</td>${left}<td class="num">+${fmtN(adds)}</td></tr>`;
+          <td>Pick ${got}${altText}</td><td>${decks}</td>${left}<td class="num">+${fmtN(adds)}</td></tr>`;
       }
       const pulls = `${fmtN(s.pulls)} pulls<div class="mini">${fmtN(s.carats)} carats${s.tickets ? " + " + fmtN(s.tickets) + " tickets" : ""}</div>`;
       const featured = it.banner.pick.map(([id]) => (it.kind === "support" ? cardName(id) : umaName(id)));
       const what = `${it.kind === "support" ? "Support banner" : "Trainee banner"}<div class="mini">${esc(featured.join(", "))}</div>`;
       let got = "";
       if (it.kind === "support") {
+        // The target: the card the sparks go to. Side copies: what the pulls bring of the others.
         const spark = c.spark || [];
-        const sparkText = spark.length === 2 && spark[0] === spark[1] ? "both sparks on " + cardShort(spark[0]) : spark.map(cardShort).join(" and ");
-        const lines = [];
+        const targets = [], sides = [];
         it.feat.forEach((f) => {
-          const n = c.copies.get(f.id) || 0, have = v.copiesBy(f.id, it.date, s.key);
-          if (!n) return;
-          const onIt = spark.filter((x) => x === f.id).length;
+          const n = c.copies.get(f.id) || 0, have = v.copiesBy(f.id, it.date, s.key), onIt = spark.filter((x) => x === f.id).length;
+          if (!n && !onIt) return;
           const dist = v.copiesDist(f.rate, s.pulls, have, onIt);
-          const spread = onIt ? `<div class="mini">${[1, 2, 3, 4, 5].filter((k) => k > have && dist[k] > 0.005).map((k) => lb(k) + " " + pct(dist[k])).join(" · ")}</div>` : "";
-          lines.push(`<div><b>${esc(cardName(f.id))}</b> ${have ? lb(have) + " → " : ""}${lb(Math.min(5, have + n))}${onIt ? "" : ` <span class="mini">(pulled, not sparked)</span>`}${spread}</div>`);
+          const head = `<b>${esc(cardName(f.id))}</b> ${have ? lb(have) + " → " : ""}${lb(Math.min(5, have + n))}`;
+          if (onIt) targets.push(`<div>${head}${onIt === 2 ? ` <span class="mini">(both sparks)</span>` : ""}<div class="mini">${spreadText(dist, have, have + onIt)}</div></div>`);
+          else sides.push(`<div>${head} <span class="mini">likely; ${spreadText(dist, have, have)}</span></div>`);
         });
-        got = `<div class="mini">Spark ${esc(sparkText)}. Likely:</div>${lines.join("")}`;
+        got = `<div class="mini">Spark for (likely result):</div>${targets.join("")}${sides.length ? `<div class="mini">Comes with the pulls, not a target:</div>${sides.join("")}` : ""}`;
       } else {
         const spark = c.spark || [];
         const also = [...(c.got || [])].filter((id) => spark.indexOf(id) === -1);
@@ -236,12 +250,13 @@
       const packs = v.selectors.filter((x) => x.price), dollars = packs.reduce((a, x) => a + x.price, 0);
       const bonus = v.bonus.reduce((a, b) => a + b.carats, 0);
       const have = PP.caratsBy({ today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth) }, result.until) + bonus;
-      const rows = steps.map(stepRow).join("");
+      const seen = new Map();
+      const rows = steps.map((s) => stepRow(s, seen)).join("");
       return `<section class="panel pull-route">
         <h3>The route</h3>
         <p class="mini">From ${fmtN(num(p.carats))} carats now and ${fmtN(num(p.perMonth))} a month${bonus ? `, plus ${fmtN(bonus)} from the $20.99 packs` : ""}, you'll have about ${fmtN(have)} by ${esc(fmtDate(result.until))}. This route spends ${fmtN(spent)} of them on the pulls that make your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}), in banner order so the carats are there at each one.${packs.length ? ` The ${packs.length} $20.99 pack${packs.length === 1 ? "" : "s"} in the window come to $${dollars.toFixed(2)}.` : ""}</p>
         ${steps.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>What</th><th class="num">Cost</th><th>You get</th><th>Clearly stronger in</th><th class="num">Carats left</th><th class="num">Adds</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="mini">Likely: each featured card's median copies from the pulls, plus the sparks (the shares under a sparked card are its other outcomes). Adds: the expected points to your decks over every cup after the banner, counting only the clearly stronger ones (the deck score's units; 60 = 1 L of race skills).</p>` : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`}
+        <p class="mini">Spark for: the card the route pulls for, at its likely limit break (the spark plus the median pulled copies), with the chances of every other result. Comes with the pulls: the other featured cards' likely copies; they aren't why the route pulls there, but they count where they're clearly stronger. Next best here: the other picks on that selector and their points. Adds: the expected points to your decks over every cup after the banner, counting only the clearly stronger ones (the deck score's units; 60 = 1 L of race skills).</p>` : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`}
         ${selectorsHTML()}
         ${closeHTML(p)}
         ${v.unscorable.length ? `<p class="mini">${v.unscorable.length} featured card${v.unscorable.length === 1 ? "" : "s"} in this window can't be scored yet (Euophrys' data doesn't have ${v.unscorable.length === 1 ? "it" : "them"}), so ${v.unscorable.length === 1 ? "it isn't" : "they aren't"} planned.</p>` : ""}
@@ -288,6 +303,14 @@
       if (!result) return "";
       const v = result.v;
       const cardLine = (c) => esc(cardShort(c.id)) + " LB" + c.lb + (c.borrowed ? " (friend's)" : "");
+      // Which route cards in a deck only came with the pulls for another card: deck → card → side.
+      const side = new Map();
+      v.committed.forEach((c) => (c.notes || []).forEach((x) => {
+        if (!x.pair || x.lb === undefined) return; // a parent's note
+        if (!side.has(x.pair.key)) side.set(x.pair.key, new Map());
+        const m = side.get(x.pair.key);
+        m.set(x.id, m.get(x.id) !== false && !!x.side);
+      }));
       const groups = Object.keys(PV.GROUPS).map((g) => {
         const ps = v.pairs.filter((x) => x.group === g);
         if (!ps.length) return "";
@@ -296,11 +319,12 @@
         return `<h4>${esc(PV.GROUPS[g].label)}</h4>${[...bySlot.values()].map((list) => `<div class="pull-decks"><b>${esc(umaName(list[0].trainee.id))}</b> <span class="mini">${esc((STYLES.find(([k]) => k === list[0].member.style) || [0, ""])[1])}</span><ul class="mini">${list.map((x) => {
           if (!x.base) return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}: ${esc(x.error || "no deck")}</li>`;
           const now = new Set(x.base.map((c) => c.id + ":" + c.lb)), after = x.deck.filter((c) => !now.has(c.id + ":" + c.lb));
-          return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}: ${x.base.map(cardLine).join(" · ")}${after.length ? `<div>With the route: ${after.map(cardLine).join(" · ")}</div>` : ""}</li>`;
+          const m = side.get(x.key) || new Map(), extra = after.filter((c) => !c.borrowed && m.get(c.id) === true), picked = after.filter((c) => extra.indexOf(c) === -1);
+          return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}: ${x.base.map(cardLine).join(" · ")}${picked.length ? `<div>With the route: ${picked.map(cardLine).join(" · ")}</div>` : ""}${extra.length ? `<div>Also from those pulls (not targets): ${extra.map(cardLine).join(" · ")}</div>` : ""}</li>`;
         }).join("")}</ul></div>`).join("")}`;
       }).join("");
       return `<details class="panel"><summary><b>Your decks now</b> (every team uma, every cup ahead, from the cards you own)</summary>
-        <p class="mini">Each deck is built the way CM &amp; decks builds it, with a friend's card. These are the decks a banner card has to beat; "With the route" lists the cards the route's picks put in.</p>${groups}</details>`;
+        <p class="mini">Each deck is built the way CM &amp; decks builds it, with a friend's card. These are the decks a banner card has to beat. "With the route" lists the cards the route's sparks and selector picks put in; "Also from those pulls" lists copies of other featured cards the pulls likely bring, which go in wherever they're any better (they aren't what the route pulls for).</p>${groups}</details>`;
     }
     function calendarHTML(p) {
       if (!B) return "";
@@ -328,7 +352,7 @@
         <p><b>200 or 400 pulls.</b> ${B ? B.meta.spark : 200} pulls give one spark (a featured card of your choice), so 200 pulls on an SSR's banner likely end at LB1 (the spark and one pulled copy), and 400 at LB4. A pull counts only when its likely result already clears your rules; its value is then the expected points over every result the pulls can give (with the sparks where they help most once you see the pulls), the other featured cards' copies included.</p>
         <p><b>Selectors.</b> At each anniversary (JP's campaigns, on Global's calendar: its 1.5 Anniversary was in July 2026), a free support selector and the $20.99 ones (support and Uma, each with 1,500 carats). The pool: the gacha SSRs (or 3★ umas) JP had about ${PV.POOL_LAG || 45} days before that anniversary. A pick is one copy, valued like a pulled one; it's taken before any carats are spent.</p>
         <p><b>Parents.</b> With "Count trainees as parents" on, a trainee counts as Parent 1 for your team umas (yours to train; Parent 2 is a friend's rental): her sparks fire at their base chance × (1 + her affinity with the ace / 100) at the ace's two inspirations, carrying the ace's top 3 race whites and her inherited unique at 2★. Same rules: clearly better than your best Parent 1 (your teams included), in enough cups. Future characters' affinity comes from JP's table.</p>
-        <p><b>The route.</b> Selector picks first, then step by step the pull with the most points per carat that still leaves enough carats at every banner, counting your income up to each banner's date, the packs' carats and tickets first. After each step the decks take the step's likely cards, so the next card has to beat those.</p>
+        <p><b>The route.</b> Step by step, the move with the most points per carat that still leaves enough carats at every banner (free selector picks first, then the pulls), counting your income up to each banner's date, the packs' carats and tickets first. After each step the decks take the step's likely cards, so the next card has to beat those. Then a second pass: back to your decks now, the same pulls in date order, and the selector picks chosen again on top of them, so no pick goes to a card a pull already brings to LB4. It's a careful step-by-step plan, not a search of every possible route.</p>
         <p><b>Dates.</b> Banners Global has announced keep their own dates and rates. Later ones, the anniversaries and the cups are GameTora's forecast from Global's pace against JP, so they can shift; plan again as banners are announced.</p>
       </div></details>`;
     }
