@@ -26,6 +26,17 @@ test("banners: Global's rules, dated and sorted, every pick a known card or trai
   assert.ok(B.release.cards && Object.keys(B.release.cards).length > 100, "forecast Global releases");
 });
 
+test("banners: anniversaries on Global's calendar, in JP's order, every half year of JP", () => {
+  assert.ok(B.events.length >= 6);
+  B.events.forEach((e, i) => {
+    assert.match(e.start, /^\d{4}-\d{2}-\d{2}$/);
+    assert.match(e.jp, /^\d{4}-(02|08)-24$/, "JP's anniversaries are on Feb 24 and Aug 24");
+    if (i) assert.ok(e.start > B.events[i - 1].start && e.jp > B.events[i - 1].jp, "Global keeps JP's order");
+  });
+  const half = B.events.find((e) => e.name === "1.5 Anniversary");
+  assert.ok(half && !half.est && half.start.slice(0, 4) === "2026", "Global's 1.5 Anniversary is announced, in 2026");
+});
+
 test("affinity: future characters take JP's groups; Global families keep Global's", () => {
   const cid = (n) => D.DATA.trainees.find((t) => t.n === n).cid;
   assert.ok(PD.affinityJp.length > 0);

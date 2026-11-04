@@ -693,3 +693,9 @@ table.pred .over { color: var(--accent); }
 .pull-team-row .mini { flex: 1 1 220px; }
 .pulls td.num, .pulls th.num { text-align: right; white-space: nowrap; }
 .pulls details > summary { cursor: pointer; }
+.pull-decks { margin: 6px 0; }
+.pull-decks ul { margin: 4px 0 0; padding-left: 18px; }
+.pull-decks li { margin: 2px 0; }
+.pulls > * { min-width: 0; }
+.pull-route td details summary { white-space: nowrap; }
+.pull-route td { vertical-align: top; }
