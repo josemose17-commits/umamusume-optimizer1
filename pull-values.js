@@ -414,11 +414,13 @@
     }
     // After a card goes into slot j: the cards it competes with (its type and the replaced
     // card's, the friend's card, anything whose best spot was slot j or the friend's slot).
+    let rescoreOnly = null; // while the picks anyway go in (anyway()): only their cards
     function rescore(pair, j, types) {
       if (!pair.live || !pair.live.size) return;
       const bi = pair.deck.findIndex((x) => x.borrowed), bCid = bi >= 0 ? card(pair.deck[bi].id).cid : null;
       const ids = new Set();
       pair.live.forEach((id) => {
+        if (rescoreOnly && !rescoreOnly.has(id)) return;
         const c = card(id);
         if (types.has(c.ty) || c.cid === bCid) { ids.add(id); return; }
         for (let lb = 0; lb <= 4; lb++) { const g = pair.gains.get(id + ":" + lb); if (g && (g.slot === j || g.via)) { ids.add(id); return; } }
@@ -890,23 +892,95 @@
       });
       return { item: it, cards, v1: value(key, 1), v2: value(key, 2) };
     }
-    // The pick with the most raw gain (rules aside) for a support selector, for when nothing
-    // clears them.
-    function selectorFallback(s) {
-      let best = null;
-      items.forEach((it) => {
-        if (it.kind !== "selector" || it.sel !== s || it.pick !== "support") return;
-        const g = cardRows(it.id, it.date, it.key)[1];
-        let raw = 0;
-        pairs.forEach((pair) => {
-          const have = copiesBy(it.id, pair.date, it.key);
-          if (!pair.gains || pair.date <= it.date || have >= 5) return;
-          const x = pair.gains.get(it.id + ":" + lbOf(have + 1));
-          if (x) raw += x.gain;
+    // ---- picks anyway, for the selectors the route leaves open ----
+    // A pick for every support selector the route leaves without one (nothing there clears your
+    // rules), planned together the way the route plans: step by step the pick that adds the most
+    // points next (rules aside), with the picks before it in your decks. So a card's next copy is
+    // worth what its next limit break adds (none goes past LB4), and a card that takes the spot of
+    // an earlier pick is worth what it adds over that one. A card worth the same at an earlier and
+    // a later selector (its points all come after both) goes to the later one, leaving the earlier
+    // one for a card that helps sooner; a card's copies go in date order. Each pick's points are
+    // what it adds when it's chosen (as the route's), and the route's decks are put back after.
+    // In steps (each puts a card in the decks): step() until false, then result() → Map(selector
+    // id → { id, have (copies just before the pick), value (points, faded like the route's), raw,
+    // cups, from (the first pair it adds to) }).
+    function anyway() {
+      const picked = new Set();
+      committed.forEach((x, key) => { const it = byKey.get(key); if (it && it.kind === "selector") picked.add(it.sel.id); });
+      const open = selectors.filter((s) => s.kind === "support" && !picked.has(s.id)); // in date order
+      const pool = new Map(open.map((s) => [s.id, []]));
+      items.forEach((it) => { if (it.kind === "selector" && it.pick === "support" && pool.has(it.sel.id)) pool.get(it.sel.id).push(it.id); });
+      const cards = [...new Set([].concat(...pool.values()))];
+      // The route's decks, to put back after.
+      const save = pairs.map((p) => (p.deck ? { deck: p.deck.map((c) => Object.assign({}, c)), gains: new Map(p.gains), alt: p.alt ? Object.assign({}, p.alt) : null, altLoss: p.altLoss } : null));
+      const mine = []; // the picks put in the decks here
+      const restore = () => {
+        pairs.forEach((p, i) => {
+          const s = save[i];
+          if (!s) return;
+          p.deck = s.deck.map((c) => Object.assign({}, c));
+          p.gains = new Map(s.gains);
+          p.alt = s.alt ? Object.assign({}, s.alt) : null;
+          p.altLoss = s.altLoss;
         });
-        if (raw > 0 && (!best || raw > best.raw)) best = { id: it.id, raw, clearCups: g.cups };
-      });
-      return best;
+        mine.forEach((k) => committed.delete(k));
+        mine.length = 0;
+        memo.clear();
+        rescoreOnly = null;
+      };
+      // What a card's next copy adds, pair by pair, to your decks as they stand.
+      const nextCopy = (id) => {
+        const list = [];
+        pairs.forEach((pair) => {
+          if (!pair.gains) return;
+          const have = copiesBy(id, pair.date);
+          if (have >= 5) return;
+          const g = pair.gains.get(id + ":" + lbOf(have + 1));
+          if (g && g.gain > 1e-9) list.push({ pair, gain: g.gain, w: weight(pair.date) });
+        });
+        return list;
+      };
+      const after = (list, date) => {
+        let value = 0, raw = 0, from = null;
+        const cups = new Set();
+        list.forEach((r) => {
+          if (r.pair.date <= date) return;
+          value += r.gain * r.w;
+          raw += r.gain;
+          cups.add(r.pair.cup.id);
+          if (!from || r.pair.date < from.date) from = r.pair;
+        });
+        return { value, raw, cups: cups.size, from };
+      };
+      const out = new Map(), left = new Set(open.map((s) => s.id)), last = new Map();
+      let over = !open.length;
+      // Only the selectors' cards are compared here, so only theirs are rescored as picks go in.
+      if (!over) rescoreOnly = new Set(cards);
+      function step() {
+        if (over) return false;
+        const next = new Map(cards.map((id) => [id, nextCopy(id)]));
+        let best = null;
+        open.forEach((s, ix) => {
+          if (!left.has(s.id)) return;
+          pool.get(s.id).forEach((id) => {
+            if (last.has(id) && ix < last.get(id)) return; // a card's copies in date order
+            const w = after(next.get(id), s.date);
+            if (w.value < 0.5) return;
+            if (!best || w.value > best.w.value + 1e-9 || (w.value > best.w.value - 1e-9 && s.date > best.s.date)) best = { s, ix, id, w };
+          });
+        });
+        if (best) {
+          out.set(best.s.id, Object.assign({ id: best.id, have: copiesAtPick(best.id, best.s.date) }, best.w));
+          left.delete(best.s.id);
+          last.set(best.id, best.ix);
+          const key = "x" + best.s.id + ":" + best.id;
+          commit(key, 1);
+          mine.push(key);
+        }
+        if (!best || !left.size) { restore(); over = true; return false; }
+        return true;
+      }
+      return { step, result: () => out, total: () => open.length, progress: () => (over ? 1 : out.size / Math.max(1, open.length)) };
     }
     // Copies of a card by a selector's date, its earlier picks that day included.
     const copiesAtPick = (id, date) => {
@@ -930,7 +1004,7 @@
     return {
       GROUPS, groupOf, cups, pairs, items, byKey, unscorable, selectors, bonus, minCups, minPct, team,
       buildPair, addSelectors, scorePair: (pair) => scorePair(pair), prepare, value, commit, committed, route, snapshot, reset,
-      copiesBy, copiesAtPick, copiesDist, review, selectorFallback, alternatives, deckScore, parentValue, parentAffinity, bestParent,
+      copiesBy, copiesAtPick, copiesDist, review, anyway, alternatives, deckScore, parentValue, parentAffinity, bestParent,
       standalone, eras: [...eras.values()], eraAt, freeCards, unrotated, weight, yours, yoursBy,
       poolFor, borrowFor, shortlist, binom, median,
     };

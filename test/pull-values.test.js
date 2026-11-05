@@ -153,6 +153,45 @@ test("the route: selector picks first and free, only 200 or 400 pulls, never bel
     clear.forEach((x) => assert.ok(x.pct >= 0.1 - 1e-9));
     assert.ok(c.spark.length === pulled.pulls / 200);
   }
+  // The picks anyway go only to the selectors the route leaves open, and the route stays as it was.
+  const sig = () => v.pairs.map((p) => p.deck && p.deck.map((c) => c.id + ":" + c.lb + ":" + c.score.toFixed(6)).join(",")).join("|");
+  const before = sig(), keys = [...v.committed.keys()].join(",");
+  const any = v.anyway();
+  while (any.step());
+  any.result().forEach((x, sid) => assert.ok(!perSelector.has(sid), "a selector the route leaves open: " + sid));
+  assert.equal(sig(), before, "the route's decks put back");
+  assert.equal([...v.committed.keys()].join(","), keys, "the route's picks and pulls as they were");
+});
+
+test("selectors left open: picks anyway, planned together (each with the ones before it in your decks)", () => {
+  // Rules nothing clears, so every selector is open.
+  const v = make({ minCups: 99, reuse: prepared() });
+  v.pairs.forEach((pair) => v.buildPair(pair));
+  v.prepare();
+  const sig = () => v.pairs.map((p) => p.deck && p.deck.map((c) => c.id + ":" + c.lb + ":" + c.score.toFixed(6)).join(",")).join("|");
+  const before = sig(), gains = v.pairs.map((p) => p.gains && p.gains.size);
+  const any = v.anyway();
+  assert.equal(any.total(), v.selectors.filter((s) => s.kind === "support").length);
+  while (any.step());
+  const sug = any.result();
+  assert.ok(sug.size > 0, "some pick adds to your decks");
+  const count = new Map();
+  v.selectors.filter((s) => s.kind === "support").forEach((s) => {
+    const x = sug.get(s.id);
+    if (!x) return;
+    assert.ok(v.items.some((it) => it.kind === "selector" && it.sel === s && it.id === x.id), "a card from that selector's pool");
+    // A card's copies in date order, each a limit break on: never past LB4.
+    const n = count.get(x.id) || 0;
+    assert.equal(x.have, Math.min(5, v.copiesAtPick(x.id, s.date) + n), D.card(x.id).n + " counts the picks of it before");
+    assert.ok(x.have < 5, "never past LB4");
+    assert.ok(x.value >= 0.5 && x.cups >= 1 && x.from && x.from.date > s.date, "adds points after its date");
+    count.set(x.id, n + 1);
+  });
+  const lbs = [...sug.values()].map((x) => x.id + ":" + x.have);
+  assert.equal(new Set(lbs).size, lbs.length, "no card twice at the same limit break");
+  assert.equal(sig(), before, "your decks put back");
+  assert.deepEqual(v.pairs.map((p) => p.gains && p.gains.size), gains);
+  assert.equal([...v.committed.keys()].length, 0, "nothing left in the route");
 });
 
 test("Parent 1's value grows with her affinity with the ace", () => {

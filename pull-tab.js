@@ -155,7 +155,20 @@
         if (!rt.step()) break;
       }
       const out = rt.result();
-      return { v, end, solo, plan: out.plan, gains: out.gains, runners: out.runners };
+      // The picks anyway for the selectors the route leaves open, planned together (pull-values.js
+      // anyway(): each with the ones before it in your decks; the route's decks are put back).
+      let suggest = null;
+      if (o.suggest) {
+        const any = v.anyway();
+        for (;;) {
+          job = { stage: label + "Picks anyway for the " + any.total() + " selectors left open…", f: 0.96 + 0.04 * any.progress() };
+          ctx.rerender();
+          await tick();
+          if (!any.step()) break;
+        }
+        suggest = any.result();
+      }
+      return { v, end, solo, plan: out.plan, gains: out.gains, runners: out.runners, suggest };
     }
     async function run() {
       const p = S();
@@ -171,8 +184,8 @@
         // Your plan: its banners locked at 400 (with their free pulls and your target), and its
         // carat estimates as the carats you'll have by each date.
         const { mine, locked, freePulls, yours, lockedPicks, budget, done } = planInputs(p);
-        const r = await build(p, { locked, budget, freePulls, yours, lockedPicks, done, reuse: result && result.deckKey === dk ? result.v : null });
-        result = { key: inputsKey(p), deckKey: dk, until: r.end, v: r.v, plan: r.plan, gains: r.gains, runners: r.runners, at: ctx.today, solo: r.solo, mine, budget, freePulls, yours, lockedPicks, done, total: total(r.gains), alt: null };
+        const r = await build(p, { locked, budget, freePulls, yours, lockedPicks, done, suggest: true, reuse: result && result.deckKey === dk ? result.v : null });
+        result = { key: inputsKey(p), deckKey: dk, until: r.end, v: r.v, plan: r.plan, gains: r.gains, runners: r.runners, suggest: r.suggest, at: ctx.today, solo: r.solo, mine, budget, freePulls, yours, lockedPicks, done, total: total(r.gains), alt: null };
       } catch (err) {
         ctx.flash(err.message || String(err));
       }
@@ -488,15 +501,22 @@
         ${v.unscorable.length ? `<p class="mini">${v.unscorable.length} featured card${v.unscorable.length === 1 ? "" : "s"} in this window can't be scored yet (Euophrys' data doesn't have ${v.unscorable.length === 1 ? "it" : "them"}), so ${v.unscorable.length === 1 ? "it isn't" : "they aren't"} planned.</p>` : ""}
       </section>`;
     }
-    // Selectors the route leaves without a pick: nothing clears your rules there.
+    // Selectors the route leaves without a pick: nothing clears your rules there. The support ones
+    // get a pick anyway, planned together (result.suggest, from pull-values.js anyway()).
     function selectorsHTML() {
       const { v, plan } = result;
       const used = new Set(plan.steps.map((s) => v.byKey.get(s.key)).filter((it) => it.kind === "selector").map((it) => it.sel.id));
       const rest = v.selectors.filter((s) => !used.has(s.id));
       if (!rest.length) return "";
-      return `<details><summary>Selectors without a pick (${rest.length})</summary><ul class="mini">${rest.map((s) => {
-        const f = s.kind === "support" ? v.selectorFallback(s) : null;
-        return `<li>${esc(est(s.event) + fmtDate(s.date))} ${esc(s.event.name)}, ${esc(s.label)}: no ${s.kind === "support" ? "card" : "uma"} makes your decks clearly stronger in ${esc(S().minCups)}+ cups from there.${f ? ` Best for your decks anyway: <b>${esc(cardName(f.id))}</b> (+${fmtN(f.raw)} points over the cups after it).` : s.kind === "trainee" ? " Pick a team uma you still need." : ""}</li>`;
+      const sug = result.suggest || new Map();
+      const any = rest.some((s) => sug.has(s.id));
+      return `<details><summary>Selectors without a pick (${rest.length})</summary>
+        ${any ? `<p class="mini">The picks anyway are planned together, the way the route plans: each one with the picks before it in your decks, so a card's next copy is worth what its next limit break adds (never past LB4), and a card that takes an earlier pick's spot is worth what it adds over that one. A card worth the same at an earlier or a later selector goes to the later one, leaving the earlier one for a card that helps sooner. Their points don't need your rules (any number of cups); "first" is the first cup it adds to.</p>` : ""}
+        <ul class="mini">${rest.map((s) => {
+        const f = s.kind === "support" ? sug.get(s.id) : null, first = f && f.from ? f.from.cup : null;
+        return `<li>${esc(est(s.event) + fmtDate(s.date))} ${esc(s.event.name)}, ${esc(s.label)}: no ${s.kind === "support" ? "card" : "uma"} makes your decks clearly stronger in ${esc(S().minCups)}+ cups from there.${f
+          ? ` Best for your decks anyway: <b>${esc(cardName(f.id))}</b>, ${f.have ? lb(f.have) + " → " + lb(f.have + 1) : "new, LB0"} (+${fmtN(f.value)} points in ${f.cups} cup${f.cups === 1 ? "" : "s"}${first ? `; first ${esc(est(first.global) + fmtDate(first.global.start))} ${esc(first.name)}` : ""}).`
+          : s.kind === "trainee" ? " Pick a team uma you still need." : s.kind === "support" ? " Nothing here adds to your decks, even rules aside." : ""}</li>`;
       }).join("")}</ul></details>`;
     }
     // Cards near the line: the route's runners-up, and the best cards your rules leave out.
