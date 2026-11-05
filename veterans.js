@@ -1,6 +1,7 @@
 // Your veterans, from an umaextractor JSON export: each one as a family member (family.js) with
 // her own sparks and G1 wins, plus her two parents (who become the ace's grandparents when she's
-// a parent). Pasting a new export replaces the list.
+// a parent), and the support cards of the decks she trained with (for My cards). Pasting a new
+// export replaces the list.
 //
 // Spark (factor) ids, checked against GameTora's factor table: the factor's id × 100 + stars.
 //   1–5: blue (Speed, Stamina, Power, Guts, Wit), e.g. 103 = Speed 3★
@@ -26,6 +27,9 @@
   const APT_KEYS = ["proper_ground_turf", "proper_ground_dirt", "proper_distance_short", "proper_distance_mile", "proper_distance_middle", "proper_distance_long",
     "proper_running_style_nige", "proper_running_style_senko", "proper_running_style_sashi", "proper_running_style_oikomi"];
   const POS = { 10: 0, 20: 1 }; // succession_chara_array: 10 and 20 are her parents (11, 12, 21, 22 theirs)
+  const FRIEND_SLOT = 6; // support_card_list: the borrowed friend's card
+  // The game's scenario ids (as uma.moe labels them; Trackblazer's careers race the most).
+  const SCENARIO = { 1: "ura", 2: "unity", 3: "grandlive", 4: "trackblazer", 5: "grandmasters", 6: "larc", 7: "uaf", 8: "cooking", 9: "mecha", 10: "legends", 11: "island", 12: "onsen", 13: "dreams" };
 
   // meta: data/skill-purchases.js skills ({ id: [family, cost, prerequisite, …] }).
   function create(meta) {
@@ -53,32 +57,47 @@
       return m;
     }
 
-    // The export (text or parsed) → { list, skipped }. Each veteran: { id, cid, tid, score,
-    // stats, apt, at, self: member, parents: [member|null, member|null] }.
+    // The export (text or parsed) → { list, skipped, cards }. Each veteran: { id, cid, tid, score,
+    // stats, apt, at, saddles (her G1 saddle ids, as uma.moe takes them), learned, scenario,
+    // races, self: member,
+    // parents: [member|null, member|null] }. cards: { support card id: limit break } from the decks
+    // she trained with: slots 1–5 are yours (slot 6 is the friend's card you borrowed, always
+    // LB4), each at the highest limit break any veteran had it at (you may have raised it since).
     function parse(input) {
       const data = typeof input === "string" ? JSON.parse(input) : input;
       const arr = Array.isArray(data) ? data : data && Array.isArray(data.trained_chara_array) ? data.trained_chara_array : null;
       if (!arr) throw new Error("Expected the umaextractor veterans list (a JSON array).");
       let skipped = 0;
-      const list = [];
+      const list = [], cards = {};
       arr.forEach((v) => {
         if (!v || !v.card_id || !Array.isArray(v.factor_info_array)) { skipped++; return; }
         const parents = [null, null];
         (v.succession_chara_array || []).forEach((p) => { if (POS[p.position_id] != null && p.card_id) parents[POS[p.position_id]] = member(p); });
+        (v.support_card_list || []).forEach((s) => {
+          const id = s && +s.support_card_id, lb = s && +s.limit_break_count;
+          if (!id || s.position === FRIEND_SLOT || !(lb >= 0 && lb <= 4)) return;
+          cards[id] = Math.max(cards[id] == null ? -1 : cards[id], lb);
+        });
         list.push({
           id: v.trained_chara_id, cid: Math.floor(v.card_id / 100), tid: v.card_id, score: v.rank_score || 0,
           stats: [v.speed, v.stamina, v.power, v.guts, v.wiz], apt: APT_KEYS.map((k) => GRADE[v[k]] || null),
-          at: v.create_time || "", self: member(v), parents,
+          at: v.create_time || "", saddles: [...new Set((v.win_saddle_id_array || []).map(Number).filter((s) => s > 0))], self: member(v), parents,
+          // Skills she learned (not her unique): how many of them became white sparks tells the
+          // planner your spark rate.
+          learned: (v.skill_array || []).filter((x) => x && x.skill_id >= 200000 && x.skill_id < 300000).length,
+          // Her scenario (the app's id) and the races she ran before the finale's three: how
+          // many races your parents can run and still reach SS.
+          scenario: SCENARIO[v.scenario_id] || null, races: (v.race_result_list || []).filter((r) => r && r.turn <= 72).length,
         });
       });
       if (!list.length) throw new Error("No veterans found in that JSON.");
-      return { list, skipped };
+      return { list, skipped, cards };
     }
 
     return { parse, member, whiteOf: (f) => base[String(f)] || null };
   }
 
-  const api = { create, SADDLE, PINK };
+  const api = { create, SADDLE, PINK, SCENARIO };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaVeterans = api;
 })(typeof window !== "undefined" ? window : globalThis);

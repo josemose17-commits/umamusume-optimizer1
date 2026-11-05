@@ -706,3 +706,24 @@ table.pred .over { color: var(--accent); }
 .pull-fixed > .table-wrap { margin-top: 6px; }
 .pull-got summary { font-size: .8rem; color: var(--muted); }
 .pull-got .row-wrap { margin-top: 4px; }
+
+/* CM/LoH planner */
+.cmp { display: grid; gap: 14px; }
+.cmp h2, .cmp h3 { margin: 0; }
+.cmp h4 { margin: 12px 0 4px; }
+.cmp > *, .cmp .panel > * { min-width: 0; }
+.cmp details > summary { cursor: pointer; }
+.cmp td.num, .cmp th.num { text-align: right; white-space: nowrap; }
+.cmp-ace-pick { align-items: flex-end; }
+.cmp-ace-pick .field { min-width: 0; }
+.cmp-ace-pick select { max-width: 100%; }
+.cmp-deck { margin: 4px 0; padding-left: 22px; }
+.cmp-deck li { margin: 2px 0; }
+.cmp-filters { margin: 4px 0 8px; padding-left: 18px; }
+.cmp-filters li { margin: 2px 0; }
+.cmp-train { margin-top: 12px; border-left: 3px solid var(--accent); padding-left: 10px; }
+.cmp-races tr.cmp-cut td { opacity: .55; }
+.cmp-rent, .cmp-import { margin-top: 6px; }
+.cmp .field { max-width: 100%; min-width: 0; }
+.cmp select, .cmp textarea { max-width: 100%; }
+#cmpCup { width: 100%; }

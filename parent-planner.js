@@ -481,7 +481,7 @@
       return true;
     }
 
-    return { render, click, change, onToggle, SP_RATING, spRate: () => spRate(st()), schedule: (p) => schedule(p || st()) };
+    return { render, click, change, onToggle, SP_RATING, spRate: () => spRate(st()), schedule: (p) => schedule(p || st()), family: fp, toBuilder, undoBuilder, st };
   }
 
   const api = { create, SP_RATING, spRating };

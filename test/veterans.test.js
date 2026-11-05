@@ -72,3 +72,13 @@ test("veterans: as a parent, her wins shared with her own parents count for affi
   assert.strictEqual(t.race.p1g11.length, 4, "Arima, Japan Cup, Derby, Satsuki Sho");
   assert.strictEqual(t.race.p1g12.length, 0);
 });
+
+test("veterans: the cards of their decks, each at the highest limit break, the friend's card left out", () => {
+  const deck = (list) => list.map(([position, id, lb]) => ({ position, support_card_id: id, exp: 0, limit_break_count: lb }));
+  const a = uma(101701, [103], [10, 99], { trained_chara_id: 1, support_card_list: deck([[1, 30016, 1], [2, 20020, 3], [6, 30134, 4]]) });
+  const b = uma(101501, [202], [], { trained_chara_id: 2, support_card_list: deck([[1, 30016, 3], [2, 20020, 2], [3, 10001, 0], [6, 30016, 4]]) });
+  const r = vets.parse([a, b]);
+  assert.deepStrictEqual(r.cards, { 30016: 3, 20020: 3, 10001: 0 }, "slot 6 (the borrowed card) never counts, even for a card you have");
+  assert.deepStrictEqual(r.list[0].saddles, [10, 99], "raw saddle ids, titles too (uma.moe reads them)");
+  assert.deepStrictEqual(vets.parse(EXPORT).cards, {}, "an export without decks gives no cards");
+});

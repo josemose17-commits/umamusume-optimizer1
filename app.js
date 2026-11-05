@@ -297,6 +297,7 @@
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
         <button type="button" role="tab" data-tab="all">All scenarios</button>
         <button type="button" role="tab" data-tab="cm" id="tabCM">CM &amp; decks</button>
+        <button type="button" role="tab" data-tab="cmplan" id="tabCmPlan">CM/LoH planner</button>
         <button type="button" role="tab" data-tab="tiers" id="tabTiers">Tier list</button>
         <button type="button" role="tab" data-tab="parents" id="tabParents">Parents</button>
         <button type="button" role="tab" data-tab="pulls" id="tabPulls">Pull planner</button>
@@ -739,6 +740,7 @@
     $("#tabBody").addEventListener("click", (e) => {
       if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
+      if (state.tab === "cmplan" && cmPlan() && cmPlan().click(e)) return;
       const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
       const s = e.target.closest("[data-pick]"); if (s) { sel.value = s.dataset.pick; sel.dispatchEvent(new Event("change")); state.tab = "guide"; save(); renderTab(); }
       if (e.target.closest("[data-undo]")) undoTurn();
@@ -800,6 +802,7 @@
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
+    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "cmplan" && cmPlan()) cmPlan().change(e); });
     $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "parents" && parents()) parents().onToggle(e); }, true);
     $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null || e.target.dataset.cmTarget != null) setTimeout(renderTab, 0); });
     $("#tabBody").addEventListener("input", (e) => {
@@ -1681,6 +1684,16 @@
     </details>`;
   }
 
+  function raiseOwned(cards) {
+    const out = { added: 0, raised: 0, unknown: 0 };
+    Object.keys(cards || {}).forEach((id) => {
+      const lb = Math.max(0, Math.min(4, Math.round(+cards[id])));
+      if (!D.DATA.supports.some((c) => c.id === +id)) { out.unknown++; return; }
+      if (owned[id] == null) { owned[id] = lb; out.added++; } else if (lb > +owned[id]) { owned[id] = lb; out.raised++; }
+    });
+    if (out.added || out.raised) { saveOwned(); if (state.deck.ownedOnly) fillLists(); }
+    return out;
+  }
   function setOwned(id, lb) {
     if (lb == null || lb === "") delete owned[id]; else owned[id] = +lb;
     saveOwned();
@@ -2776,6 +2789,124 @@
     if (predictDone && state.tab === "parents") predictDone();
   }
 
+  // Resolves once every cup's skill values are loaded (the pull planner and the CM planner).
+  const ensureSkills = (ids) => new Promise((resolve, reject) => {
+    ids.forEach((id) => loadSkillValues(id));
+    const t0 = Date.now();
+    const wait = () => {
+      if (ids.every((id) => typeof svCache[id] === "object" || svCache[id] === "missing")) resolve();
+      else if (ids.some((id) => svCache[id] === "error")) reject(new Error("Couldn't load a cup's skill values. Check your connection and plan again."));
+      else if (Date.now() - t0 > 60000) reject(new Error("Loading the cups' skill values timed out. Plan again."));
+      else setTimeout(wait, 100);
+    };
+    wait();
+  });
+  // The ace's relevant skills on a race for her style ({ targets, why, L } with every charted
+  // skill's L), out on Global by that cup when CM & decks says so; null while they load.
+  function aceSkillsFor(race) {
+    const id = race.preset.id;
+    loadSkillValues(id);
+    if (!(pasted[id] && pasted[id][race.style]) && typeof svCache[id] !== "object") return null;
+    const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
+    const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(race.preset) });
+    if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x, race.preset)) { delete out.targets[x]; delete out.why[x]; } });
+    return Object.assign(out, { L });
+  }
+
+  // The CM planner's decks, built the quick way CM & decks starts (Euophrys' scoring plus the
+  // race's skill values, no simulated search), with CM & decks' makeup, friend card and skill
+  // weight: her racing deck (races null), or an Ace parent's deck for this race in Independent
+  // Training with that many G1s (the Parents tab's ③ settings). tid: her version (null: none).
+  function planDeck(p, style, tid, races) {
+    const parent = races != null;
+    const base = Object.assign({ statsW: "0.1", comp: {}, ownedOnly: true, borrow: true, skillW: "1", itManual: "0.5", eventSuccessRate: "0.5", globalSkills: true }, parent ? state.pcm || {} : state.cm || {});
+    const c = Object.assign({}, base, { goal: parent ? "ace" : "race", preset: p.id, style, independent: parent, itRaces: parent ? races : null, locked: [], must: [], reachSS: false, comp: Object.assign({}, base.comp || {}) });
+    const pool = optPool(c);
+    let bp = c.borrow ? borrowPool() : [];
+    const locked = [], link = itLink(c, pool, bp);
+    if (link && link.lock) locked.push(link.lock);
+    if (link && link.borrow) bp = [link.borrow];
+    const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: c.comp, trainee: tid || null });
+    if (opts.parent) delete opts.parent.reachSS;
+    const r = T.buildDeck(opts, pool, bp);
+    return { cards: r.cards, skills: r.skills, offers: T.deckOffers(opts, r.cards), link };
+  }
+
+  // The CM/LoH planner tab (cm-tab.js): the cup and your aces, then for each her deck, Parent 1
+  // (a veteran, or a fresh one with her races) and the uma.moe search for Parent 2.
+  let cmTab = null;
+  const charNames = new Map();
+  function cmPlan() {
+    if (cmTab || !window.UmaCmTab || !window.UmaCmPlan || !P || !T || !parents()) return cmTab;
+    const fp = () => parents().family;
+    const saddles = {};
+    Object.keys(window.UmaVeterans.SADDLE).forEach((k) => { saddles[window.UmaVeterans.SADDLE[k]] = +k; });
+    D.DATA.trainees.forEach((t) => { if (!charNames.has(t.cid)) charNames.set(t.cid, t.n); });
+    const PR = window.UmaRating, SB = window.UmaSkillBudget;
+    cmTab = window.UmaCmTab.create({
+      D, P, T, A: window.UmaAffinity, F: window.UmaFamily, PR, SB, SS: PR.SS,
+      esc, flash, save, today: TODAY, state: () => state, saddles,
+      chars: () => [...new Set(D.DATA.trainees.filter((t) => D.onGlobal(t)).map((t) => t.cid))],
+      cupLabel: (p) => presetLabel(p),
+      owned: () => owned, ownedCode: () => ownedCode(), myUmas: () => myUmas(),
+      veterans: () => (fp() ? fp().veterans() : { at: "", list: [] }),
+      importVeterans: (text) => (fp() ? fp().importVeterans(text) : null),
+      rentals: () => (fp() ? fp().rentalsList() : []),
+      addRentals: (text) => fp() && fp().addRentals(text),
+      clearRentals: () => fp() && fp().setRentals([]),
+      euReady: () => euReady(),
+      ensureSkills: (ids) => ensureSkills(ids),
+      aceSkills: (race) => aceSkillsFor(race),
+      build: (p) => E.BUILDS[p.build] || null,
+      deck: (p, style, tid, races) => planDeck(p, style, tid, races),
+      // A parent's run with this deck and n extra races, as ② predicts it (16 careers).
+      simulate: (p, tid, cards, n) => {
+        const c = state.pcm || {};
+        const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, n / 60), runs: 16,
+          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false }), cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
+        return { stats: est.stats, sp: est.sp, finals: est.finals };
+      },
+      // Rating per skill point for a parent buying her relevant skills on this race.
+      spRate: (p, style, apt) => window.UmaParentPlanner.spRating(Object.keys(parentTargetsFor({ style, globalSkills: (state.pcm || {}).globalSkills !== false }, p).targets), apt, PR, SB),
+      skillName: (id) => skillInfo(id)[0],
+      charName: (cid) => charNames.get(+cid) || "#" + cid,
+      turnText: (t) => E.turnInfo(t, scenario()).text,
+      scenario: () => ({ id: scenario().id, name: scenario().name }),
+      scenarioName: (id) => (SCENARIOS.find((x) => x.id === id) || { name: id }).name,
+      // Your Pull planner team for the cup's track: [{ tid, style }].
+      pullTeam: (p) => {
+        const g = window.UmaPullValues && window.UmaPullValues.groupOf(p), teams = (state.pull && state.pull.teams) || {};
+        return g ? (teams[g] || []).filter((m) => m && m.id).map((m) => ({ tid: +m.id, style: m.style || null })) : [];
+      },
+      gotoCM: (p, style, tid) => { const c = state.cm || (state.cm = {}); c.preset = p.id; c.style = style; state.tab = "cm"; save(); setTrainee(tid); renderTab(); },
+      sendToParents: (o) => sendToParents(o),
+      rerender: () => { if (state.tab === "cmplan") renderTab(); },
+    });
+    return cmTab;
+  }
+  // A fresh Parent 1 from the CM planner, set up in the Parents tab: the family (the ace, her,
+  // and her two veterans as her parents), ① her (the coach's trainee too), ② her races, ③ the
+  // ace's race as an Ace parent, ④ her target whites as spark ★.
+  function sendToParents(o) {
+    const pp = parents();
+    if (!pp) return;
+    const c = state.cm || (state.cm = {});
+    c.preset = o.cup; c.style = o.style;
+    const ps = pp.st(), f = ps.family || (ps.family = {});
+    const blank = () => ({ cid: null, tid: null, white: [], blue: [0, 0], pink: [0, 0], green: 0, wins: [] });
+    const vet = (v) => (v ? { cid: v.cid, tid: v.tid, white: v.self.white.map((w) => w.slice()), blue: v.self.blue.slice(), pink: v.self.pink.slice(), green: v.self.green, wins: v.self.wins.slice(), vet: v.id } : blank());
+    f.ace = { cid: o.ace.cid, tid: o.ace.tid };
+    f.p1 = Object.assign(blank(), { cid: o.p1.cid, tid: o.p1.tid, wins: (o.wins || []).slice() });
+    f.g11 = vet(o.parents[0]); f.g12 = vet(o.parents[1]);
+    if (f.rental == null) f.rental = true;
+    f.builderUndo = pp.toBuilder(o.p1.tid, o.must);
+    ps.races = o.races.slice();
+    state.tab = "parents";
+    save();
+    flash(`${D.trainee(o.p1.tid).n} is set up in the Parents tab: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
+    renderTab();
+  }
+
   // The Parents tab (parent-planner.js): the parent, her races, her deck, and the SS check.
   let pp = null;
   let ppSkillsOpen = false;
@@ -2793,18 +2924,7 @@
       setOwned: (id, lb) => { if (lb == null || lb === "") delete owned[id]; else owned[id] = Math.max(0, Math.min(4, +lb)); saveOwned(); },
       addMyUma: (id) => { const s = myUmas(); s.add(+id); setMyUmas(s); },
       euReady: () => euReady(),
-      // Resolves once every cup's skill values are loaded.
-      ensureSkills: (ids) => new Promise((resolve, reject) => {
-        ids.forEach((id) => loadSkillValues(id));
-        const t0 = Date.now();
-        const wait = () => {
-          if (ids.every((id) => typeof svCache[id] === "object" || svCache[id] === "missing")) resolve();
-          else if (ids.some((id) => svCache[id] === "error")) reject(new Error("Couldn't load a cup's skill values. Check your connection and plan again."));
-          else if (Date.now() - t0 > 60000) reject(new Error("Loading the cups' skill values timed out. Plan again."));
-          else setTimeout(wait, 100);
-        };
-        wait();
-      }),
+      ensureSkills: (ids) => ensureSkills(ids),
       // Her racing deck there, as CM & decks builds it (its makeup, friend card and skill weight).
       // scen: the scenario Global trains in by that cup (pull-values.js); your Euophrys weight
       // changes apply in the scenario they're for.
@@ -2861,15 +2981,7 @@
       aceRace: () => { const c = state.cm || {}; return { preset: presetById(c.preset) || defaultPreset(), style: c.style || defaultStyle() }; },
       // Her relevant skills there ({ targets, why, L } with every charted skill's L), or null
       // while the race's skill values load.
-      aceSkills: (race) => {
-        const id = race.preset.id;
-        loadSkillValues(id);
-        if (!(pasted[id] && pasted[id][race.style]) && typeof svCache[id] !== "object") return null;
-        const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
-        const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(race.preset) });
-        if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x, race.preset)) { delete out.targets[x]; delete out.why[x]; } });
-        return Object.assign(out, { L });
-      },
+      aceSkills: (race) => aceSkillsFor(race),
       // How likely the racing deck built in CM & decks offers each skill, or null.
       // White skills the app has no race value for (none in the Umalator's data, or under 0.05 L
       // on every chart) and that aren't counted by condition either: named, so you know.
@@ -2889,6 +3001,9 @@
         return pool.skills.filter((x) => x.target && x.spark).map((x) => x.id);
       },
       setTrainee: (id) => setTrainee(id),
+      // Your veterans' decks (umaextractor import): each card at least at the limit break you
+      // trained with; never lowers one. Returns { added, raised, unknown }.
+      raiseOwned: (cards) => raiseOwned(cards),
       // ③ Deck: the deck builder's race header and controls, for the parent setup.
       deckHTML: () => {
         if (!P || !T) return `<div class="empty">The CM data didn't load. Refresh the page.</div>`;
@@ -3537,6 +3652,10 @@
     }
     if (state.tab === "pulls" && HAS_DATA && pulls()) {
       pulls().render(body);
+      return;
+    }
+    if (state.tab === "cmplan" && HAS_DATA && cmPlan()) {
+      cmPlan().render(body);
       return;
     }
     if ((state.tab === "cards" || state.tab === "trainees") && HAS_DATA) {

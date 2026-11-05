@@ -22,7 +22,7 @@
   const PARENT_OF = { g11: "p1", g12: "p1", g21: "p2", g22: "p2" };
   // In length units: 1 L counts like 60 stat points (as in the deck optimizer), and an
   // aptitude raised to A on the race like 1 L (a rough stand-in: no measured value).
-  const STAT_PER_L = 60, APT_L = 1;
+  const STAT_PER_L = 60, APT_L = 1, HINT_L = 0.15;
 
   // The chance a spark fires at least once in the run's two inspiration events.
   const twice = (base, stars, affinity) => {
@@ -102,10 +102,25 @@
     // pink: [aptitude index, stars], green: stars, wins: [G1 names] }.
     // The race's side of a score (relevant families, what to look for) depends only on x, so it's
     // kept per x: ranking many families against one ace stays fast.
+    // A white spark's hint is worth its skill's L only when the ace couldn't get the skill
+    // otherwise: for a skill her deck offers anyway (x.offers: chance by skill id) or one she has
+    // (innate or awakening), the hint just makes it cheaper, worth about HINT_L (a +1..+5 hint
+    // takes ~20% off a ~170 SP skill, at the optimizer's 0.35 points per SP and 60 per L).
+    const worth = (F, x) => {
+      const q = F.ids.some((id) => (x.innate || []).map(String).indexOf(id) !== -1) ? 1 : Math.max(0, ...F.ids.map((id) => (x.offers && x.offers[id]) || 0));
+      return F.L * (1 - q) + Math.min(F.L, HINT_L) * q;
+    };
     const cache = new WeakMap();
+    function prep(x) {
+      if (!cache.has(x)) {
+        const fams = families(x.rel), eff = {};
+        Object.keys(fams).forEach((f) => { eff[f] = worth(fams[f], x); });
+        cache.set(x, { fams, eff, want: lookFor(Object.assign({}, x, { chars: [], fam: {} })) });
+      }
+      return cache.get(x);
+    }
     function score(fam, x) {
-      if (!cache.has(x)) cache.set(x, { fams: families(x.rel), want: lookFor(Object.assign({}, x, { chars: [], fam: {} })) });
-      const { fams, want } = cache.get(x), raceL = x.raceL || {};
+      const { fams, eff, want } = prep(x), raceL = x.raceL || {};
       const L = { trainee: x.ace && x.ace.cid };
       SLOTS.forEach((k) => { L[k] = fam[k] && fam[k].cid; });
       const wins = {};
@@ -120,9 +135,9 @@
         (m.white || []).forEach(([id, stars]) => {
           const f = fams[family(id)];
           if (!f) return;
-          const p = twice(WHITE, stars, aff);
-          out.white.push({ slot: k, id: String(id), stars, p, L: f.L });
-          out.hints += p; out.whiteL += p * f.L;
+          const p = twice(WHITE, stars, aff), worthL = eff[family(id)];
+          out.white.push({ slot: k, id: String(id), stars, p, L: f.L, worth: worthL });
+          out.hints += p; out.whiteL += p * worthL;
         });
         if (m.green && m.unique) {
           const p = twice(GREEN, m.green, aff), gl = raceL[m.unique] || 0;
@@ -160,10 +175,13 @@
       return [...new Set(out)];
     }
 
-    return { lookFor, score, families, baseWhite, problems };
+    // What a white spark of each relevant family is worth to the ace ({ family: L }, her deck's
+    // offers and her own skills counted).
+    const worthOf = (x) => prep(x).eff;
+    return { lookFor, score, families, baseWhite, problems, worthOf, family };
   }
 
-  const api = { create, twice, WHITE, GREEN, PINK, BLUE, START_BLUE, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L };
+  const api = { create, twice, WHITE, GREEN, PINK, BLUE, START_BLUE, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamily = api;
 })(typeof window !== "undefined" ? window : globalThis);

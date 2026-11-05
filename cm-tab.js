@@ -1,0 +1,385 @@
+// The CM/LoH planner tab: from the cup to the ace's parents on one page. Pick the cup and up to
+// three aces; for each it builds her racing deck from your cards (as CM & decks does), then
+// picks Parent 1 from your veterans given that deck (or, when none is good enough, a fresh one
+// to train, with her own parents from your veterans and the G1s to win, as many as keep her at
+// SS), and the uma.moe search for Parent 2. Logic: cm-plan.js; keeps state.cmp.
+(function (root) {
+  "use strict";
+  const STYLES = [["Nige", "Front"], ["Senkou", "Pace"], ["Sasi", "Late"], ["Oikomi", "End"]];
+  const STYLE_LABEL = Object.fromEntries(STYLES);
+  const MAX_ACES = 3;
+  // A fresh parent's deck is first built for this many G1s (Race Bonus counts for them), before
+  // her race plan is known.
+  const PLAN_RACES = 10;
+  const RANK = "GFEDCBAS";
+  const fmt = (v) => v.toFixed(2);
+  const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+  function create(ctx) {
+    const { D, P, A, F, PR, esc } = ctx;
+    const CP = root.UmaCmPlan.create({ A, F, skills: ctx.SB.DATA.skills, trainees: D.DATA.trainees, chars: ctx.chars(), saddles: ctx.saddles, SS: PR.SS });
+    let job = null;    // the plan in progress: { stage, f }
+    let result = null; // the last plan, with the inputs it was made for
+    const trainee = (id) => (id ? D.trainee(+id) : null);
+    const tName = (t) => (t ? t.n + (D.DATA.trainees.filter((x) => x.cid === t.cid).length > 1 ? " [" + t.t + "]" : "") : "");
+    const cardName = (id) => { const c = D.card(id); return c ? c.n + " [" + c.t + "]" : "#" + id; };
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+
+    // ---------- state ----------
+    const cups = () => P.list.filter((p) => p.global.end >= ctx.today);
+    function st() {
+      const s = ctx.state();
+      if (!s.cmp) s.cmp = {};
+      const c = s.cmp;
+      if (!c.byCup) c.byCup = {};
+      if (c.ssMust == null) c.ssMust = true;
+      if (!c.cup || !P.list.some((p) => p.id === c.cup)) c.cup = (cups().find((p) => p.kind === "cm") || cups()[0] || P.list[P.list.length - 1]).id;
+      return c;
+    }
+    const cup = (c) => P.list.find((p) => p.id === c.cup);
+    // Her running style: the one she's best at (Pace on ties).
+    function bestStyle(t) {
+      if (!t) return "Senkou";
+      let best = 1;
+      [0, 1, 2, 3].forEach((i) => { if (RANK.indexOf(t.apt[6 + i]) > RANK.indexOf(t.apt[6 + best])) best = i; });
+      return STYLES[best][0];
+    }
+    // This cup's aces: yours to pick (starting from your Pull planner team for its track).
+    function aces(c) {
+      if (!c.byCup[c.cup]) c.byCup[c.cup] = ctx.pullTeam(cup(c)).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES);
+      return c.byCup[c.cup];
+    }
+    const inputsKey = (c) => JSON.stringify([c.cup, aces(c), c.ssMust, ctx.ownedCode(), ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort()]);
+
+    // ---------- planning ----------
+    async function run() {
+      const c = st(), p = cup(c), list = aces(c).filter((a) => trainee(a.tid));
+      if (job) return;
+      if (!list.length) { ctx.flash("Pick an ace first."); return; }
+      job = { stage: "Loading the card data…", f: 0 };
+      ctx.rerender();
+      try {
+        for (let i = 0; !ctx.euReady(); i++) { if (i > 600) throw new Error("The card data didn't load. Check your connection."); await new Promise((r) => setTimeout(r, 100)); }
+        job.stage = "Loading the race's skill values…"; ctx.rerender();
+        await ctx.ensureSkills([p.id]);
+        const shared = { vets: ctx.veterans().list, umas: [...ctx.myUmas()], pdeck: {} };
+        const out = [];
+        for (let i = 0; i < list.length; i++) out.push(await planAce(c, p, list[i], i, list.length, shared));
+        result = { key: inputsKey(c), cup: p.id, aces: out };
+      } catch (err) {
+        ctx.flash(err.message || String(err));
+      }
+      job = null;
+      ctx.rerender();
+    }
+    const stage = async (text, f) => { job = { stage: text, f }; ctx.rerender(); await tick(); };
+
+    async function planAce(c, p, a, i, n, shared) {
+      const t = trainee(a.tid), who = tName(t), style = a.style || bestStyle(t);
+      await stage(`${who}: her racing deck…`, i / n);
+      const deck = ctx.deck(p, style, t.id, null);
+      const rel = ctx.aceSkills({ preset: p, style });
+      if (!rel) throw new Error("The race's skill values didn't load. Plan again.");
+      const x = CP.context({ ace: { cid: t.cid, tid: t.id }, race: { preset: p, style }, rel, offers: deck.offers, build: ctx.build(p) });
+      await stage(`${who}: Parent 1 from your veterans…`, (i + 0.25) / n);
+      const vets = CP.rankVets(x, shared.vets);
+      await stage(`${who}: would a fresh Parent 1 do better?`, (i + 0.4) / n);
+      const pk = p.id + "|" + style;
+      if (!shared.pdeck[pk]) shared.pdeck[pk] = ctx.deck(p, style, null, PLAN_RACES);
+      const fresh = CP.rankFresh(x, shared.vets, shared.umas, shared.pdeck[pk].offers);
+      const useFresh = CP.freshWins(vets[0], fresh[0]);
+      let train = null;
+      if (fresh[0]) {
+        const f = fresh[0], races = CP.racePlan(f, shared.vets);
+        const her = ctx.deck(p, style, f.t.id, races.extraRaces);
+        await stage(`${who}: how many races keep ${tName(f.t)} at SS…`, (i + 0.6) / n);
+        const ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, c.ssMust, shared.vets);
+        train = { f, races, deck: her, ss, agenda: CP.upTo(races, ss.n) };
+      }
+      const p1 = useFresh ? fresh[0] : vets[0] || null;
+      return { a, style, t, x, deck, vets: vets.slice(0, 6), fresh: fresh.slice(0, 4), useFresh, train, p1, link: p1 ? linkFor(x, t, p1, useFresh ? train : null) : null };
+    }
+
+    // The most extra races (her plan's order) that keep her at SS. Your veterans in the scenario
+    // you train in that ran next to no extra races give the ratings you really reach; the
+    // simulation (her deck, Independent Training, 16 careers) gives what each race costs her; a
+    // count keeps her at SS when SS_SHARE of those ratings, less that cost, still reach it.
+    // Too few such veterans: the simulation alone (it leaves out inheritance, so it runs low).
+    // Without "SS is a must", every planned race.
+    async function ssCut(p, style, t, cards, max, must, vets) {
+      const rate = ctx.spRate(p, style, t.apt), uniq = PR.uniqueBonus(t.r, t.r), share = root.UmaCmPlan.SS_SHARE;
+      const rating = (x) => PR.statsScore(x.stats) + Math.round((x.sp || 0) * rate) + uniq;
+      const memo = new Map();
+      const sim = async (k) => {
+        if (!memo.has(k)) {
+          await tick();
+          const x = ctx.simulate(p, t.id, cards, k), fin = x.finals || [];
+          memo.set(k, { n: k, stats: x.stats, sp: x.sp, rating: rating(x), hit: fin.filter((y) => rating(y) >= PR.SS).length, of: fin.length });
+        }
+        return memo.get(k);
+      };
+      const zero = await sim(0), top = await sim(max);
+      const perRace = max > 0 ? Math.max(0, (zero.rating - top.rating) / max) : 0;
+      const sc = ctx.scenario();
+      let scen = sc, base = CP.baseline(vets, sc.id);
+      if (!base) {
+        // Not enough of your veterans in the coach's scenario: the one you trained in last.
+        const last = (vets || []).filter((v) => v.scenario).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+        if (last && last.scenario !== sc.id) { base = CP.baseline(vets, last.scenario); if (base) scen = { id: last.scenario, name: ctx.scenarioName(last.scenario) }; }
+      }
+      let cut;
+      if (base) cut = Object.assign(CP.ssLimit(base, perRace, max), { from: "veterans", base, scen });
+      else {
+        const ok = (y) => (y.of ? y.hit / y.of >= share : y.rating >= PR.SS);
+        if (ok(top)) cut = { n: max };
+        else if (!ok(zero)) cut = { n: 0, none: true };
+        else {
+          let lo = 0, hi = max;
+          while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (ok(await sim(mid))) lo = mid; else hi = mid; }
+          cut = { n: lo };
+        }
+        cut.from = "simulation";
+      }
+      if (!must) cut = Object.assign(cut, { n: max, none: false, loose: true });
+      await sim(cut.n);
+      return Object.assign(cut, { perRace, rows: [...memo.values()].sort((a, b) => a.n - b.n), simScen: sc });
+    }
+
+    // The uma.moe search for Parent 2 with this Parent 1.
+    function linkFor(x, t, p1, train) {
+      const saddles = train ? train.agenda.map((r) => ctx.saddles[r.name]).filter(Boolean) : CP.saddlesOf(p1);
+      const want = CP.want(x), whites = CP.missingWhites(x, p1.s).slice(0, 4);
+      const blue = want.blue.map((b) => b.i);
+      return Object.assign(CP.umaMoe({ ace: t.id, p1: { tid: p1.f.p1.tid, saddles }, blue, whites: whites.map((w) => w.id) }), { blue: want.blue, whites, pink: want.pink, green: want.green.slice(0, 3), wins: saddles.length });
+    }
+
+    // ---------- drawing ----------
+    function render(body) {
+      const c = st();
+      body.innerHTML = `<div class="cmp">
+        <section class="panel"><h2>CM/LoH planner</h2><p class="mini">One page from the cup to her parents. For each ace you pick, it builds her racing deck from your cards, then picks Parent 1 from your veterans <i>given that deck</i> (a spark for a skill the deck already offers is worth only its hint's discount), or a fresh Parent 1 to train when none of your veterans is good enough, with the G1s she should win. Then it gives you the uma.moe search for Parent 2, and ranks the rentals you paste from it.</p></section>
+        ${importHTML()}${setupHTML(c)}${resultHTML(c)}
+      </div>`;
+    }
+
+    function importHTML() {
+      const v = ctx.veterans(), n = v.list.length, owned = Object.keys(ctx.owned()).length;
+      return `<section class="panel"><details class="cmp-import"${n ? "" : " open"}><summary><b>Your umaextractor export</b> · ${n ? `${plural(n, "veteran")} imported ${esc(v.at || "")}` : "not imported yet"} · ${plural(owned, "card")} in My cards · ${plural(ctx.myUmas().size, "uma")} in My umas</summary>
+        <p class="mini">Paste the JSON from umaextractor (or pick the file) whenever you've trained more: it replaces your veterans and adds to My umas and My cards (each card at least at the limit break you trained it with; a card you've raised since stays as you set it). The Parents tab shares the same list.</p>
+        <textarea class="fp-vets" id="cmpVetsText" rows="3" placeholder="Paste the umaextractor JSON here"></textarea>
+        <div class="row-wrap"><button type="button" class="btn small" id="cmpImport">Import</button><label class="btn ghost small">Pick the file<input type="file" accept=".json,application/json" id="cmpVetsFile" hidden></label></div>
+      </details></section>`;
+    }
+
+    function setupHTML(c) {
+      const p = cup(c), list = aces(c), mine = [...ctx.myUmas()].map(trainee).filter(Boolean).sort((a, b) => a.n.localeCompare(b.n) || a.t.localeCompare(b.t));
+      const cupOpts = cups().map((x) => `<option value="${esc(x.id)}"${x.id === c.cup ? " selected" : ""}>${esc(ctx.cupLabel(x))}</option>`).join("");
+      const row = (a, i) => {
+        const t = trainee(a && a.tid);
+        return `<div class="row-wrap cmp-ace-pick"><label class="field"><span>Ace ${i + 1}</span><select data-cmp-ace="${i}"><option value="">—</option>${mine.map((m) => `<option value="${m.id}"${t && m.id === t.id ? " selected" : ""}>${esc(m.n + " [" + m.t + "]")}</option>`).join("")}</select></label>
+          <label class="field"><span>Running style</span><select data-cmp-style="${i}"${t ? "" : " disabled"}>${STYLES.map(([k, l]) => `<option value="${k}"${t && (a.style || bestStyle(t)) === k ? " selected" : ""}>${l}${t ? " (" + t.apt[6 + STYLES.findIndex((s) => s[0] === k)] + ")" : ""}</option>`).join("")}</select></label>
+          ${t ? `<span class="mini">${esc(p.course.surface)} ${esc(t.apt[p.course.surface === "Dirt" ? 1 : 0])} · ${esc(p.course.dist)} ${esc(t.apt[{ Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.course.dist]] || "?")}</span>` : ""}</div>`;
+      };
+      const rows = list.slice(0, MAX_ACES).map(row).join("") + (list.length < MAX_ACES ? row(null, list.length) : "");
+      const team = ctx.pullTeam(p).filter((m) => ctx.myUmas().has(+m.tid));
+      const stale = result && result.key !== inputsKey(c);
+      return `<section class="panel">
+        <div class="pp-form"><label class="field"><span>The cup</span><select id="cmpCup">${cupOpts}</select></label></div>
+        <p class="mini">${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} (${esc(p.course.dist)})${p.global.est ? " · estimated date" : ""}. Pick up to three aces from My umas${mine.length ? "" : " (tick yours in the Trainees tab, or import your export above)"}.</p>
+        ${rows}
+        <div class="row-wrap">${team.length ? `<button type="button" class="btn ghost small" id="cmpTeam">Use my Pull planner team for this track</button>` : ""}${list.length ? `<button type="button" class="btn ghost small" id="cmpClear">Clear the aces</button>` : ""}
+          <label class="chip-toggle"><input type="checkbox" id="cmpSS"${c.ssMust ? " checked" : ""}> SS is a must for a parent you train (fewer races if needed)</label></div>
+        <div class="row-wrap"><button type="button" class="btn" id="cmpRun"${job ? " disabled" : ""}>${result ? "Plan again" : "Plan"}</button>${stale ? `<span class="mini warn">Your inputs changed since this plan: plan again.</span>` : ""}</div>
+        ${job ? `<div class="row-wrap"><span class="progress"><i style="width:${Math.round(job.f * 100)}%"></i></span><span class="mini">${esc(job.stage)}</span></div>` : ""}
+      </section>`;
+    }
+
+    function resultHTML(c) {
+      if (!result) return "";
+      const p = P.list.find((x) => x.id === result.cup);
+      return result.aces.map((r) => aceHTML(r, p)).join("") + howHTML();
+    }
+
+    const sparks = (m) => [m.blue && m.blue[1] ? `${F.STAT_LABELS[m.blue[0]]} ${m.blue[1]}★` : "", m.pink && m.pink[1] ? `${F.APT_LABELS[m.pink[0]]} ${m.pink[1]}★` : "", m.green ? `green ${m.green}★` : "", m.white && m.white.length ? plural(m.white.length, "white") : "", m.wins && m.wins.length ? `${m.wins.length} G1` : ""].filter(Boolean).join(" · ");
+    const vetName = (v) => tName(trainee(v.tid)) || ctx.charName(v.cid);
+    const topSkills = (s, slots) => s.white.filter((w) => !slots || slots.indexOf(w.slot) !== -1).sort((a, b) => b.p * b.worth - a.p * a.worth).slice(0, 3).map((w) => esc(ctx.skillName(w.id))).join(", ");
+
+    function aceHTML(r, p) {
+      const head = `${esc(tName(r.t))} · ${STYLE_LABEL[r.style]}`;
+      return `<section class="panel cmp-ace"><h3>${head}</h3>
+        <h4>① Her racing deck</h4>${deckHTML(r, p)}
+        <h4>② Parent 1</h4>${p1HTML(r)}
+        <h4>③ Parent 2: a friend's rental</h4>${p2HTML(r)}
+        ${r.train ? `<details class="cmp-train"${r.useFresh ? " open" : ""}><summary><b>${r.useFresh ? "④ Train her: " : "A fresh Parent 1, if you train one anyway: "}${esc(tName(r.train.f.t))}</b> · ${plural(r.train.ss.n, "extra race")}${r.train.ss.none ? " (short of SS even without extra races)" : ""}</summary>${trainHTML(r, p)}</details>` : ""}
+      </section>`;
+    }
+
+    function deckHTML(r, p) {
+      const d = r.deck;
+      const offers = (d.skills || []).slice(0, 6).map((s) => `${esc(ctx.skillName(s.id))} ${Math.round(s.p * 100)}%`).join(", ");
+      return `<ol class="cmp-deck">${d.cards.map((x) => `<li>${esc(cardName(x.id))} <span class="mini">${esc(D.card(x.id).ty)} · LB${x.lb}${x.borrowed ? " · a friend's card" : ""}</span></li>`).join("")}</ol>
+        ${offers ? `<p class="mini">Its best race skills, with the chance it offers each: ${offers}.</p>` : ""}
+        <div class="row-wrap"><button type="button" class="btn ghost small" data-cmp-cm="${r.t.id}|${r.style}">Open it in CM &amp; decks</button><span class="mini">to simulate it, set target stats or must-have skills (sets this cup, style and ace there).</span></div>`;
+    }
+
+    function famLine(s) { return `family score <b>${fmt(s.value)}</b> · affinity <b>${s.total} ${s.symbol}</b>`; }
+
+    function p1HTML(r) {
+      const v0 = r.vets[0], f0 = r.fresh[0];
+      let out = "";
+      if (r.useFresh) {
+        const f = r.train.f;
+        out += `<p><b>Train a new one: ${esc(tName(f.t))}</b>, with your veterans ${f.parents.map((v) => `<b>${esc(vetName(v))}</b>`).join(" and ")} as her parents (the ace's grandparents). Expected ${famLine(Object.assign({}, f.s, { value: f.value }))}${v0 ? `, against ${fmt(v0.value)} for your best veteran, ${esc(vetName(v0.v))}` : ""}. How to train her: ④ below.</p>`;
+      } else if (v0) {
+        const v = v0.v;
+        out += `<p><b>Your veteran ${esc(vetName(v))}</b> <span class="mini">(rating ${(v.score || 0).toLocaleString("en-US")} · ${sparks(v.self)}${v.parents.some(Boolean) ? ` · her parents ${v.parents.filter(Boolean).map((m) => esc(ctx.charName(m.cid))).join(" + ")}` : ""})</span>: ${famLine(v0.s)}${topSkills(v0.s, ["p1", "g11", "g12"]) ? `. Her family's best sparks here: ${topSkills(v0.s, ["p1", "g11", "g12"])}` : ""}.</p>
+          <p class="mini">${f0 ? `Good enough: the best fresh Parent 1 you could train, ${esc(tName(f0.t))} (with ${f0.parents.map((x) => esc(vetName(x))).join(" + ")}), would score about ${fmt(f0.value)}${f0.value > v0.value ? `, ${Math.round((f0.value / v0.value - 1) * 100)}% more: not the ${Math.round(root.UmaCmPlan.MARGIN * 100)}% a new career is worth` : ""}.` : "None of your umas would do better as a fresh Parent 1."}</p>`;
+      } else out += `<p class="mini">None of your veterans can be her Parent 1 (import your export above)${f0 ? "" : ", and no uma in My umas could be trained for it"}.</p>`;
+      if (r.vets.length > 1 || (r.useFresh && r.vets.length)) {
+        out += `<details><summary class="mini">Your best veterans as Parent 1 (${r.vets.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Veteran (and her parents)</th><th class="num">Family</th><th class="num">Affinity</th></tr></thead><tbody>${r.vets.map((x) => `<tr><td>${esc(vetName(x.v))}<div class="mini">rating ${(x.v.score || 0).toLocaleString("en-US")} · ${sparks(x.v.self)}${x.v.parents.some(Boolean) ? ` · parents ${x.v.parents.filter(Boolean).map((m) => esc(ctx.charName(m.cid))).join(" + ")}` : ""}</div></td><td class="num">${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td></tr>`).join("")}</tbody></table></div>
+          <p class="mini">Each with her own two parents as the ace's grandparents, and Parent 2 as the rental character that suits her and the ace best (${r.vets[0] && r.vets[0].rent ? esc(ctx.charName(r.vets[0].rent.cid)) + " for the first" : "sparks unknown"}) until you pick a real one in ③.</p></details>`;
+      }
+      if (r.fresh.length) {
+        out += `<details><summary class="mini">Fresh Parent 1s you could train (${r.fresh.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Train her, with these parents</th><th class="num">Expected family</th><th class="num">Affinity</th></tr></thead><tbody>${r.fresh.map((x) => `<tr><td>${esc(tName(x.t))}<div class="mini">${x.parents.map((v) => esc(vetName(v))).join(" + ")} · ${plural(x.f.p1.wins.filter((n, i, a) => a.indexOf(n) === i).length, "G1")} shared or career goals</div></td><td class="num">${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td></tr>`).join("")}</tbody></table></div>
+          <p class="mini">Expected at your veterans' own rates (${ratesText(r.fresh[0].rates)}), with her inherited unique at 2★, and her pink and blue sparks on a random aptitude and stat.</p></details>`;
+      }
+      return out;
+    }
+    const ratesText = (q) => `${Math.round(q.spark * 100)}% of learned skills became white sparks, ${q.stars.map((v, i) => `${i + 1}★ ${Math.round(v * 100)}%`).join(" / ")}, about ${q.learn} relevant skills learned${q.vets ? ` (from ${plural(q.vets, "veteran")})` : " (defaults: import your export to use your own)"}`;
+
+    function p2HTML(r) {
+      if (!r.p1) return `<p class="mini">Pick Parent 1 first.</p>`;
+      const l = r.link, p1 = r.p1, t = r.t;
+      const name = ctx.skillName;
+      const blue = l.blue.map((b) => `<b>${b.label} 3★</b>`).join(" or ");
+      const items = [
+        `<b>Affinity</b> → Target character: <b>${esc(tName(t))}</b>${p1.kind === "vet" ? ` · Legacy: your <b>${esc(vetName(p1.v))}</b> (if she's in your uma.moe veterans)` : ""}`,
+        `<b>Main Parent Factors</b> → Blue: ${blue}${l.blue.length > 1 ? " (add both, the second set to OR)" : ""}`,
+        l.whites.length ? `<b>White Factors</b> → Preferred: ${l.whites.map((w) => `<b>${esc(name(w.id))}</b>`).join(", ")}` : "",
+        l.pink.length ? `optional, Pink: <b>${l.pink.map((x) => x.label).join(", ")}</b> (she has ${l.pink.map((x) => x.grade).join(", ")} there)` : "",
+        l.green.length ? `optional, Green: <b>${l.green.map((g) => esc(name(g.id))).join(", ")}</b>` : "",
+        `<b>Sort by</b>: Affinity`,
+      ].filter(Boolean);
+      const rents = CP.rankRentals(r.x, p1, ctx.rentals());
+      return `<p><a class="btn small" href="${esc(l.url)}" target="_blank" rel="noopener">Search uma.moe for her Parent 2</a> <span class="mini">opens its database with these filters set, sorted by affinity with ${esc(tName(t))} and your ${esc(p1.kind === "vet" ? vetName(p1.v) : tName(p1.t))} (her character and ${plural(l.wins, "race win")}${p1.kind === "fresh" ? " she'll have" : ""}; shared G1s add affinity there too):</span></p>
+        <ul class="mini cmp-filters">${items.map((x) => `<li>${x}</li>`).join("")}</ul>
+        <details class="cmp-rent"${rents.length ? " open" : ""}><summary class="mini"><b>Paste rentals from uma.moe</b> · ${ctx.rentals().length ? `${ctx.rentals().length} pasted` : "none yet"}</summary>
+          <p class="mini">On uma.moe, select whole parent cards (from the trainer's name to the last race spark), copy, and paste here: each is ranked as Parent 2 with this Parent 1. The Parents tab keeps the same list.</p>
+          <textarea class="fp-vets" data-cmp-rent-text rows="3" placeholder="Paste uma.moe parent cards here"></textarea>
+          <div class="row-wrap"><button type="button" class="btn small" data-cmp-rent-add>Add</button>${ctx.rentals().length ? `<button type="button" class="btn ghost small" data-cmp-rent-clear>Remove all</button>` : ""}</div>
+          ${rents.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Rental (and her parents)</th><th>Friend</th><th class="num">Family</th><th class="num">Affinity</th></tr></thead><tbody>${rents.slice(0, 10).map((x) => `<tr><td>${esc(x.r.names[0])} <span class="mini">+ ${esc(x.r.names[1] || "")} + ${esc(x.r.names[2] || "")}</span><div class="mini">${sparks(x.r.parent)}${topSkills(x.s, ["p2", "g21", "g22"]) ? ` · best sparks: ${topSkills(x.s, ["p2", "g21", "g22"])}` : ""}</div></td><td>${esc(x.r.trainer)}<div class="mini">${esc(x.r.friend.replace(/(\d{3})(?=\d)/g, "$1 "))}</div></td><td class="num">${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td></tr>`).join("")}</tbody></table></div>` : ""}
+          ${rents.hidden && rents.hidden.length ? `<p class="mini">Not shown (the game wouldn't allow them here): ${rents.hidden.map((h) => `${esc(h.r.trainer)}'s ${esc(h.r.names[0])} (${esc(h.why)})`).join("; ")}.</p>` : ""}
+        </details>`;
+    }
+
+    // Where her race count comes from, in words.
+    function ssText(ss) {
+      const pct = Math.round(root.UmaCmPlan.SS_SHARE * 100), each = Math.round(ss.perRace);
+      if (ss.loose) return `SS isn't a must (the box above), so every race she can fit is in: each extra race costs her about ${each} rating in the simulation.`;
+      if (ss.from === "veterans") {
+        const b = ss.base, more = b.more.n ? ` Those of yours that ran more reached SS in ${b.more.ss} of ${b.more.n}.` : "";
+        if (ss.none) return `<span class="warn">Your ${esc(ss.scen.name)} veterans with at most one extra race reached SS in only ${b.ss} of ${b.n}</span>, under ${pct}%: no extra races, and the Parents tab's ④ shows what to buy to close the gap.${more}`;
+        return `Your ${b.n} ${esc(ss.scen.name)} veterans with at most one extra race reached SS in ${b.ss}; each extra race costs her about ${each} rating (simulated), so ${ss.n ? `${plural(ss.n, "extra race")} still keep${ss.n === 1 ? "s" : ""} ${ss.ss} of those ${b.n} ratings at SS (${pct}% needed)` : `any extra race would drop them under ${pct}%`}.${more}`;
+      }
+      if (ss.none) return `<span class="warn">The simulation puts her short of SS even with no extra races</span> (it leaves out inheritance, so it runs low): import more of your veterans in this scenario to plan from your real ratings, or check the buy in the Parents tab's ④.`;
+      return `From the simulation alone (too few of your veterans in this scenario to go by; it leaves out inheritance, so it runs low): ${plural(ss.n, "extra race")} keep ${pct}% of the simulated careers at SS; each costs about ${each} rating.`;
+    }
+    function trainHTML(r, p) {
+      const tr = r.train, f = tr.f, ss = tr.ss;
+      const shared = (x) => `shared with ${x.with.map((role) => esc(vetName(f.parents[role === "g12" ? 1 : 0]))).join(" and ")} (+${3 * x.with.length} affinity)`;
+      const why = (x) => {
+        if (x.free) return (x.goal === "choice" ? "career goal: pick this one" : x.goal === "open" ? "career goal: either one" : "career goal") + (x.with && x.with.length ? " · " + shared(x) : "");
+        if (!x.extra) return shared(x);
+        return `won by ${x.pop} of your veterans and their parents: a rental likely shares it`;
+      };
+      const all = tr.races.agenda.concat(tr.races.goals || []).sort((a, b) => a.turn - b.turn);
+      const rows = all.map((x) => { const keep = x.free || x.rank < ss.n; return `<tr${keep ? "" : ' class="cmp-cut"'}><td class="num">${x.turn}<div class="mini">${esc(ctx.turnText(x.turn))}</div></td><td><b>${esc(x.name)}</b>${x.d ? `<div class="mini">${x.d}m ${x.s === 2 ? "dirt" : "turf"}${x.aptGrades ? " · aptitude " + x.aptGrades.join("/") : ""}</div>` : ""}</td><td class="mini">${why(x)}${keep ? "" : " · <b>skip</b>: past what keeps her at SS"}</td></tr>`; }).join("");
+      const ssRows = ss.rows.map((x) => `<tr${x.n === ss.n ? ' class="cur"' : ""}><td class="num">${x.n}${x.n === ss.n ? " ←" : ""}</td>${x.stats.map((v) => `<td class="num">${v}</td>`).join("")}<td class="num">${x.sp}</td><td class="num">${x.rating.toLocaleString("en-US")}</td><td class="num">${x.hit}/${x.of}</td></tr>`).join("");
+      const w = f.extra.whites.list.slice(0, 6).map((y) => esc(ctx.skillName(y.id))).join(", ");
+      return `<p class="mini">Her own parents: ${f.parents.map((v) => `your <b>${esc(vetName(v))}</b> <span class="mini">(${sparks(v.self)})</span>`).join(" and ")}. Her own affinity in the ace's family: ${f.s.own.p1}.</p>
+        <p><b>Her deck</b> (an Ace parent deck from your cards, Independent Training): ${tr.deck.cards.map((x) => esc(cardName(x.id)) + ` <span class="mini">LB${x.lb}${x.borrowed ? ", a friend's" : ""}</span>`).join(", ")}.</p>
+        <p class="mini">Build into her: learn the race's skills ${w ? `(<b>${w}</b> first)` : ""} for white sparks, the key stats (${CP.want(r.x).blue.map((b) => b.label).join(", ")}) as high as you can for her blue spark${CP.want(r.x).pink.length ? `, and pink for ${CP.want(r.x).pink.map((x) => x.label).join(", ")} if you can` : ""}.</p>
+        <p><b>Her races</b>: ${plural(ss.n, "extra race")} beyond her career goals${tr.races.extraRaces > ss.n ? ` (of the ${tr.races.extraRaces} she could run)` : ""}. The G1s her parents won come first (each shared win adds 3 affinity for her and that parent), then the G1s a rental most likely shares.</p>
+        <p class="mini">${ssText(ss)}</p>
+        <div class="table-wrap"><table class="plan cmp-races"><thead><tr><th class="num">Turn</th><th>Race</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
+        ${tr.races.skipped.some((x) => x.points > 0) ? `<p class="mini">No free turn for ${tr.races.skipped.filter((x) => x.points > 0).map((x) => esc(x.name)).join(", ")}, which her parents won: it's held on a turn her career already takes.</p>` : ""}
+        <details><summary class="mini">What the races cost: about ${Math.round(ss.perRace)} rating each, simulated</summary>
+          <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th class="num">Extra races</th>${F.STAT_LABELS.map((l) => `<th class="num">${l.slice(0, 3)}</th>`).join("")}<th class="num">SP</th><th class="num">Rating</th><th class="num">SS</th></tr></thead><tbody>${ssRows}</tbody></table></div>
+          <p class="mini">Simulated in ${esc(ss.simScen.name)} (the coach's scenario) with her deck above, Independent Training, 16 careers each, rated as the Parents tab does (skill points spent on her relevant skills). It leaves out inheritance, so its ratings run low; the planner takes only what each race costs from it${ss.from === "veterans" ? ", and the ratings you reach from your veterans" : ""}.</p></details>
+        <div class="row-wrap"><button type="button" class="btn small" data-cmp-send="${r.t.id}">Send her to the Parents tab</button><span class="mini">sets her as the parent you're training (also the coach's trainee), her races in ②, the ace's race in ③, these whites as spark ★ in ④, and this family in 2 · Her parents.</span></div>`;
+    }
+
+    function howHTML() {
+      return `<section class="panel"><details><summary><b>How the planner decides</b></summary><ul class="mini">
+        <li><b>The deck</b> is CM &amp; decks' quick build: Euophrys' scoring plus the race's skill values for her style, from My cards at your limit breaks, with a friend's SSR at LB4 and CM &amp; decks' deck makeup and skill weight. CM &amp; decks can go further (simulated target stats).</li>
+        <li><b>Parent 1</b> is scored with the Parents tab's family score: each relevant spark's chance (by stars × the uma's own affinity, at two inspirations) × what it's worth to the ace, plus blue start bonuses on the key stats and needed pinks. A white spark is worth its skill's L only when her deck doesn't offer the skill (a hint for one it offers, or one she has innately, only takes some SP off: about ${F.HINT_L} L).</li>
+        <li><b>A fresh Parent 1</b> is any uma in My umas, with the two of your veterans that suit her best as her own parents. She's valued at your own veterans' rates: the relevant whites her parent deck offers, learned as many as your veterans learn and turned into sparks as often as theirs were. She's suggested when she'd beat your best veteran by ${Math.round(root.UmaCmPlan.MARGIN * 100)}%: a whole career is a lot to spend on less.</li>
+        <li><b>Her races</b>: career goals keep their turns; then the G1s her parents won (each shared win: +3 affinity), then the G1s your veterans and their parents won most, at B aptitude or better, one race a turn. With SS a must, as many as keep ${Math.round(root.UmaCmPlan.SS_SHARE * 100)}% of your runs at SS: your veterans in the scenario you train in that ran ${root.UmaCmPlan.BASE_EXTRA} extra race or none give the ratings you really reach (inheritance, your skill buys and all), and the simulation gives what each extra race costs her. With fewer than ${root.UmaCmPlan.BASE_MIN} such veterans, the simulation alone, which runs low.</li>
+        <li><b>Parent 2</b>: the uma.moe link carries its own database filters: the ace as the affinity target and Parent 1 (her character and G1 wins) as the legacy, so its affinity sort counts both, a 3★ blue in a key stat on the rental herself, and the race whites the family still lacks as preferred sparks. Paste the best results back to rank them by the family score.</li>
+      </ul></details></section>`;
+    }
+
+    // ---------- events ----------
+    function click(e) {
+      const t = e.target, c = st();
+      if (t.closest("#cmpRun")) { run(); return true; }
+      if (t.closest("#cmpImport")) {
+        const ta = document.getElementById("cmpVetsText");
+        if (!ta || !ta.value.trim()) { ctx.flash("Paste the JSON first."); return true; }
+        ctx.importVeterans(ta.value);
+        ctx.rerender();
+        return true;
+      }
+      if (t.closest("#cmpTeam")) { c.byCup[c.cup] = ctx.pullTeam(cup(c)).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES); ctx.save(); ctx.rerender(); return true; }
+      if (t.closest("#cmpClear")) { c.byCup[c.cup] = []; ctx.save(); ctx.rerender(); return true; }
+      const add = t.closest("[data-cmp-rent-add]");
+      if (add) {
+        const ta = add.closest("details").querySelector("[data-cmp-rent-text]");
+        if (!ta.value.trim()) { ctx.flash("Paste the uma.moe cards first."); return true; }
+        ctx.addRentals(ta.value);
+        ctx.rerender();
+        return true;
+      }
+      if (t.closest("[data-cmp-rent-clear]")) { ctx.clearRentals(); ctx.rerender(); return true; }
+      const cmb = t.closest("[data-cmp-cm]");
+      if (cmb) { const [tid, style] = cmb.dataset.cmpCm.split("|"); ctx.gotoCM(cup(c), style, +tid); return true; }
+      const send = t.closest("[data-cmp-send]");
+      if (send && result) {
+        const r = result.aces.find((x) => x.t.id === +send.dataset.cmpSend);
+        if (!r || !r.train) return true;
+        const f = r.train.f;
+        ctx.sendToParents({ cup: result.cup, style: r.style, ace: { cid: r.t.cid, tid: r.t.id }, p1: { cid: f.t.cid, tid: f.t.id }, parents: f.parents, races: r.train.agenda.filter((x) => !x.free).map((x) => x.name), wins: [...new Set(r.train.agenda.map((x) => x.name))], must: f.extra.whites.list.slice(0, 5).map((x) => x.id) });
+        return true;
+      }
+      return false;
+    }
+    function change(e) {
+      const t = e.target, c = st(), ds = t.dataset;
+      if (t.id === "cmpCup") { c.cup = t.value; ctx.save(); ctx.rerender(); return true; }
+      if (t.id === "cmpSS") { c.ssMust = t.checked; ctx.save(); ctx.rerender(); return true; }
+      if (t.id === "cmpVetsFile") {
+        const file = t.files && t.files[0];
+        if (file) { const fr = new root.FileReader(); fr.onload = () => { ctx.importVeterans(String(fr.result)); ctx.rerender(); }; fr.readAsText(file); }
+        return true;
+      }
+      if (ds.cmpAce != null) {
+        const list = aces(c), i = +ds.cmpAce, tid = t.value ? +t.value : null;
+        if (!tid) list.splice(i, 1);
+        else if (list.some((a, j) => j !== i && trainee(a.tid).cid === trainee(tid).cid)) { ctx.flash("She's already one of the aces."); ctx.rerender(); return true; }
+        else list[i] = { tid, style: bestStyle(trainee(tid)) };
+        c.byCup[c.cup] = list.filter(Boolean);
+        ctx.save(); ctx.rerender();
+        return true;
+      }
+      if (ds.cmpStyle != null) { const a = aces(c)[+ds.cmpStyle]; if (a) a.style = t.value; ctx.save(); ctx.rerender(); return true; }
+      if (ds.cmpRentText != null || t.id === "cmpVetsText") return true;
+      return false;
+    }
+
+    return { render, click, change, st };
+  }
+
+  const api = { create, PLAN_RACES };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.UmaCmTab = api;
+})(typeof window !== "undefined" ? window : globalThis);

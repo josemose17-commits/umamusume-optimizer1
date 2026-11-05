@@ -47,14 +47,22 @@
     }
     const mineCids = () => new Set(myUmas().map((id) => trainee(id).cid));
     const ownVersions = (cid) => { const own = new Set(myUmas()), vs = versions(cid).filter((v) => own.has(v.id)); return vs.length ? vs : versions(cid); };
+    // Each import replaces your veterans; My umas and My cards only gain from it: the versions
+    // you trained are ticked, and the cards of their decks go in at the limit break you trained
+    // with (a card you have higher stays as it is). Returns what changed, or null.
     function importVeterans(text) {
+      let out = null;
       try {
-        const r = V.parse(text);
+        const r = V.parse(text), had = new Set(myUmas());
         setVeterans({ at: new Date().toISOString().slice(0, 10), list: r.list });
         setUmas(myUmas().concat(r.list.map((v) => v.tid)));
-        ctx.flash(`Imported ${r.list.length} veterans${r.skipped ? ` (${r.skipped} skipped)` : ""}.`);
+        const cards = ctx.raiseOwned && r.cards ? ctx.raiseOwned(r.cards) : null;
+        out = { veterans: r.list.length, skipped: r.skipped, umas: myUmas().filter((id) => !had.has(id)).length, cards };
+        const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+        ctx.flash(`Imported ${plural(r.list.length, "veteran")}${r.skipped ? ` (${r.skipped} skipped)` : ""}. My umas: ${out.umas ? plural(out.umas, "version") + " added" : "nothing new"}.${cards ? ` My cards: ${cards.added || cards.raised ? [cards.added ? `${plural(cards.added, "card")} added` : "", cards.raised ? `${plural(cards.raised, "card")} raised to the limit break you trained with` : ""].filter(Boolean).join(", ") : "nothing new"}${cards.unknown ? ` (${plural(cards.unknown, "card")} the app doesn't know yet)` : ""}.` : ""}`);
       } catch (err) { ctx.flash("Couldn't read that: " + err.message); }
       ctx.rerender();
+      return out;
     }
     // A veteran in a parent slot brings her own two parents as the grandparents.
     const GRAND = { p1: ["g11", "g12"], p2: ["g21", "g22"] };
@@ -237,7 +245,7 @@
       if (!V) return "";
       const v = veterans(), n = v.list.length;
       return `<details class="pred-help" data-pp-open="fpVets"${ctx.isOpen("fpVets") ? " open" : ""}><summary><b>Import your veterans</b> · ${n ? `${n} imported${v.at ? " " + esc(v.at) : ""}` : "from umaextractor"}</summary>
-        <p class="mini">Paste the veterans JSON from umaextractor (or pick the file). Each import replaces the list; it stays in this browser. Her sparks, G1 wins and her two parents (the ace's grandparents when she's a parent) come with her; Parent 1 above ranks them, and the versions you've trained are ticked as yours in the Trainees tab.</p>
+        <p class="mini">Paste the veterans JSON from umaextractor (or pick the file), again whenever you've trained more. Each import replaces the list; it stays in this browser. Her sparks, G1 wins and her two parents (the ace's grandparents when she's a parent) come with her; Parent 1 above ranks them. It also fills in what it can: the versions you've trained are ticked in My umas, and the cards in their decks (not the friend's card you borrowed) go into My cards at the limit break you trained with. Neither ever loses anything: a card you've raised since stays as you set it.</p>
         <textarea class="fp-vets" data-fp-vets-text rows="3" placeholder="Paste the umaextractor veterans JSON here"></textarea>
         <div class="row-wrap"><button type="button" class="btn small" data-fp-vets-import>Import</button><label class="btn ghost small">Pick the file<input type="file" accept=".json,application/json" data-fp-vets-file hidden></label>${n ? `<button type="button" class="btn ghost small" data-fp-vets-clear>Remove them</button>` : ""}</div>
       </details>`;
@@ -454,7 +462,8 @@
       const f = st(), n = (k) => (f[k].cid ? esc(ctx.charName(f[k].cid)) : "?");
       return { ace: f.ace.cid ? esc(ctx.charName(f.ace.cid)) : "pick the ace", family: f.ace.cid ? (f.p1.cid || f.p2.cid ? `${n("p1")} + ${n("p2")}` : "pick her parents") : "" };
     };
-    return { aceHTML, parentsHTML, trainHTML, click, change, notes };
+    // The CM planner (cm-tab.js) shares your veterans, rentals and My umas through these.
+    return { aceHTML, parentsHTML, trainHTML, click, change, notes, veterans, importVeterans, rentalsList, addRentals, setRentals, myUmas: () => { umas = null; return myUmas(); } };
   }
 
   const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1", RENTALS_KEY = "uma-rentals-v1";
