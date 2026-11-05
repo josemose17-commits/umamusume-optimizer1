@@ -163,7 +163,11 @@
   //   o.self: character id; o.links: [{ role, cid, wins: [names] }]; o.apt: her aptitudes
   //   (GameTora order); o.minGrade: lowest distance/surface aptitude worth racing ("B");
   //   o.need: race points still needed for the target (from total()); o.won: G1s she has
-  //   already won (counted in total(), so not planned again); o.races: override list.
+  //   already won (counted in total(), so not planned again); o.races: override list;
+  //   o.extra: more G1 names to win once the shared ones are in (they add no points now, e.g.
+  //   the G1s a rental is likely to share), in order, each kept only if every race still gets
+  //   its own turn. Every extra race in the agenda has its rank: its place in the order they
+  //   were picked (shared ones first), so the first n of them make a plan of n extra races.
   // Her career goals come first: fixed G1 goals are free, a "pick one" goal takes its shared
   // G1 if it has one, and every goal's turn is taken. Then the races shared with the most umas,
   // each kept only if every planned race still gets its own turn (a race held in two years
@@ -211,14 +215,27 @@
       picked.push(r);
       got += r.points;
     });
+    const shared = picked.length;
+    // A career goal race (one to pick from too) is won anyway: never planned again as an extra.
+    const have = new Set(picked.map((r) => r.name).concat(goals.fixed.map((g) => g.name), ...goals.choices.map((c) => c.map((x) => x.name))));
+    (o.extra || []).forEach((name) => {
+      const r = byName.get(name);
+      if (!r || goalNames.has(name) || have.has(name) || !r.fits || r.won) return;
+      if (!assignTurns(open.concat(picked, [r]), blocked)) { skipped.push(Object.assign({ why: "clash" }, r)); return; }
+      have.add(name);
+      picked.push(Object.assign({}, r, { extra: true }));
+    });
     const turns = assignTurns(open.concat(picked), blocked) || [];
-    picked.forEach((r, k) => agenda.push(Object.assign({}, r, { turn: turns[open.length + k], free: false })));
+    picked.forEach((r, k) => agenda.push(Object.assign({}, r, { turn: turns[open.length + k], free: false, rank: k })));
     agenda.sort((a, b) => a.turn - b.turn);
-    return { candidates, agenda, points: got, extraRaces: picked.length, reached: got >= (o.need || 0), skipped,
+    return { candidates, agenda, points: got, extraRaces: picked.length, shared, reached: got >= (o.need || 0), skipped,
       unfit: candidates.filter((r) => !goalNames.has(r.name) && !r.fits), alreadyWon: all.filter((r) => r.won).map((r) => r.name) };
   }
 
-  const api = { WIN_POINTS, GREAT, GOOD, together, total, individual, sparkMult, symbol, g1Races, careerGoals, goalG1s, assignTurns, planRaces, shared };
+  // Can she run it: her surface and distance aptitudes for a G1 ({ d, s }) at minGrade or better.
+  const fits = (apt, r, minGrade) => !apt || [apt[r.s === 2 ? 1 : 0], apt[DIST(r.d)]].every((g) => GRADE_OK[g] >= GRADE_OK[minGrade || "B"]);
+
+  const api = { WIN_POINTS, GREAT, GOOD, together, total, individual, sparkMult, symbol, g1Races, careerGoals, goalG1s, assignTurns, planRaces, shared, fits };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaAffinity = api;
 })(typeof window !== "undefined" ? window : globalThis);

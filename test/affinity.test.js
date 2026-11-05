@@ -120,3 +120,25 @@ test('race plan: G1s she has already won are not planned again', () => {
   assert.deepEqual(p.agenda.map((r) => r.name), ['Satsuki Sho']);
   assert.deepEqual(p.alreadyWon, ['Osaka Hai']);
 });
+
+test("planRaces: extra G1s after the shared ones, in order, ranked, never a career goal again", () => {
+  const A = withGroups([]);
+  const t = D.trainees.find((x) => x.n === "Special Week");
+  const goals = A.careerGoals(t.cid);
+  const goalNames = new Set(goals.fixed.map((g) => g.name).concat(...goals.choices.map((c) => c.map((x) => x.name))));
+  const all = A.g1Races().filter((r) => A.fits(t.apt, r, "B")).map((r) => r.name);
+  const shared = all.filter((n) => !goalNames.has(n)).slice(0, 2);
+  const extra = all.slice().reverse();
+  const plan = A.planRaces({ self: t.cid, apt: t.apt, minGrade: "B", links: [{ role: "g11", cid: 1, wins: shared }], need: Infinity, extra });
+  const ext = plan.agenda.filter((r) => !r.free).sort((a, b) => a.rank - b.rank);
+  assert.deepStrictEqual(ext.slice(0, plan.shared).map((r) => r.name).sort(), shared.slice().sort(), "the shared G1s rank first");
+  assert.ok(ext.slice(plan.shared).every((r) => r.extra && r.points === 0), "then the extras, worth no points now");
+  const order = ext.slice(plan.shared).map((r) => extra.indexOf(r.name));
+  assert.ok(order.every((v, i) => i === 0 || order[i - 1] < v), "extras keep the order given");
+  assert.ok(ext.every((r) => !goalNames.has(r.name)), "a career goal is never an extra race");
+  assert.ok(ext.every((r) => A.fits(t.apt, r, "B")), "only races she can run at B or better");
+  const turns = plan.agenda.map((r) => r.turn);
+  assert.strictEqual(new Set(turns).size, turns.length, "one race a turn");
+  assert.strictEqual(plan.extraRaces, ext.length);
+  assert.ok(plan.extraRaces > plan.shared);
+});

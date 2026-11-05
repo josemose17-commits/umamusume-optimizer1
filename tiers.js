@@ -164,7 +164,7 @@
       if (pr > 0) mustValue += MUST_COVER + MUST_P * pr;
       return { id, p: pr, src: e ? e.src : [] };
     });
-    return { value, list, must, mustValue };
+    return { value, list, must, mustValue, offers: probabilities };
   }
 
   function makeCtx(opts) {
@@ -335,6 +335,18 @@
     return { cards, skills: sv.list.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10), must: sv.must };
   }
 
+  // Every skill the deck offers ({ skill id: chance over the career }), charted or not: the
+  // family score (family.js) counts a parent's spark for one of them only for its discount.
+  function deckOffers(opts, deck) {
+    const ctx = makeCtx(opts);
+    ctx.spWeight = 1;
+    ctx.speedWeight = 1;
+    ctx.races = 0;
+    const out = {};
+    skillValue(deck, ctx).offers.forEach((x) => { if (x.p > 0) out[String(x.id)] = Math.min(1, x.p); });
+    return out;
+  }
+
   // The whole deck's skill score in stat points (1 L = 60, skill points at 0.35 each, as in
   // optimizer.js) and its must-have bonus, for the target-stat search.
   function deckSkills(opts, deck) {
@@ -368,7 +380,7 @@
   }
   const hasScenario = (key) => !!(EU && EU.SCENARIOS_BY_SERVER && EU.SCENARIOS_BY_SERVER.gl[key]);
 
-  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, addScenario, hasScenario, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };
+  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, addScenario, hasScenario, rank, buildDeck, describeDeck, deckSkills, deckOffers, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTiers = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

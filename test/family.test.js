@@ -99,3 +99,19 @@ test("what the ace gets: a skill several members carry combines their chances", 
   assert.ok(Math.abs(b.p - (1 - (1 - ws[0].p) * (1 - ws[1].p))) < 1e-12);
   assert.deepStrictEqual(b.from.sort(), ["g11", "p1"]);
 });
+
+test("family score: a spark for a skill the ace's deck offers (or she has) counts only for its discount", () => {
+  const top = fam.lookFor(base).white[0];
+  const ids = Object.keys(rel.targets).filter((id) => SB.DATA.skills[id] && SB.DATA.skills[id][0] === top.family);
+  const one = { p1: { cid: chars[0], white: [[top.id, 3]], blue: [0, 0], pink: [0, 0], green: 0, wins: [] } };
+  const plain = fam.score(one, base);
+  const half = fam.score(one, Object.assign({}, base, { offers: Object.fromEntries(ids.map((id) => [id, 0.5])) }));
+  const sure = fam.score(one, Object.assign({}, base, { offers: Object.fromEntries(ids.map((id) => [id, 1])) }));
+  const innate = fam.score(one, Object.assign({}, base, { innate: [ids[0]] }));
+  const p = plain.white[0].p, L = plain.white[0].L, hint = Math.min(L, F.HINT_L);
+  assert.ok(Math.abs(plain.whiteL - p * L) < 1e-12, "no deck: the skill's full L");
+  assert.ok(Math.abs(half.whiteL - p * (L * 0.5 + hint * 0.5)) < 1e-12, "offered half the time: half its L, plus the discount the other half");
+  assert.ok(Math.abs(sure.whiteL - p * hint) < 1e-12, "always offered: only the discount");
+  assert.ok(Math.abs(innate.whiteL - p * hint) < 1e-12, "her own skill: only the discount");
+  assert.strictEqual(sure.white[0].L, L, "the listed L stays the skill's own");
+});
