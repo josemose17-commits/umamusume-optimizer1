@@ -899,8 +899,9 @@
     // worth what its next limit break adds (none goes past LB4), and a card that takes the spot of
     // an earlier pick is worth what it adds over that one. A card worth the same at an earlier and
     // a later selector (its points all come after both) goes to the later one, leaving the earlier
-    // one for a card that helps sooner; a card's copies go in date order. Each pick's points are
-    // what it adds when it's chosen (as the route's), and the route's decks are put back after.
+    // one for a card that helps sooner. Then the picks go in again in date order, for what each
+    // adds with the ones before it and the limit break it takes its card to, and the route's decks
+    // are put back as they were.
     // In steps (each puts a card in the decks): step() until false, then result() → Map(selector
     // id → { id, have (copies just before the pick), value (points, faded like the route's), raw,
     // cups, from (the first pair it adds to) }).
@@ -928,6 +929,7 @@
         memo.clear();
         rescoreOnly = null;
       };
+      const put = (s, id) => { const key = "x" + s.id + ":" + id; commit(key, 1); mine.push(key); };
       // What a card's next copy adds, pair by pair, to your decks as they stand.
       const nextCopy = (id) => {
         const list = [];
@@ -952,35 +954,52 @@
         });
         return { value, raw, cups: cups.size, from };
       };
-      const out = new Map(), left = new Set(open.map((s) => s.id)), last = new Map();
-      let over = !open.length;
+      const out = new Map(), left = new Set(open.map((s) => s.id));
+      let phase = open.length ? 1 : 3, order = [], again = 0;
       // Only the selectors' cards are compared here, so only theirs are rescored as picks go in.
-      if (!over) rescoreOnly = new Set(cards);
+      if (phase === 1) rescoreOnly = new Set(cards);
       function step() {
-        if (over) return false;
-        const next = new Map(cards.map((id) => [id, nextCopy(id)]));
-        let best = null;
-        open.forEach((s, ix) => {
-          if (!left.has(s.id)) return;
-          pool.get(s.id).forEach((id) => {
-            if (last.has(id) && ix < last.get(id)) return; // a card's copies in date order
-            const w = after(next.get(id), s.date);
-            if (w.value < 0.5) return;
-            if (!best || w.value > best.w.value + 1e-9 || (w.value > best.w.value - 1e-9 && s.date > best.s.date)) best = { s, ix, id, w };
+        if (phase === 1) {
+          const next = new Map(cards.map((id) => [id, nextCopy(id)]));
+          let best = null;
+          open.forEach((s) => {
+            if (!left.has(s.id)) return;
+            pool.get(s.id).forEach((id) => {
+              const w = after(next.get(id), s.date);
+              if (w.value < 0.5) return;
+              if (!best || w.value > best.w.value + 1e-9 || (w.value > best.w.value - 1e-9 && s.date > best.s.date)) best = { s, id, w };
+            });
           });
-        });
-        if (best) {
-          out.set(best.s.id, Object.assign({ id: best.id, have: copiesAtPick(best.id, best.s.date) }, best.w));
-          left.delete(best.s.id);
-          last.set(best.id, best.ix);
-          const key = "x" + best.s.id + ":" + best.id;
-          commit(key, 1);
-          mine.push(key);
+          if (best) {
+            out.set(best.s.id, { id: best.id });
+            left.delete(best.s.id);
+            put(best.s, best.id);
+            if (left.size) return true;
+          }
+          // The same picks again in date order: what each adds with the ones before it in your
+          // decks, and the limit break it takes its card to.
+          restore();
+          rescoreOnly = new Set(cards);
+          order = open.filter((s) => out.has(s.id));
+          phase = 2;
+          return true;
         }
-        if (!best || !left.size) { restore(); over = true; return false; }
-        return true;
+        if (phase === 2) {
+          const s = order.shift();
+          if (s) {
+            const x = out.get(s.id);
+            Object.assign(x, after(nextCopy(x.id), s.date), { have: copiesAtPick(x.id, s.date) });
+            if (x.value >= 0.5) put(s, x.id);
+            else out.delete(s.id);
+            again++;
+            return true;
+          }
+          restore();
+          phase = 3;
+        }
+        return false;
       }
-      return { step, result: () => out, total: () => open.length, progress: () => (over ? 1 : out.size / Math.max(1, open.length)) };
+      return { step, result: () => out, total: () => open.length, progress: () => (phase === 3 ? 1 : phase === 1 ? 0.5 * out.size / Math.max(1, open.length) : 0.5 + 0.5 * again / Math.max(1, again + order.length)) };
     }
     // Copies of a card by a selector's date, its earlier picks that day included.
     const copiesAtPick = (id, date) => {
