@@ -326,3 +326,29 @@ test("your team by date: a fixed uma races once she's yours, a flex slot in betw
   assert.ok(v.items.filter((it) => it.kind === "selector" && it.group === picks[0].group && !it.locked).every((it) => !p.chosen.get(it.key)), "one pick per selector");
 });
 
+
+test("your plan as time goes by: banners behind you drop out, what you got comes off the budget", () => {
+  const m = PV.matchPlan(PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan-2.txt", "utf8")), B, D);
+  const events = B.events, picks = { anniv2: 105301, "anniv2.5": 102501 };
+  const now = PV.planParts(m, { today: "2026-11-05", selPicks: picks, selUma: true, events });
+  assert.equal(now.locked.size, 15);
+  assert.deepEqual([...now.lockedPicks.keys()].sort(), ["anniv2-uma", "anniv2.5-uma"]);
+  // After Ramonu's banner has ended (your table's End: Dec 25), it's behind you: not locked, and
+  // its carats aren't added back (the balances after it have them paid).
+  const later = PV.planParts(m, { today: "2026-12-27", selPicks: picks, selUma: true, events });
+  const ramonu = m.find((x) => x.target === "Mejiro Ramonu");
+  assert.ok(!later.locked.has(ramonu.banner.id) && later.done.has("s" + ramonu.banner.id));
+  assert.equal(later.locked.size, 14);
+  const larc = m.find((x) => x.target === "El Condor Pasa");
+  assert.equal(later.budget(larc.start), 92700, "L'Arc's own balance, nothing to add back now");
+  assert.ok(!later.lockedPicks.has("anniv2-uma") && later.yours.get(105301) === B.events.find((e) => e.id === "anniv2").start, "a pick behind you: she's yours");
+  // You entered what you got on L'Arc early, and on a banner outside your plan (400 pulls).
+  const done = { ["s" + larc.banner.id]: { pulls: 400, free: 197 }, s30213: { pulls: 400, free: 0 } };
+  const after = PV.planParts(m, { today: "2026-12-27", done, selPicks: picks, selUma: true, events });
+  assert.ok(!after.locked.has(larc.banner.id) && after.done.has("s30213"));
+  const uaf = m.find((x) => x.target === "Orfevre" && x.kind === "support");
+  assert.equal(Math.round(later.budget(uaf.start) - after.budget(uaf.start)), 60000 + 30450, "the extra 400 pulls and L'Arc's carats come off");
+  // The trainee rows make your team umas yours, behind you or not.
+  assert.ok(after.yours.has(111901) && after.yours.has(111501));
+  assert.ok(PV.rowDone(ramonu, "2026-12-27", {}) && !PV.rowDone(larc, "2026-12-27", {}));
+});

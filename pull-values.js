@@ -104,7 +104,10 @@
     const today = o.today, until = o.until;
     // Running or ahead: a forecast banner whose estimated start just passed is still to come.
     const twoWeeksAgo = addDays(today, -14);
-    const later = (b) => locked.has(b.id) || ((b.end ? b.end >= today : b.start >= twoWeeksAgo) && b.start <= until);
+    // o.done: items you've pulled on or picked already (their keys: "s"/"t" + banner id, "x" +
+    // selector id): they're behind you, so they're out of the planning.
+    const done = o.done || new Set();
+    const later = (b, k) => !done.has(k + b.id) && (locked.has(b.id) || ((b.end ? b.end >= today : b.start >= twoWeeksAgo) && b.start <= until));
     const dateOf = (b) => (b.start < today ? today : b.start);
     // A gain a year ahead counts (1 - fade) as much (forecast uncertainty, newer cards).
     const weight = (date) => (fade ? Math.pow(1 - fade, Math.max(0, (Date.parse(date) - Date.parse(today)) / (365.25 * DAY))) : 1);
@@ -203,7 +206,7 @@
       if (L) { it.required = L.level || 2; it.most = it.required; it.free = +L.free || it.free || 0; it.locked = true; it.target = L.target || null; }
       return it;
     };
-    B.support.filter(later).forEach((b) => {
+    B.support.filter((b) => later(b, "s")).forEach((b) => {
       const feat = [];
       b.pick.forEach(([id, rate]) => {
         if (!card(id)) return;
@@ -212,7 +215,7 @@
       });
       if (feat.length || locked.has(b.id)) items.push(lock({ key: "s" + b.id, kind: "support", banner: b, date: dateOf(b), feat, most: 2, pullsAt: (k) => spark * k, blind: !feat.length }));
     });
-    if (parentsOn) B.trainee.filter(later).forEach((b) => {
+    if (parentsOn) B.trainee.filter((b) => later(b, "t")).forEach((b) => {
       // Umas you'll have anyway (your team, your plan's) aren't what these pulls are worth; a
       // locked banner of yours for one of them just sets its carats aside.
       const feat = b.pick.filter(([id]) => trainee(id) && !umas.has(id)).map(([id, rate]) => ({ id, rate }));
@@ -231,7 +234,7 @@
     const selectors = [];
     (B.events || []).filter((e) => e.start > today && e.start <= until).forEach((e) => {
       const cut = addDays(e.jp, -POOL_LAG);
-      const add = (id, kind, label, price) => selectors.push({ id: e.id + "-" + id, event: e, date: e.start, kind, cut, label, price, carats: price ? SELECTOR_CARATS : 0 });
+      const add = (id, kind, label, price) => { if (!done.has("x" + e.id + "-" + id)) selectors.push({ id: e.id + "-" + id, event: e, date: e.start, kind, cut, label, price, carats: price ? SELECTOR_CARATS : 0 }); };
       if (sel.free) add("free", "support", "Free support selector", 0);
       if (sel.paid) add("paid", "support", "$20.99 support selector", SELECTOR_PRICE);
       if (sel.uma) add("uma", "trainee", "$20.99 Uma selector", SELECTOR_PRICE);
@@ -1029,7 +1032,40 @@
     };
   }
 
-  const api = { create, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom };
+  // A plan row's key ("s"/"t" + its banner id), and whether it's behind you: its end has passed
+  // (your table's End, else the calendar's, else three weeks after it starts), or you've entered
+  // what you got there (done: { key: { pulls, free } }).
+  const rowKey = (x) => (x.kind === "trainee" ? "t" : "s") + x.banner.id;
+  const rowEnd = (x) => x.end || (x.banner && x.banner.end) || addDays((x.banner || x).start, 21);
+  const rowDone = (x, today, done) => !!(x.banner && (rowEnd(x) < today || (done && done[rowKey(x)])));
+  // Your plan's parts for a run, from matchPlan() rows. o: { today, done, selPicks: { event id:
+  // trainee id }, selUma, events, caratsNow, pullCarats }. → { locked (each row still ahead at its
+  // # Pulls), freePulls, yours (the umas it gets you, from when), lockedPicks (your Uma selector
+  // picks still ahead), done (Set of keys behind you), budget(date) }. The budget comes from the
+  // rows still ahead (each one's balance has the rows behind you paid already), less what you've
+  // spent outside your plan since (done keys that aren't plan rows).
+  function planParts(mine, o) {
+    const today = o.today, done = o.done || {}, pullCarats = o.pullCarats || 150;
+    const rows = mine.filter((x) => x.banner && x.kind !== "stepup"), live = rows.filter((x) => !rowDone(x, today, done));
+    const locked = new Map(live.filter((x) => x.pulls > 0).map((x) => [x.banner.id, { level: x.pulls >= 400 ? 2 : 1, free: x.free || 0, target: x.targetId }]));
+    const freePulls = new Map(live.map((x) => [x.banner.id, x.free || 0]));
+    const yours = new Map();
+    rows.filter((x) => x.kind === "trainee" && x.pulls > 0 && x.targetId).forEach((x) => yours.set(x.targetId, x.banner.start));
+    const lockedPicks = new Map();
+    if (o.selUma) Object.keys(o.selPicks || {}).forEach((ev) => {
+      const id = +o.selPicks[ev], e = (o.events || []).find((x) => x.id === ev);
+      if (!id || !e) return;
+      if (e.start > today && !done["x" + ev + "-uma"]) lockedPicks.set(ev + "-uma", id);
+      if (!yours.has(id) || e.start < yours.get(id)) yours.set(id, e.start);
+    });
+    let budget = mine.length ? budgetFrom(mine.filter((x) => !rowDone(x, today, done)), today, o.caratsNow) : null;
+    const planKeys = new Set(rows.map(rowKey));
+    const extra = Object.keys(done).filter((k) => !planKeys.has(k)).reduce((a, k) => a + Math.max(0, (+done[k].pulls || 0) - (+done[k].free || 0)) * pullCarats, 0);
+    if (budget && extra) { const b0 = budget; budget = (d) => b0(d) - extra; }
+    return { locked, freePulls, yours, lockedPicks, budget, done: new Set(Object.keys(done).concat(rows.filter((x) => rowDone(x, today, done)).map(rowKey))) };
+  }
+
+  const api = { create, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaPullValues = api;
 })(typeof window !== "undefined" ? window : globalThis);
