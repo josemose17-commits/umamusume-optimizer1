@@ -47,14 +47,45 @@
   }
   const median = (dist) => { let c = 0; for (let i = 0; i < dist.length; i++) { c += dist[i]; if (c >= 0.5) return i; } return dist.length - 1; };
 
+  // GameTora's scenario ids → the scenario Global trains in from its start: Euophrys' own preset
+  // (key), or an estimate on a base preset with the scenario's friend card as its link (Euophrys
+  // has no preset for it). Names as Global's banners give them.
+  const ERAS = {
+    4: { name: "Grand Concert", key: "GL" },
+    5: { name: "Grand Masters", key: "GM" },
+    6: { name: "Project L'Arc", base: "GM" },
+    7: { name: "U.A.F. Ready GO!", base: "GM" },
+    8: { name: "Great Food Festival", base: "GM" },
+    9: { name: "Hashire! Mecha Umamusume", base: "GM" },
+    10: { name: "The Twinkle Legends", base: "GM" },
+    11: { name: "Design Your Island", key: "DYI", jp: true },
+    12: { name: "Paradise ♪ Yukoma Hot Springs", base: "DYI" },
+    13: { name: "Beyond Dreams", base: "DYI" },
+    14: { name: "Order Up! Tracen Ramen!", base: "DYI" },
+  };
+  const NOW_ERA = 4; // Global's scenario before the forecast's first
+  // Parents: an aptitude raised to A on the race counts like 1 L (family.js's stand-in), from a
+  // 2★ pink spark (3% base). Ranks for picking a rotating uma.
+  const PINK_2 = 0.03, APT_L = 1;
+  const RANK = { S: 8, A: 7, B: 6, C: 5, D: 4, E: 3, F: 2, G: 1 };
+  const DIST_IX = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }, STYLE_IX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 };
+  const STYLES = ["Senkou", "Sasi", "Oikomi", "Nige"];
+  const EVENT_DAYS = 14; // a story event's SSR is yours (to LB4) by the end of its event
+  const needsOf = (cup, style) => [cup.course.surface === "Dirt" ? 1 : 0, DIST_IX[cup.course.dist], STYLE_IX[style]].filter((i) => i != null);
+
   // o: { D, T, A, B (data/banners.js), P (data/presets.js), today, until, teams: { sm|ml|dirt:
-  //      [{ id, style }] }, owned: { cardId: lb }, umas: Set of trainee ids you own,
-  //      minCups (2), minPct (0.1), parents (true), selectors: { free, paid, uma } (all true),
+  //      [{ id, style } or { rotate: true } (a fresh uma of yours each cup)] }, owned: { cardId: lb },
+  //      umas: Set of trainee ids you own, minCups (2), minPct (0.1), parents (true), fade (share
+  //      of value lost a year ahead, 0), selectors: { free, paid, uma } (all true),
+  //      locked: Map(banner id → { level, free, target }) (banners you'll pull no matter what, at
+  //      that level, with that banner's free pulls and the card you'd spark when nothing else
+  //      helps), freePulls: Map(banner id → free pulls on it, locked or not), freeCards (true: story events' SSRs are yours to
+  //      LB4 by their event's end), eras (true: each cup's decks in the scenario of its date),
   //      reuse (an earlier result of create() with the same cards, teams and deck settings),
-  //      deckOpts(cup, style, traineeId) → tiers.js options for her racing deck there,
+  //      deckOpts(cup, style, traineeId, scenario) → tiers.js options for her racing deck there,
   //      whites(cup, style) → the ace's race white skills' L values, skillL(cup, style, id) → L }
   // Use: buildPair(pair) for every pair, then addSelectors(), then scorePair(pair) for every pair
-  // (or prepare() for the last two), then the planner with value() and commit().
+  // (or prepare() for the last two), then route() (or the planner with value() and commit()).
   function create(o) {
     const { D, T, A, B } = o;
     const card = (id) => D.card(id);
@@ -63,31 +94,99 @@
     const minCups = Math.max(1, o.minCups != null ? +o.minCups : 2);
     const minPct = Math.max(0, o.minPct != null ? +o.minPct : 0.1);
     const parentsOn = o.parents !== false;
+    const fade = Math.min(0.9, Math.max(0, +o.fade || 0));
     const sel = Object.assign({ free: true, paid: true, uma: true }, o.selectors || {});
+    const locked = o.locked || new Map();
     const relC = (B.release && B.release.cards) || {};
     const scorable = (id) => !!T.entry(id, 4);
     const today = o.today, until = o.until;
     // Running or ahead: a forecast banner whose estimated start just passed is still to come.
     const twoWeeksAgo = addDays(today, -14);
-    const later = (b) => (b.end ? b.end >= today : b.start >= twoWeeksAgo) && b.start <= until;
+    const later = (b) => locked.has(b.id) || ((b.end ? b.end >= today : b.start >= twoWeeksAgo) && b.start <= until);
     const dateOf = (b) => (b.start < today ? today : b.start);
+    // A gain a year ahead counts (1 - fade) as much (forecast uncertainty, newer cards).
+    const weight = (date) => (fade ? Math.pow(1 - fade, Math.max(0, (Date.parse(date) - Date.parse(today)) / (365.25 * DAY))) : 1);
+
+    // ---- the scenario each cup's decks are trained in ----
+    // Its preset in tiers.js: Euophrys' own, Design Your Island from Euophrys' JP bundle, or an
+    // estimate: the base preset with the scenario's friend (or group) SSR from its opening banner
+    // as the link card, at Design Your Island's link bonus (Euophrys' value for Tucker Bryne).
+    const eraList = [{ id: NOW_ERA, start: "0000-00-00" }].concat((B.scenarios || []).filter((s) => ERAS[s.id]));
+    const dyiBonus = 1000;
+    const eras = new Map();
+    eraList.forEach((s) => {
+      const E = ERAS[s.id], era = { id: s.id, name: E.name, start: s.start === "0000-00-00" ? null : s.start, est: !E.key, key: E.key || "EST" + s.id, link: null };
+      if (o.eras !== false) {
+        if (E.key && !T.hasScenario(E.key)) T.addScenario(E.key, E.key, { bondPerDay: 10 });
+        if (!E.key) {
+          const open = B.support.find((b) => b.start && Math.abs(Date.parse(b.start) - Date.parse(s.start)) <= 3 * DAY
+            && b.pick.some(([id]) => { const c = card(id); return c && c.r === 3 && (c.ty === "friend" || c.ty === "group") && scorable(id); }));
+          const linkId = open ? open.pick.map(([id]) => id).find((id) => { const c = card(id); return c && c.r === 3 && (c.ty === "friend" || c.ty === "group") && scorable(id); }) : null;
+          era.link = linkId || null;
+          T.addScenario(era.key, E.base, { bondPerDay: 10, scenarioLink: linkId ? [T.entry(linkId, 4).char_name] : [], scenarioBonus: linkId ? dyiBonus : 0 });
+        }
+      }
+      eras.set(s.id, era);
+    });
+    const eraAt = (date) => { let e = eras.get(NOW_ERA); eraList.forEach((s) => { if (s.start <= date && eras.has(s.id)) e = eras.get(s.id); }); return e; };
 
     // Your team umas count as yours from today, out on Global or not.
     const team = new Set();
-    Object.values(o.teams || {}).forEach((list) => (list || []).forEach((m) => { if (m && m.id && trainee(m.id)) team.add(+m.id); }));
-    const umas = new Set([...(o.umas || [])].map(Number).concat([...team]));
+    Object.values(o.teams || {}).forEach((list) => (list || []).forEach((m) => { if (m && m.id && !m.rotate && trainee(m.id)) team.add(+m.id); }));
+    const owned = [...(o.umas || [])].map(Number).filter((id) => trainee(id));
+    const umas = new Set(owned.concat([...team]));
+
+    // A rotating slot: each cup, the uma of yours that fits it best (A or better on its surface,
+    // distance and her best running style), a different one from the cup before when another
+    // fits as well. The team's fixed umas (and their characters) race already.
+    function fitFor(t, cup) {
+      const surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
+      let best = null;
+      STYLES.forEach((st) => { const g = RANK[t.apt[STYLE_IX[st]]] || 0; if (!best || g > best.g) best = { st, g }; });
+      const s = RANK[t.apt[surf]] || 0, d = RANK[t.apt[dist]] || 0;
+      return { style: best.st, good: s >= 7 && d >= 7 && best.g >= 7, score: Math.min(s, d, best.g) * 100 + s + d + best.g };
+    }
+    const lastRotated = {}; // group → the uma rotated in last
+    const rotateFor = (cup, group, fixed) => {
+      const chars = new Set(fixed.map((t) => t.cid));
+      const list = owned.map((id) => trainee(id)).filter((t) => t && !chars.has(t.cid)).map((t) => Object.assign({ t }, fitFor(t, cup)))
+        .sort((a, b) => (b.good - a.good) || ((a.t.id === lastRotated[group]) - (b.t.id === lastRotated[group])) || (b.score - a.score) || (a.t.id - b.t.id));
+      const pick = list[0];
+      if (!pick || !pick.good) return null;
+      lastRotated[group] = pick.t.id;
+      return pick;
+    };
 
     // The cups ahead with the team for their track: one pair per cup and team uma.
     const cups = o.P.list.filter((p) => p.global.start > today && p.global.start <= until && groupOf(p))
       .sort((a, b) => (a.global.start < b.global.start ? -1 : 1));
-    const pairs = [];
-    cups.forEach((cup) => (o.teams[groupOf(cup)] || []).forEach((m, slot) => {
-      const t = m && m.id ? trainee(m.id) : null;
-      if (t) pairs.push({ key: cup.id + ":" + slot + ":" + t.id + ":" + m.style, cup, date: cup.global.start, group: groupOf(cup), slot, member: m, trainee: t });
-    }));
+    const pairs = [], unrotated = [];
+    cups.forEach((cup) => {
+      const g = groupOf(cup), list = o.teams[g] || [], era = eraAt(cup.global.start);
+      const fixed = list.filter((m) => m && m.id && !m.rotate).map((m) => trainee(m.id)).filter(Boolean);
+      list.forEach((m, slot) => {
+        let t = null, member = m, rotating = false;
+        if (m && m.rotate) {
+          const r = rotateFor(cup, g, fixed);
+          if (!r) { unrotated.push({ cup, slot }); return; }
+          t = r.t; member = { id: r.t.id, style: r.style, rotate: true }; rotating = true;
+        } else t = m && m.id ? trainee(m.id) : null;
+        if (t) pairs.push({ key: [cup.id, slot, t.id, member.style, era.key].join(":"), cup, date: cup.global.start, group: g, slot, member, trainee: t, rotating, era });
+      });
+    });
 
-    // The banners: one item per banner, 200 pulls (level 1) or 400 (level 2).
+    // The banners: one item per banner, 200 pulls (level 1) or 400 (level 2). A locked banner is
+    // taken first at its level, its free pulls used first; one with no card Euophrys can score
+    // still gets its carats set aside.
     const items = [], unscorable = [];
+    // freePulls: Map(banner id → pulls that come free on it), locked or not.
+    const freePulls = o.freePulls || new Map();
+    const lock = (it) => {
+      if (freePulls.has(it.banner.id)) it.free = +freePulls.get(it.banner.id) || 0;
+      const L = locked.get(it.banner.id);
+      if (L) { it.required = L.level || 2; it.free = +L.free || it.free || 0; it.locked = true; it.target = L.target || null; }
+      return it;
+    };
     B.support.filter(later).forEach((b) => {
       const feat = [];
       b.pick.forEach(([id, rate]) => {
@@ -95,13 +194,19 @@
         if (!scorable(id)) { unscorable.push({ banner: b, id }); return; }
         feat.push({ id, rate });
       });
-      if (feat.length) items.push({ key: "s" + b.id, kind: "support", banner: b, date: dateOf(b), feat, most: 2, pullsAt: (k) => spark * k });
+      if (feat.length || locked.has(b.id)) items.push(lock({ key: "s" + b.id, kind: "support", banner: b, date: dateOf(b), feat, most: 2, pullsAt: (k) => spark * k, blind: !feat.length }));
     });
     if (parentsOn) B.trainee.filter(later).forEach((b) => {
       const feat = b.pick.filter(([id]) => trainee(id) && !umas.has(id)).map(([id, rate]) => ({ id, rate }));
-      if (feat.length) items.push({ key: "t" + b.id, kind: "trainee", banner: b, date: dateOf(b), feat, most: Math.min(2, feat.length), pullsAt: (k) => spark * k });
+      if (feat.length || locked.has(b.id)) items.push(lock({ key: "t" + b.id, kind: "trainee", banner: b, date: dateOf(b), feat, most: Math.max(1, Math.min(2, feat.length)), pullsAt: (k) => spark * k, blind: !feat.length }));
     });
     const byKey = new Map(items.map((it) => [it.key, it]));
+    // The story events' free SSRs, yours to LB4 by the end of their event.
+    const freeCards = new Map(); // card id → the date you have it by
+    if (o.freeCards !== false) (B.storyEvents || []).forEach((e) => {
+      const by = addDays(e.start, EVENT_DAYS);
+      if (e.start > today) e.cards.forEach((id) => { if (card(id) && scorable(id) && (!freeCards.has(id) || by < freeCards.get(id))) freeCards.set(id, by); });
+    });
 
     // The selectors ahead, and the carats the $20.99 packs bring.
     const selectors = [];
@@ -120,6 +225,7 @@
     const committed = new Map();
     const memo = new Map(); // cleared with every commit
     const copiesBy = (id, date, skipKey) => {
+      if (freeCards.has(id) && freeCards.get(id) < date) return 5;
       let n = o.owned[id] != null ? +o.owned[id] + 1 : 0;
       committed.forEach((x, key) => { if (key !== skipKey && x.copies && byKey.get(key).date < date) n += x.copies.get(id) || 0; });
       return Math.min(5, n);
@@ -134,6 +240,7 @@
     // ---- decks ----
     const poolFor = (pair) => {
       const ids = new Set(Object.keys(o.owned).map(Number));
+      freeCards.forEach((by, id) => { if (by < pair.date) ids.add(id); });
       committed.forEach((x, key) => { if (x.copies && byKey.get(key).date < pair.date) x.copies.forEach((n, id) => { if (n > 0) ids.add(id); }); });
       const pool = [];
       ids.forEach((id) => { const n = copiesBy(id, pair.date); if (card(id) && n > 0 && scorable(id)) pool.push({ id, lb: lbOf(n) }); });
@@ -157,8 +264,10 @@
       return (ty) => (cp[ty] != null ? (n[ty] || 0) < cp[ty] : left - 1 >= need);
     }
     // Each card's value with the other five fixed.
-    function slotScores(pair) {
+    // types: rescore only the cards of these types (those a change in the deck competes with).
+    function slotScores(pair, types) {
       pair.deck.forEach((c, i) => {
+        if (types && !types.has(card(c.id).ty)) return;
         const rest = pair.deck.filter((_, j) => j !== i);
         const r = T.rank(pair.opts, card(c.id).ty, rest, [{ id: c.id, lb: c.lb }])[0];
         c.score = r ? r.score : 0;
@@ -186,7 +295,7 @@
     // o.reuse: an earlier run with the same cards, teams and deck settings, whose decks hold.
     const reuse = o.reuse ? new Map(o.reuse.pairs.filter((p) => p.base).map((p) => [p.key, p])) : null;
     function buildPair(pair) {
-      pair.opts = o.deckOpts(pair.cup, pair.member.style, pair.trainee.id);
+      pair.opts = o.deckOpts(pair.cup, pair.member.style, pair.trainee.id, o.eras !== false ? pair.era.key : null);
       const old = reuse && reuse.get(pair.key);
       if (old) {
         pair.deck = old.base.map((c) => Object.assign({}, c));
@@ -314,6 +423,9 @@
         for (let l = 0; l <= lbOf(have); l++) pair.gains.delete(id + ":" + l);
         const lb = lbOf(have), at = pair.deck.findIndex((x) => !x.borrowed && x.id === id);
         if (at !== -1 && pair.deck[at].lb >= lb) return;
+        // A card that didn't help this deck even at LB4 before the route can't now (decks only
+        // get stronger): no need to try it (unless it's in the deck already).
+        if (at === -1 && pair.first && !pair.first.has(id + ":4") && !(pair.live && pair.live.has(id)) && !pair.deck.some((x) => x.id === id)) return;
         const s = bestSpot(pair, id, lb);
         if (!s) return;
         const replaced = pair.deck[s.slot], types = new Set([card(id).ty, card(replaced.id).ty]);
@@ -338,16 +450,17 @@
       const mk = "c|" + id + "|" + date + "|" + (skipKey || "");
       if (memo.has(mk)) return memo.get(mk);
       const rows = [];
-      for (let n = 0; n <= 5; n++) rows.push({ gain: 0, cups: new Set(), decks: [] });
+      for (let n = 0; n <= 5; n++) rows.push({ gain: 0, faded: 0, cups: new Set(), decks: [] });
       pairs.forEach((pair) => {
         if (!pair.gains || pair.date <= date) return;
-        const have = copiesBy(id, pair.date, skipKey);
+        const have = copiesBy(id, pair.date, skipKey), w = weight(pair.date);
         for (let n = 1; n <= 5 && have < 5; n++) {
           const lb = lbOf(Math.min(5, have + n)), g = pair.gains.get(id + ":" + lb);
-          if (g && g.gain >= minPct * g.base - 1e-9) { rows[n].gain += g.gain; rows[n].cups.add(pair.cup.id); rows[n].decks.push({ pair, lb, gain: g.gain, pct: g.gain / g.base }); }
+          if (g && g.gain >= minPct * g.base - 1e-9) { rows[n].gain += g.gain; rows[n].faded += g.gain * w; rows[n].cups.add(pair.cup.id); rows[n].decks.push({ pair, lb, gain: g.gain, pct: g.gain / g.base }); }
         }
       });
-      const out = rows.map((r) => ({ value: r.cups.size >= minCups ? r.gain : 0, gain: r.gain, cups: r.cups.size, decks: r.decks }));
+      // The rules on the gains as they are; the value with far-off cups faded.
+      const out = rows.map((r) => ({ value: r.cups.size >= minCups ? r.faded : 0, gain: r.gain, cups: r.cups.size, decks: r.decks }));
       memo.set(mk, out);
       return out;
     }
@@ -418,14 +531,19 @@
     };
     const inheritedOf = (t) => (t && t.us && t.us.length ? "9" + String(t.us[0]).slice(1) : null);
     const pvMemo = new Map();
+    // Her worth as Parent 1 for the pair's ace: the ace's top whites and her inherited unique at
+    // 2★, and a 2★ pink spark where the ace lacks an A on the race (surface, distance, style) and
+    // she has it (one pink spark a parent), all at her affinity with the ace. Blue sparks are left
+    // out: any parent can carry them, so they don't make one trainee worth more than another.
     function parentValue(pair, t) {
-      if (!t || t.cid === pair.trainee.cid) return 0;
+      if (!t || t.cid === pair.trainee.cid || pair.rotating) return 0;
       const mk = pair.key + "|" + t.id;
       if (pvMemo.has(mk)) return pvMemo.get(mk);
       const aff = parentAffinity(pair.trainee.cid, t.cid);
       const whites = topWhites(pair).reduce((a, L) => a + L * twice(WHITE_2, aff), 0);
       const g = inheritedOf(t), gL = g ? Math.max(0, o.skillL(pair.cup, pair.member.style, g) || 0) : 0;
-      const v = STAT_PER_L * (whites + gL * twice(GREEN_2, aff));
+      const ace = pair.trainee.apt || [], pink = needsOf(pair.cup, pair.member.style).some((i) => (RANK[ace[i]] || 0) < 7 && (RANK[(t.apt || [])[i]] || 0) >= 7);
+      const v = STAT_PER_L * (whites + gL * twice(GREEN_2, aff) + (pink ? APT_L * twice(PINK_2, aff) : 0));
       pvMemo.set(mk, v);
       return v;
     }
@@ -444,17 +562,17 @@
     function parentRows(ids, date, skipKey) {
       const mk = "t|" + ids.slice().sort().join(",") + "|" + date + "|" + (skipKey || "");
       if (memo.has(mk)) return memo.get(mk);
-      let gain = 0;
+      let gain = 0, faded = 0;
       const cups = new Set(), decks = [];
       if (ids.length) pairs.forEach((pair) => {
-        if (pair.date <= date) return;
+        if (pair.date <= date || pair.rotating) return;
         const cur = bestParent(pair, skipKey);
         let best = 0, who = null;
         ids.forEach((id) => { const v = parentValue(pair, trainee(id)); if (v > best) { best = v; who = id; } });
         const g = best - cur;
-        if (g > 1e-9 && g >= minPct * cur - 1e-9) { gain += g; cups.add(pair.cup.id); decks.push({ pair, id: who, gain: g, pct: cur > 0 ? g / cur : null }); }
+        if (g > 1e-9 && g >= minPct * cur - 1e-9) { gain += g; faded += g * weight(pair.date); cups.add(pair.cup.id); decks.push({ pair, id: who, gain: g, pct: cur > 0 ? g / cur : null }); }
       });
-      const out = { value: cups.size >= minCups ? gain : 0, gain, cups: cups.size, decks };
+      const out = { value: cups.size >= minCups ? faded : 0, gain, cups: cups.size, decks };
       memo.set(mk, out);
       return out;
     }
@@ -508,9 +626,14 @@
         const first = sup.reduce((a, s) => (s.date < a ? s.date : a), "9999-99-99");
         const lastCut = sup.reduce((a, s) => (s.cut > a ? s.cut : a), "");
         const pool = D.DATA.supports.filter((c) => inSupportPool(c, lastCut));
-        const short = new Set();
+        const short = new Set(), ranked = new Set();
         pairs.forEach((pair) => {
           if (!pair.deck || pair.date <= first) return;
+          // The pool is ranked in one deck a cup (its umas share the race; their decks' own
+          // cards still join below), so this stays quick.
+          const rank = !ranked.has(pair.cup.id);
+          ranked.add(pair.cup.id);
+          if (!rank) { pair.deck.forEach((c) => { if (inSupportPool(card(c.id), lastCut) && (c.borrowed || c.lb < 4)) short.add(c.id); }); return; }
           const owned = pair.deck.map((c, j) => ({ c, j })).filter((x) => !x.c.borrowed);
           const weak = owned.slice().sort((a, b) => a.c.score - b.c.score)[0];
           const rest = pair.deck.filter((_, i) => !weak || i !== weak.j);
@@ -540,6 +663,14 @@
     function prepare() {
       addSelectors();
       pairs.forEach((pair) => scorePair(pair));
+    }
+    // Every banner on one scale, before the route: what 200 and 400 pulls on it would add to your
+    // decks (support cards) or as Parent 1 (trainees) on their own, in the same points.
+    function standalone() {
+      return items.filter((it) => it.kind !== "selector").map((it) => ({
+        key: it.key, kind: it.kind, item: it, blind: !!it.blind, locked: !!it.locked,
+        v1: it.blind ? 0 : value(it.key, 1), v2: it.blind || it.most < 2 ? 0 : value(it.key, 2),
+      }));
     }
     // Your decks and their gains before the route (snapshot), and back to them (reset).
     function snapshot() {
@@ -571,11 +702,24 @@
       const opts = (onStep) => Object.assign({}, o, { bonus: o.bonus || bonus, value: (key, k) => value(key, k), onStep });
       const gains = new Map(), runners = new Map();
       snapshot();
-      let pass = 1, moves = 0, replay = null;
-      let pl = PP.planner(items, opts((s) => commit(s.key, s.k)));
+      let pass = 1, moves = 0, replay = null, sawPick = false, pullAfterPick = false;
+      // The first pass keeps what each step adds, for when it's already in order (no pull came
+      // after a selector pick, as when your locked banners take the carats): then it's the route.
+      const note = (s) => {
+        const it = byKey.get(s.key);
+        if (it.kind === "selector") { sawPick = true; runners.set(s.key, alternatives(s.key, 3)); }
+        else if (sawPick) pullAfterPick = true;
+        if (s.required) gains.set(s.key, value(s.key, s.k));
+        commit(s.key, s.k);
+        if (!s.required) gains.set(s.key, (gains.get(s.key) || 0) + (s.dv || 0));
+      };
+      let pl = PP.planner(items, opts(note));
       function step() {
         if (pass === 1) {
           if (pl.step()) { moves++; return true; }
+          if (!pullAfterPick) { pass = 4; return false; }
+          gains.clear();
+          runners.clear();
           replay = [...pl.result().chosen].filter(([key, k]) => k > 0 && byKey.get(key).kind !== "selector")
             .sort((a, b) => (byKey.get(a[0]).date < byKey.get(b[0]).date ? -1 : byKey.get(a[0]).date > byKey.get(b[0]).date ? 1 : 0));
           reset();
@@ -589,12 +733,13 @@
             commit(key, k);
             return true;
           }
-          pl = PP.planner(items, opts((s) => {
+          const keep = new Map();
+          committed.forEach((x, key) => keep.set(key, x.k));
+          pl = PP.planner(items, Object.assign(opts((s) => {
             if (byKey.get(s.key).kind === "selector") runners.set(s.key, alternatives(s.key, 3));
             commit(s.key, s.k);
             gains.set(s.key, (gains.get(s.key) || 0) + (s.dv || 0));
-          }));
-          committed.forEach((x, key) => pl.chosen.set(key, x.k));
+          }), { chosen: keep }));
           pass = 3;
           return true;
         }
@@ -627,10 +772,22 @@
       if (!prev && it.most > 1) it.pre = [0].concat([1, 2].map((l) => (l <= it.most ? value(key, l) : 0)));
       const x = prev || { k: 0, notes: [] };
       x.k = k;
+      if (it.blind) {
+        // A locked banner with no card Euophrys can score: its carats are set aside, nothing more.
+        x.copies = new Map();
+        x.spark = [];
+        x.got = new Set();
+        committed.set(key, x);
+        memo.clear();
+        return;
+      }
       if (it.kind === "support") {
         const plan = supportPlan(it, k);
         const to = plan.likely.to.map((i) => plan.use[i].f.id);
-        while (to.length < k) to.push(it.feat[0].id); // nothing helps: the first featured card
+        // Nothing (more) helps: your own target on a locked banner, else its best-rarity card.
+        const fallback = (it.target && it.feat.some((f) => f.id === it.target) ? it.target : null)
+          || it.feat.slice().sort((a, b) => card(b.id).r - card(a.id).r || a.rate - b.rate)[0].id;
+        while (to.length < k) to.push(fallback);
         const copies = new Map();
         plan.tabs.forEach((t) => copies.set(t.f.id, median(t.dist)));
         to.forEach((id) => copies.set(id, copies.get(id) + 1));
@@ -736,11 +893,70 @@
       GROUPS, groupOf, cups, pairs, items, byKey, unscorable, selectors, bonus, minCups, minPct, team,
       buildPair, addSelectors, scorePair: (pair) => scorePair(pair), prepare, value, commit, committed, route, snapshot, reset,
       copiesBy, copiesAtPick, copiesDist, review, selectorFallback, alternatives, deckScore, parentValue, parentAffinity, bestParent,
+      standalone, eras: [...eras.values()], eraAt, freeCards, unrotated, weight,
       poolFor, borrowFor, shortlist, binom, median,
     };
   }
 
-  const api = { create, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS };
+  // ---- your own plan (another planner's table, pasted) ----
+  // Each banner block: "Recommended:A + B", "Start: 2026/12/1", "End: …", "Free/Tickets/Paid" then
+  // "120/30/36", "Carat Est." then "60,040", "Paid Carat Est." then a number, "Max Pulls" then
+  // its number and then # Pulls. → [{ names, start, end, free, carats, paid, max, pulls }].
+  function parsePlan(text) {
+    const out = [];
+    const date = (m) => (m ? m[1] + "-" + String(m[2]).padStart(2, "0") + "-" + String(m[3]).padStart(2, "0") : null);
+    const num = (s) => (s == null ? null : +String(s).replace(/,/g, ""));
+    String(text || "").split(/Recommended:\s*/).slice(1).forEach((blk) => {
+      const names = blk.split(/\n/)[0].split("+").map((s) => s.trim()).filter(Boolean);
+      const start = date(blk.match(/Start:\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/)), end = date(blk.match(/End:\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/));
+      const ftp = blk.match(/Free\/Tickets\/Paid\s*([\d,]+)\s*\/\s*([\d,]+)\s*\/\s*([\d,]+)/);
+      const carats = blk.match(/(?:^|\n)\s*Carat Est\.\s*([\d,]+)/), paid = blk.match(/Paid Carat Est\.\s*([\d,]+)/);
+      const max = blk.match(/Max Pulls\s*([\d,]+)\s*\n\s*([\d,]+)/);
+      // The card the odds are for ("Odds for X", or "X MLB + Y" for two at once): your target.
+      const odds = blk.match(/Odds for ([^\n]+)/) || blk.match(/\n\s*([^\n]+?) MLB \+/);
+      if (!names.length || !start) return;
+      out.push({ names, start, end, free: ftp ? num(ftp[1]) + num(ftp[2]) + num(ftp[3]) : 0, carats: carats ? num(carats[1]) : null,
+        paid: paid ? num(paid[1]) : null, max: max ? num(max[1]) : null, pulls: max ? num(max[2]) : null,
+        target: odds ? odds[1].trim() : names[0] });
+    });
+    return out;
+  }
+  // The banner of the calendar each entry is (its featured cards by name, the nearest start
+  // within three weeks): [{ ...entry, banner, kind }] (banner null when none matches).
+  function matchPlan(entries, B, D) {
+    const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+    return entries.map((e) => {
+      let best = null;
+      [["support", B.support, (id) => D.card(id)], ["trainee", B.trainee, (id) => D.trainee(id)]].forEach(([kind, list, get]) => list.forEach((b) => {
+        const names = b.pick.map(([id]) => { const x = get(id); return x ? norm(x.n) : ""; });
+        if (!e.names.every((n) => names.indexOf(norm(n)) !== -1)) return;
+        const gap = Math.abs(Date.parse(b.start) - Date.parse(e.start)) / DAY;
+        if (gap <= 21 && (!best || gap < best.gap)) best = { banner: b, kind, gap };
+      }));
+      // Your target as a card (or trainee) id on that banner.
+      const get = best && best.kind === "trainee" ? (id) => D.trainee(id) : (id) => D.card(id);
+      const target = best && e.target ? (best.banner.pick.map(([id]) => id).find((id) => { const x = get(id); return x && norm(x.n) === norm(e.target); }) || null) : null;
+      return Object.assign({}, e, { banner: best ? best.banner : null, kind: best ? best.kind : null, targetId: target });
+    });
+  }
+  // Carats you'll have by a date if you spend none, from a plan's estimates: straight lines
+  // between them, from what you have today (or the first stretch's pace back to today), and on at
+  // the plan's average pace after its last banner.
+  function budgetFrom(entries, today, caratsNow) {
+    const pts = entries.filter((e) => e.carats != null && e.start).map((e) => [e.start, e.carats]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    if (!pts.length) return null;
+    const t = (d) => Date.parse(d) / DAY;
+    const rate = pts.length > 1 ? (pts[pts.length - 1][1] - pts[0][1]) / Math.max(1, t(pts[pts.length - 1][0]) - t(pts[0][0])) : 0;
+    const first = pts.length > 1 ? (pts[1][1] - pts[0][1]) / Math.max(1, t(pts[1][0]) - t(pts[0][0])) : rate;
+    if (pts[0][0] > today) pts.unshift([today, caratsNow != null && caratsNow !== "" && !isNaN(+caratsNow) ? +caratsNow : Math.max(0, pts[0][1] - first * (t(pts[0][0]) - t(today)))]);
+    return (date) => {
+      if (date <= pts[0][0]) return pts[0][1];
+      for (let i = 1; i < pts.length; i++) if (date <= pts[i][0]) return pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * (t(date) - t(pts[i - 1][0])) / Math.max(1, t(pts[i][0]) - t(pts[i - 1][0]));
+      return pts[pts.length - 1][1] + rate * (t(date) - t(pts[pts.length - 1][0]));
+    };
+  }
+
+  const api = { create, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaPullValues = api;
 })(typeof window !== "undefined" ? window : globalThis);

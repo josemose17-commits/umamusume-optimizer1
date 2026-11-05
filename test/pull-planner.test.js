@@ -103,3 +103,27 @@ test("copies after a fixed number of pulls: the spark plus Bin(n, r), capped at 
   assert.equal(PP.likely(PP.outcomes(400, r, 0, 200)), 5, "400 pulls likely reach LB4");
   assert.equal(PP.outcomes(200, r, 4, 200)[5], 1, "from LB3, one spark always reaches LB4");
 });
+
+test("locked banners: taken first at their level, free pulls before carats, your own carat curve", () => {
+  const items = [
+    { key: "mine", kind: "support", date: "2026-12-01", most: 2, pullsAt: (k) => 200 * k, required: 2, free: 186 },
+    { key: "later", kind: "support", date: "2027-04-07", most: 2, pullsAt: (k) => 200 * k, required: 2, free: 197 },
+    { key: "other", kind: "support", date: "2027-01-10", most: 2, pullsAt: (k) => 200 * k },
+  ];
+  // Your table: 60,040 carats by Dec 1 and 92,700 by Apr 7 if you spend none.
+  const pts = [["2026-11-05", 50000], ["2026-12-01", 60040], ["2027-04-07", 92700]];
+  const budget = (d) => { let v = pts[0][1]; pts.forEach(([pd, c], i) => { if (d >= pd) { const n = pts[i + 1]; v = n && d < n[0] ? c + (n[1] - c) * (Date.parse(d) - Date.parse(pd)) / (Date.parse(n[0]) - Date.parse(pd)) : c; } }); return v; };
+  const p = PP.plan(items, { today: "2026-11-05", budget, value: values({ other: [1000, 1500] }) });
+  assert.equal(p.chosen.get("mine"), 2, "locked at 400");
+  assert.equal(p.chosen.get("later"), 2);
+  const s = new Map(p.steps.map((x) => [x.key, x]));
+  assert.equal(s.get("mine").free, 186);
+  assert.equal(s.get("mine").carats, (400 - 186) * 150, "the banner's free pulls go first");
+  assert.ok(p.steps.every((x) => x.left >= -1e-6));
+  // With 32,100 + 30,450 carats for the locked ones, 200 more pulls in January just fit (92,550 of
+  // 92,700 by April); 400 don't (92,100 by January, when you'd have about 70,300).
+  assert.equal(p.chosen.get("other"), 1);
+  // A locked banner that doesn't fit is reported, not forced.
+  const tight = PP.plan(items, { today: "2026-11-05", budget: () => 40000, value: values({}) });
+  assert.deepEqual(tight.missed, ["later"]);
+});

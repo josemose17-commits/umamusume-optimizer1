@@ -357,7 +357,18 @@
     return PR.aceTargets({ preset, style, raceSkills, debuffs, minL: minL || 0.1, rarityOf, kinds, positions }).targets;
   }
 
-  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };
+  // A Global scenario preset beyond Euophrys' own (the pull planner's scenario eras: Design Your
+  // Island from Euophrys' JP bundle, and estimates for scenarios Euophrys doesn't score): base's
+  // preset (Global's, else JP's) with patch's general fields on top. Returns false without base.
+  function addScenario(key, base, patch) {
+    const all = EU && EU.SCENARIOS_BY_SERVER, from = all && (all.gl[base] || all.jp[base]);
+    if (!from) return false;
+    all.gl[key] = Object.assign({}, from, { general: Object.assign({}, from.general, patch || {}) });
+    return true;
+  }
+  const hasScenario = (key) => !!(EU && EU.SCENARIOS_BY_SERVER && EU.SCENARIOS_BY_SERVER.gl[key]);
+
+  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, addScenario, hasScenario, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTiers = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

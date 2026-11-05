@@ -74,11 +74,13 @@
   }
 
   // The route. items: [{ key, kind: "support" | "trainee" | "selector", date, rate, have (copies
-  // you own), most (levels: copies worth having, or with pullsAt the pull options), required,
-  // pullsAt(level) (fixed pulls for a level: 200, 400; 0 for a selector pick), group (items that
-  // share a group are alternatives: one banner's picks, one selector's choice) }].
+  // you own), most (levels: copies worth having, or with pullsAt the pull options), required
+  // (true, or the level it's locked at), free (pulls that come free on that banner only, used
+  // first), pullsAt(level) (fixed pulls for a level: 200, 400; 0 for a selector pick), group
+  // (items that share a group are alternatives: one banner's picks, one selector's choice) }].
   // o: { today, carats, perMonth, bonus: [{ date, carats }] (carats that come with packs),
-  //      tickets: { support, trainee }, luck: "mean" | "p90", pullCarats, spark,
+  //      budget(date) (in place of carats, perMonth and bonus: the carats you'll have by a date
+  //      if you spend none), tickets: { support, trainee }, luck: "mean" | "p90", pullCarats, spark,
   //      value(key, level, chosen), onStep(step) }: value is what that level of the item adds,
   // given the other planned items (chosen: Map key → level); onStep hears every item taken.
   // Takes the required items first (in date order, while they fit), then step by step the move (an
@@ -88,9 +90,9 @@
     const pullCarats = o.pullCarats || 150, spark = o.spark || 200;
     const by = new Map(items.map((it) => [it.key, it]));
     const pulls = (it, k) => { if (it.pullsAt) return k > 0 ? it.pullsAt(k) : 0; const c = cost(k, it.rate, spark); return o.luck === "p90" ? c.p90 : c.mean; };
-    const budgetAt = (date) => caratsBy(o, date) + (o.bonus || []).reduce((a, b) => a + (b.date <= date ? b.carats : 0), 0);
-    // Carats a set of planned items needs, banner by banner, using tickets first; null when the
-    // budget runs short at some banner.
+    const budgetAt = o.budget || ((date) => caratsBy(o, date) + (o.bonus || []).reduce((a, b) => a + (b.date <= date ? b.carats : 0), 0));
+    // Carats a set of planned items needs, banner by banner, using the banner's free pulls and
+    // then tickets first; null when the budget runs short at some banner.
     function walk(chosen) {
       const list = [...chosen.entries()].filter(([, k]) => k > 0).map(([key, k]) => ({ it: by.get(key), k }))
         .sort((a, b) => (a.it.date < b.it.date ? -1 : a.it.date > b.it.date ? 1 : 0));
@@ -98,23 +100,26 @@
       let spent = 0;
       const steps = [];
       for (const x of list) {
-        const p = pulls(x.it, x.k), use = Math.min(tickets[x.it.kind] || 0, p);
+        const p = pulls(x.it, x.k), free = Math.min(x.it.free || 0, p), use = Math.min(tickets[x.it.kind] || 0, p - free);
         tickets[x.it.kind] -= use;
-        const carats = (p - use) * pullCarats;
+        const carats = (p - free - use) * pullCarats;
         spent += carats;
         const have = budgetAt(x.it.date);
         if (spent > have + 1e-6) return null;
-        steps.push({ key: x.it.key, k: x.k, pulls: p, tickets: use, carats, left: have - spent });
+        steps.push({ key: x.it.key, k: x.k, pulls: p, free, tickets: use, carats, left: have - spent });
       }
       return steps;
     }
-    const chosen = new Map(), missed = [], taken = new Map(); // taken: group → the item chosen in it
+    // o.chosen: items already in the route (key → level), kept as they are.
+    const chosen = new Map(o.chosen || []), missed = [], taken = new Map(); // taken: group → the item chosen in it
+    chosen.forEach((k, key) => { const it = by.get(key); if (it && it.group) taken.set(it.group, key); });
     items.filter((it) => it.required).sort((a, b) => (a.date < b.date ? -1 : 1)).forEach((it) => {
       if (chosen.has(it.key)) return;
-      chosen.set(it.key, 1);
+      const k = it.required === true ? 1 : Math.max(1, +it.required || 1);
+      chosen.set(it.key, k);
       if (!walk(chosen)) { chosen.delete(it.key); missed.push(it.key); return; }
       if (it.group) taken.set(it.group, it.key);
-      if (o.onStep) o.onStep({ key: it.key, k: 1, required: true });
+      if (o.onStep) o.onStep({ key: it.key, k, required: true });
     });
     let done = false, moves = 0;
     function step() {
