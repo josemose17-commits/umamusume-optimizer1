@@ -48,6 +48,7 @@
     const { D, B, P, PV, PP, esc, fmtDate } = ctx;
     let job = null;    // the run in progress: { stage, f }
     let result = null; // the last route, with the inputs it was made for
+    let fixedOpen = false; // "Your fixed plan in the route" stays open across re-renders once opened
     const tLabel = (t) => t.n + " [" + t.t + "]";
     const byLabel = new Map(D.DATA.trainees.map((t) => [tLabel(t).toLowerCase(), t.id]));
 
@@ -442,10 +443,26 @@
       const last = steps.length ? steps[steps.length - 1] : null;
       const lastDate = last ? v.byKey.get(last.key).date : result.until;
       const have = result.budget ? result.budget(lastDate) : PP.caratsBy({ today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth) }, result.until) + bonus;
+      // Every row in route order (a selector's copies count the picks before it), then split: the
+      // table shows only what's outside your fixed plan; your plan's banners and picks fold below it.
       const seen = new Map();
-      const rows = steps.map((s) => stepRow(s, seen)).join("");
+      const drawn = steps.map((s) => ({ s, it: v.byKey.get(s.key), html: stepRow(s, seen) })).filter((x) => x.it && x.html);
+      const extra = drawn.filter((x) => !x.it.locked), fixed = drawn.filter((x) => x.it.locked);
       const lockedN = v.items.filter((it) => it.locked && it.kind !== "selector").length, picksN = v.items.filter((it) => it.locked && it.kind === "selector").length;
       const planSpent = steps.filter((s) => v.byKey.get(s.key).locked).reduce((a, s) => a + s.carats, 0);
+      const head = `<thead><tr><th>When</th><th>What</th><th class="num">Cost</th><th>You get</th><th>Clearly stronger in</th><th class="num">Carats left</th><th class="num">Adds</th></tr></thead>`;
+      const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
+      const fixedBanners = fixed.filter((x) => x.it.kind !== "selector").length, fixedPicks = fixed.length - fixedBanners;
+      const fixedHTML = fixed.length ? `<details class="pull-fixed"${fixedOpen ? " open" : ""}><summary><b>Your fixed plan in the route</b> (${[fixedBanners ? plural(fixedBanners, "banner") : "", fixedPicks ? plural(fixedPicks, "Uma pick") : "", planSpent ? fmtN(planSpent) + " carats" : ""].filter(Boolean).join(", ")})</summary>
+        <p class="mini">Pulled no matter what, each at its # Pulls, so they aren't in the table above. Once you've pulled one, open its "What I got" here.</p>
+        <div class="table-wrap"><table>${head}<tbody>${fixed.map((x) => x.html).join("")}</tbody></table></div></details>` : "";
+      const legend = drawn.length ? `<p class="mini">Spark for: the card the route pulls for, at its likely limit break (the spark plus the median pulled copies), with the chances of every other result. Comes with the pulls: the other featured cards' likely copies; they aren't why the route pulls there, but they count where they're clearly stronger. Next best here: the other picks on that selector and their points. Carats left: after that row and every row before it, your fixed plan's included. Adds: the expected points to your decks over every cup after the banner, counting only the clearly stronger ones (the deck score's units; 60 = 1 L of race skills).</p>` : "";
+      const empty = fixed.length
+        ? `<div class="empty">Nothing outside your fixed plan makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats it leaves over, the selectors included. Mark your cards or relax the rules above.</div>`
+        : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`;
+      const table = extra.length
+        ? `<div class="table-wrap"><table>${head}<tbody>${extra.map((x) => x.html).join("")}</tbody></table></div>${legend}${fixedHTML}`
+        : `${empty}${fixedHTML}${legend}`;
       // Banners of your plan that don't fit: what they need, and what's left of your carats then.
       const missed = plan.missed.map((key) => v.byKey.get(key)).filter(Boolean).map((it) => {
         const need = Math.max(0, it.pullsAt(it.required === true ? 1 : it.required) - (it.free || 0)) * B.meta.pullCarats;
@@ -456,15 +473,14 @@
           : `you'd have about ${fmtN(Math.max(0, left))} then, ${fmtN(need - Math.max(0, left))} short`}.</li>`;
       }).join("");
       const intro = result.budget
-        ? `Budget: your plan's carat estimates (about ${fmtN(have)} by ${esc(fmtDate(lastDate))} if you spent none). Your plan's ${lockedN} banner${lockedN === 1 ? "" : "s"} come first, each at its # Pulls, in date order (each banner's free pulls before carats)${picksN ? `, with your ${picksN} selector pick${picksN === 1 ? "" : "s"}` : ""}: ${fmtN(planSpent)} carats. The carats left over go to whatever else makes your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}): ${fmtN(spent - planSpent)} more, ${fmtN(spent)} in all.`
+        ? `Budget: your plan's carat estimates (about ${fmtN(have)} by ${esc(fmtDate(lastDate))} if you spent none). ${lockedN || picksN ? `Your fixed plan goes first: ${[lockedN ? `its ${plural(lockedN, "banner")}, each at its # Pulls in date order (free pulls before carats)` : "", picksN ? `your ${plural(picksN, "Uma selector pick")}` : ""].filter(Boolean).join(", and ")}, ${fmtN(planSpent)} carats, folded under the table. The table shows only what's outside it` : "The table"}: the selector picks left to the planner (the free and $20.99 support selectors, and any Uma selector you left blank) and the banners the carats ${lockedN || picksN ? "left over " : ""}go to, for making your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}): ${fmtN(spent - planSpent)} more carats, ${fmtN(spent)} in all.`
         : `From ${fmtN(num(p.carats))} carats now and ${fmtN(num(p.perMonth))} a month${bonus ? `, plus ${fmtN(bonus)} from the $20.99 packs` : ""}, you'll have about ${fmtN(have)} by ${esc(fmtDate(result.until))}. This route spends ${fmtN(spent)} of them on the pulls that make your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}), in banner order so the carats are there at each one.`;
       return `<section class="panel pull-route">
         <h3>The route</h3>
         <p class="mini">${intro}${packs.length ? ` The ${packs.length} $20.99 pack${packs.length === 1 ? "" : "s"} in the window come to $${dollars.toFixed(2)}.` : ""}</p>
         ${missed ? `<div class="mini warn"><b>Your plan doesn't all fit your carat estimates:</b><ul>${missed}</ul></div>` : ""}
         ${doneHTML(p)}
-        ${steps.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>What</th><th class="num">Cost</th><th>You get</th><th>Clearly stronger in</th><th class="num">Carats left</th><th class="num">Adds</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="mini">Spark for: the card the route pulls for, at its likely limit break (the spark plus the median pulled copies), with the chances of every other result. Comes with the pulls: the other featured cards' likely copies; they aren't why the route pulls there, but they count where they're clearly stronger. Next best here: the other picks on that selector and their points. Adds: the expected points to your decks over every cup after the banner, counting only the clearly stronger ones (the deck score's units; 60 = 1 L of race skills).</p>` : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`}
+        ${table}
         ${checkHTML()}
         ${compareHTML()}
         ${selectorsHTML()}
@@ -607,6 +623,8 @@
         <section class="panel"><h2>Pull planner</h2><p class="mini">Your plan's banners at 400, and the best use of everything else (other banners, selector picks), so your teams' decks get clearly stronger in as many cups as your carats allow, through mid-2029. It builds your decks for every cup ahead from the cards you own, in the scenario of the time, and puts every support card and trainee on one scale, on the banners Global has announced and GameTora's forecast of the rest.</p></section>
         ${planHTML(p)}${picksHTML(p)}${budgetHTML(p)}${teamsHTML(p)}${controlsHTML(p)}${routeHTML(p)}${decksHTML()}${calendarHTML(p)}${howHTML()}
       </div>`;
+      const fx = body.querySelector(".pull-fixed");
+      if (fx) fx.addEventListener("toggle", () => { fixedOpen = fx.open; });
     }
 
     // ---------- events ----------
