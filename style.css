@@ -702,5 +702,7 @@ table.pred .over { color: var(--accent); }
 .pull-check { border-left: 3px solid var(--accent); padding-left: 10px; }
 .pull-check ul { margin: 4px 0; padding-left: 18px; }
 .pull-got { margin-top: 6px; }
+.pull-fixed { margin: 10px 0; }
+.pull-fixed > .table-wrap { margin-top: 6px; }
 .pull-got summary { font-size: .8rem; color: var(--muted); }
 .pull-got .row-wrap { margin-top: 4px; }
