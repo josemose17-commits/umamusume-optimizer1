@@ -83,22 +83,17 @@
     const planned = (p) => (p.usePlan && p.plan && p.plan.length ? PV.matchPlan(p.plan, B, D) : []);
     // Your plan's locks (each row's banner at its # Pulls), its free pulls, and the umas it gets
     // you (its trainee rows and your Uma selector picks) with their dates.
+    // Your plan's parts for a run (pull-values.js planParts): its locks, free pulls, the umas it
+    // gets you, your selector picks, what's behind you, and the budget.
+    const keyOf = (x) => PV.rowKey(x);
+    const rowDone = (p, x) => PV.rowDone(x, ctx.today, p.done);
     function planInputs(p) {
-      const mine = planned(p), rows = mine.filter((x) => x.banner && x.kind !== "stepup");
-      const locked = new Map(rows.filter((x) => x.pulls > 0).map((x) => [x.banner.id, { level: x.pulls >= 400 ? 2 : 1, free: x.free || 0, target: x.targetId }]));
-      const freePulls = new Map(rows.map((x) => [x.banner.id, x.free || 0]));
-      const yours = new Map();
-      rows.filter((x) => x.kind === "trainee" && x.pulls > 0 && x.targetId).forEach((x) => yours.set(x.targetId, x.banner.start));
-      const lockedPicks = new Map();
-      if (p.selUma) Object.keys(p.selPicks || {}).forEach((ev) => {
-        const id = +p.selPicks[ev], e = (B.events || []).find((x) => x.id === ev);
-        if (id && e && e.start > ctx.today) { lockedPicks.set(ev + "-uma", id); if (!yours.has(id) || e.start < yours.get(id)) yours.set(id, e.start); }
-      });
-      return { mine, locked, freePulls, yours, lockedPicks, budget: mine.length ? PV.budgetFrom(mine, ctx.today, p.carats) : null };
+      const mine = planned(p);
+      return Object.assign({ mine }, PV.planParts(mine, { today: ctx.today, done: p.done, selPicks: p.selPicks, selUma: !!p.selUma, events: B.events || [], caratsNow: p.carats, pullCarats: B.meta.pullCarats }));
     }
     // What the decks rest on (a re-plan with the same keeps them), and everything the route does.
     const deckKey = (p) => JSON.stringify([ctx.today, until(p), p.teams, ctx.ownedCode(), ctx.settingsKey(), [...ctx.myUmas()].sort(), p.usePlan && p.plan, p.selUma && p.selPicks]);
-    const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma, p.selPicks]);
+    const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma, p.selPicks, p.done]);
     const relT = (B && B.release && B.release.trainees) || {};
     const traineeOutDate = (t) => t.en || relT[t.id] || null;
     const cardName = (id) => { const c = D.card(id); return c ? c.n + " (" + RARITY[c.r] + " " + c.ty + ")" : "#" + id; };
@@ -117,7 +112,7 @@
       const v = PV.create({
         D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(),
         minCups: +p.minCups || 2, minPct: (+p.minPct || 10) / 100, fade: (+p.fade || 0) / 100, locked: o.locked, freePulls: o.freePulls,
-        yours: o.yours, lockedPicks: o.lockedPicks,
+        yours: o.yours, lockedPicks: o.lockedPicks, done: o.done,
         selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma },
         reuse: o.reuse, deckOpts: ctx.deckOpts, whites: ctx.whites, skillL: ctx.skillL,
       });
@@ -174,9 +169,9 @@
         await ctx.ensureSkills(cupIds);
         // Your plan: its banners locked at 400 (with their free pulls and your target), and its
         // carat estimates as the carats you'll have by each date.
-        const { mine, locked, freePulls, yours, lockedPicks, budget } = planInputs(p);
-        const r = await build(p, { locked, budget, freePulls, yours, lockedPicks, reuse: result && result.deckKey === dk ? result.v : null });
-        result = { key: inputsKey(p), deckKey: dk, until: r.end, v: r.v, plan: r.plan, gains: r.gains, runners: r.runners, at: ctx.today, solo: r.solo, mine, budget, freePulls, yours, lockedPicks, total: total(r.gains), alt: null };
+        const { mine, locked, freePulls, yours, lockedPicks, budget, done } = planInputs(p);
+        const r = await build(p, { locked, budget, freePulls, yours, lockedPicks, done, reuse: result && result.deckKey === dk ? result.v : null });
+        result = { key: inputsKey(p), deckKey: dk, until: r.end, v: r.v, plan: r.plan, gains: r.gains, runners: r.runners, at: ctx.today, solo: r.solo, mine, budget, freePulls, yours, lockedPicks, done, total: total(r.gains), alt: null };
       } catch (err) {
         ctx.flash(err.message || String(err));
       }
@@ -194,7 +189,7 @@
         // The banners of your plan the model can't value (no Euophrys data) stay as you planned.
         const keep = new Map(result.v.items.filter((it) => it.locked && it.blind).map((it) => [it.banner.id, { level: it.required === true ? 1 : it.required, free: it.free || 0, target: it.target }]));
         // Your selector picks and the umas your plan gets stay too: they're your team.
-        const r = await build(p, { locked: keep, budget: result.budget, freePulls: result.freePulls, yours: result.yours, lockedPicks: result.lockedPicks, reuse: result.v, label: "The planner's own route: " });
+        const r = await build(p, { locked: keep, budget: result.budget, freePulls: result.freePulls, yours: result.yours, lockedPicks: result.lockedPicks, done: result.done, reuse: result.v, label: "The planner's own route: " });
         result.alt = { v: r.v, plan: r.plan, gains: r.gains, total: total(r.gains) };
       } catch (err) {
         ctx.flash(err.message || String(err));
@@ -257,7 +252,8 @@
       const mine = p.plan && p.plan.length ? PV.matchPlan(p.plan, B, D) : [];
       const kindLabel = (x) => (x.kind === "trainee" ? "Trainee" : x.kind === "stepup" ? "Step-up" : "Support");
       const rows = mine.map((x) => `<tr><td>${esc(kindLabel(x))}${x.title ? `<div class="mini">${esc(x.title)}</div>` : ""}</td><td>${esc(x.names.join(" + "))}${x.target && x.names.length > 1 ? `<div class="mini">your target: ${esc(x.target)}</div>` : ""}</td>
-        <td>${esc(fmtDate(x.start))}${x.banner ? `<div class="mini">calendar: ${esc(when(x.banner))}</div>` : x.kind === "stepup" ? `<div class="mini">not modeled${x.pulls ? "" : " (0 steps)"}</div>` : `<div class="mini warn">not on the calendar</div>`}</td>
+        <td>${esc(fmtDate(x.start))}${x.banner ? `<div class="mini">calendar: ${esc(when(x.banner))}</div>` : x.kind === "stepup" ? `<div class="mini">not modeled${x.pulls ? "" : " (0 steps)"}</div>` : `<div class="mini warn">not on the calendar</div>`}${x.banner && rowDone(p, x)
+          ? `<div class="mini"><b>Behind you</b> (${p.done && p.done[keyOf(x)] ? `you entered what you got <button type="button" class="btn ghost small" data-pull-undone="${esc(keyOf(x))}">Undo</button>` : "it has ended"})</div>` : ""}</td>
         <td class="num">${x.kind === "stepup" ? fmtN(x.pulls || 0) + " steps" : fmtN(x.pulls || 0)}</td><td class="num">${fmtN(x.free || 0)}</td><td class="num">${x.carats != null ? fmtN(x.carats) : "—"}</td></tr>`).join("");
       return `<section class="panel">
         <h3>Your plan</h3>
@@ -353,6 +349,34 @@
       return [0, 1, 2, 3, 4, 5].filter((k) => k >= from && dist[k] > 0.005)
         .map((k) => (k === have ? (have ? "no new copy" : "none") : lb(k)) + " " + pct(dist[k])).join(" · ");
     }
+    // The pulls and picks outside your plan you've entered results for: behind you (with undo).
+    function doneHTML(p) {
+      const planKeys = new Set((result.mine || []).filter((x) => x.banner).map(keyOf));
+      const keys = Object.keys(p.done || {}).filter((k) => !planKeys.has(k));
+      if (!keys.length) return "";
+      const name = (k) => {
+        if (k[0] === "x") { const id = k.slice(1), ev = (B.events || []).find((e) => id.indexOf(e.id + "-") === 0); return (ev ? ev.name + " " : "") + (/-free$/.test(id) ? "free support selector" : /-paid$/.test(id) ? "$20.99 support selector" : "$20.99 Uma selector"); }
+        const b = (k[0] === "t" ? B.trainee : B.support).find((x) => "" + x.id === k.slice(1));
+        return b ? b.pick.map(([id]) => (k[0] === "t" ? (D.trainee(id) || {}).n : cardShort(id))).join(" + ") : k;
+      };
+      return `<p class="mini">Behind you (you entered what you got): ${keys.map((k) => `${esc(name(k))}${p.done[k].pulls ? " (" + p.done[k].pulls + " pulls)" : ""} <button type="button" class="btn ghost small" data-pull-undone="${esc(k)}">Undo</button>`).join(" · ")}. Their carats are off your budget, and the route plans on without them.</p>`;
+    }
+    // "What I got": once you've pulled (or picked), your limit break now for each featured card
+    // (or the umas you got). Saving puts it in My cards / My umas, marks the banner behind you and
+    // plans again from there.
+    function gotForm(it, s) {
+      const owned = ctx.owned(), mine = ctx.myUmas();
+      const lbSel = (id) => `<label class="field"><span>${esc(cardShort(id))}</span><select data-got-card="${id}">
+        <option value="" ${owned[id] == null ? "selected" : ""}>not owned</option>${[0, 1, 2, 3, 4].map((l) => `<option value="${l}" ${owned[id] === l ? "selected" : ""}>LB${l}</option>`).join("")}</select></label>`;
+      const umaBox = (id) => `<label class="chip-toggle"><input type="checkbox" data-got-uma="${id}" ${mine.has(id) ? "checked" : ""}> ${esc(umaName(id))}</label>`;
+      let fields;
+      if (it.kind === "selector") fields = it.pick === "support" ? lbSel(it.id) : umaBox(it.id);
+      else if (it.kind === "support") fields = it.banner.pick.map(([id]) => id).filter((id) => D.card(id)).map(lbSel).join("");
+      else fields = it.banner.pick.map(([id]) => id).filter((id) => D.trainee(id)).map(umaBox).join("");
+      return `<details class="pull-got"><summary>What I got</summary><div class="row-wrap">${fields}</div>
+        <div class="row-wrap"><button type="button" class="btn small" data-pull-save="${esc(it.key)}" data-pulls="${s.pulls || 0}" data-free="${s.free || 0}">Save and plan again</button>
+        <span class="mini">Your limit breaks (or umas) now go to My cards (My umas), and the route plans on from there without this ${it.kind === "selector" ? "selector" : "banner"}.</span></div></details>`;
+    }
     function stepRow(s, seen) {
       const v = result.v, it = v.byKey.get(s.key), c = v.committed.get(s.key);
       if (!it || !c) return "";
@@ -374,7 +398,7 @@
           ? `<div class="mini">Next best here: ${alt.map((x) => esc(x.pick === "support" ? cardShort(x.id) + " " + (x.have ? lb(x.have) + " → " + lb(x.have + 1) : "LB0") : umaName(x.id)) + " " + (x.value > 0 ? "+" + fmtN(x.value) + " (" + x.cups + " cup" + (x.cups === 1 ? "" : "s") + ")" : "clearly stronger in only " + x.cups + " cup" + (x.cups === 1 ? "" : "s"))).join(" · ")}</div>`
           : `<div class="mini">Nothing else here makes a deck clearly stronger.</div>`;
         return `<tr><td>${esc(est(e) + fmtDate(e.start))}</td><td>${it.locked ? `<span class="pill">your pick</span> ` : ""}${esc(e.name)}: ${esc(s0.label)}</td><td class="num">${s0.price ? "$" + s0.price.toFixed(2) + `<div class="mini">+${fmtN(s0.carats)} carats</div>` : "free"}</td>
-          <td>Pick ${got}${altText}</td><td>${decks}</td>${left}<td class="num">+${fmtN(adds)}</td></tr>`;
+          <td>Pick ${got}${altText}${gotForm(it, s)}</td><td>${decks}</td>${left}<td class="num">+${fmtN(adds)}</td></tr>`;
       }
       const pulls = `${fmtN(s.pulls)} pulls<div class="mini">${fmtN(s.carats)} carats${s.free ? " + " + fmtN(s.free) + " free on the banner" : ""}${s.tickets ? " + " + fmtN(s.tickets) + " tickets" : ""}</div>`;
       const featured = it.banner.pick.map(([id]) => (it.kind === "support" ? cardName(id) : umaName(id)));
@@ -405,7 +429,7 @@
         const also = [...(c.got || [])].filter((id) => spark.indexOf(id) === -1);
         got = `<div class="mini">Spark:</div><b>${esc(spark.map(umaName).join(" and "))}</b>${also.length ? `<div class="mini">The pulls likely bring ${esc(also.map(umaName).join(", "))} too.</div>` : ""}`;
       }
-      return `<tr><td>${esc(when(it.banner))}</td><td>${what}</td><td class="num">${pulls}</td><td>${got}</td><td>${decks}</td>${left}<td class="num">+${fmtN(adds)}</td></tr>`;
+      return `<tr><td>${esc(when(it.banner))}</td><td>${what}</td><td class="num">${pulls}</td><td>${got}${gotForm(it, s)}</td><td>${decks}</td>${left}<td class="num">+${fmtN(adds)}</td></tr>`;
     }
     function routeHTML(p) {
       if (!result) return "";
@@ -438,6 +462,7 @@
         <h3>The route</h3>
         <p class="mini">${intro}${packs.length ? ` The ${packs.length} $20.99 pack${packs.length === 1 ? "" : "s"} in the window come to $${dollars.toFixed(2)}.` : ""}</p>
         ${missed ? `<div class="mini warn"><b>Your plan doesn't all fit your carat estimates:</b><ul>${missed}</ul></div>` : ""}
+        ${doneHTML(p)}
         ${steps.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>What</th><th class="num">Cost</th><th>You get</th><th>Clearly stronger in</th><th class="num">Carats left</th><th class="num">Adds</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="mini">Spark for: the card the route pulls for, at its likely limit break (the spark plus the median pulled copies), with the chances of every other result. Comes with the pulls: the other featured cards' likely copies; they aren't why the route pulls there, but they count where they're clearly stronger. Next best here: the other picks on that selector and their points. Adds: the expected points to your decks over every cup after the banner, counting only the clearly stronger ones (the deck score's units; 60 = 1 L of race skills).</p>` : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`}
         ${checkHTML()}
@@ -588,6 +613,29 @@
     function click(e) {
       if (e.target.closest("#pullRun")) { run(); return true; }
       if (e.target.closest("#pullCheck")) { check(); return true; }
+      const save = e.target.closest("[data-pull-save]");
+      if (save) {
+        const box = save.closest(".pull-got"), p = S(), key = save.dataset.pullSave, owned = ctx.owned(), got = [];
+        box.querySelectorAll("select[data-got-card]").forEach((sel) => {
+          const id = +sel.dataset.gotCard, lb = sel.value === "" ? null : +sel.value;
+          if ((owned[id] == null ? null : owned[id]) !== lb) { ctx.setOwned(id, lb); got.push(cardShort(id) + (lb == null ? " not owned" : " LB" + lb)); }
+        });
+        box.querySelectorAll("input[data-got-uma]").forEach((cb) => { if (cb.checked && !ctx.myUmas().has(+cb.dataset.gotUma)) { ctx.addMyUma(+cb.dataset.gotUma); got.push(umaName(+cb.dataset.gotUma)); } });
+        if (!p.done) p.done = {};
+        p.done[key] = { pulls: +save.dataset.pulls || 0, free: +save.dataset.free || 0, at: ctx.today };
+        ctx.save();
+        ctx.flash((got.length ? "Saved " + got.join(", ") : "Marked as done") + ". Planning again…");
+        run();
+        return true;
+      }
+      const undo = e.target.closest("[data-pull-undone]");
+      if (undo) {
+        const p = S();
+        if (p.done) delete p.done[undo.dataset.pullUndone];
+        ctx.save();
+        ctx.rerender();
+        return true;
+      }
       if (e.target.closest("#pullPlanRead")) {
         const box = document.getElementById("pullPlanText"), got = PV.parsePlan(box ? box.value : "");
         if (!got.length) { ctx.flash("That doesn't look like a planner table: each banner needs a Start: line with its name above it."); return true; }

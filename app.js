@@ -2789,6 +2789,9 @@
       D, B: window.UmaBanners, P, PV: window.UmaPullValues, PP: window.UmaPullPlanner, T, A: window.UmaAffinity,
       esc, fmtDate, flash, save, today: TODAY, state: () => state,
       owned: () => owned, ownedCode: () => ownedCode(), myUmas: () => myUmas(),
+      // "What I got" on the route: your limit break now (null: not owned) and the umas you got.
+      setOwned: (id, lb) => { if (lb == null || lb === "") delete owned[id]; else owned[id] = Math.max(0, Math.min(4, +lb)); saveOwned(); },
+      addMyUma: (id) => { const s = myUmas(); s.add(+id); setMyUmas(s); },
       euReady: () => euReady(),
       // Resolves once every cup's skill values are loaded.
       ensureSkills: (ids) => new Promise((resolve, reject) => {
