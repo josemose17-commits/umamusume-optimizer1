@@ -14,6 +14,9 @@ Sources (GameTora, gametora.com/umamusume):
     from Global's pace against JP, featured cards from JP's banners). Rates are assumed to follow
     the same rule as Global's banners so far.
   - en/foresight/predicted_releases: each JP card's and trainee's forecast Global release.
+  - en/foresight/timeline also gives the training scenarios ahead (future_scenarios: GameTora's
+    scenario id and its forecast Global start) and the story events ahead with their free SSRs
+    (future_story_events: support_ids).
   - gacha/support-standard (JP's banners): the anniversaries. JP's game opened on 2021-02-24 and
     holds an anniversary every Feb 24 and a half anniversary every Aug 24, each with its
     selectors (uma.guide's selector overview: a free support selector from the anniversary
@@ -118,6 +121,11 @@ def main():
             n = year - 2021 + half
             name = ("%g" % n) + ({1: "st", 2: "nd", 3: "rd"}.get(int(n), "th") if n == int(n) else "") + " Anniversary"
             events.append({"id": "anniv%g" % n, "kind": "anniversary", "name": name, "jp": jp, "start": start, "est": est})
+    # The training scenarios ahead on Global and the story events' free SSRs (GameTora's forecast).
+    scenarios = [{"id": s["id"], "start": day(s["display_start"]), "est": bool(s.get("is_estimated", True))}
+                 for s in timeline.get("future_scenarios", [])]
+    story = [{"id": e["id"], "start": day(e["display_start"]), "est": bool(e.get("is_estimated", True)), "cards": e["support_ids"]}
+             for e in timeline.get("future_story_events", []) if e.get("support_ids")]
     predicted = get("en/foresight/predicted_releases")
     release = {
         "cards": {k: v["release_date"] for k, v in sorted(predicted.get("support_cards", {}).items())},
@@ -130,6 +138,7 @@ def main():
             "pullCarats": PULL_CARATS, "spark": SPARK, "featured": {k: {str(r): v for r, v in d.items()} for k, d in FEATURED.items()},
         },
         "support": out["support"], "trainee": out["trainee"], "release": release, "events": events,
+        "scenarios": scenarios, "storyEvents": story,
     }
     body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     # Keep the old build date when nothing else changed, so scheduled rebuilds stay quiet.

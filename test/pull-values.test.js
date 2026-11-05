@@ -7,6 +7,7 @@ const B = require("../data/banners.js");
 const P = require("../data/presets.js");
 const PV = require("../pull-values.js");
 const PP = require("../pull-planner.js");
+const fs = require("fs");
 
 // The Dirt team (El Condor Pasa, Copano Rickey and Valentine Yukino Bijin, all Pace Chasers) over
 // 18 months, with a fixed sample collection.
@@ -18,7 +19,7 @@ const owned = {};
 D.DATA.supports.filter((c) => D.onGlobal(c, today) && c.r >= 2).forEach((c) => { if (rnd() < 0.5) owned[c.id] = Math.floor(rnd() * 5); });
 const teams = { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou" }] };
 const make = (extra) => PV.create(Object.assign({ D, T, A, B, P, today, until, teams, owned, umas: new Set([101401]),
-  deckOpts: (p, style, tid) => ({ scenario: "GM", trainee: tid, skills: skills(p, style), costs: {}, skillWeight: 1, borrow: true }),
+  deckOpts: (p, style, tid, scen) => ({ scenario: scen || "GM", trainee: tid, skills: skills(p, style), costs: {}, skillWeight: 1, borrow: true }),
   whites: () => [1, 0.8, 0.6], skillL: (p, style, id) => skills(p, style)[id] || 0 }, extra || {}));
 // One prepared run, shared (decks are the slow part).
 let base = null;
@@ -61,7 +62,13 @@ test("your decks now: six cards each, kept as they were before the route", () =>
   assert.ok(v.pairs.every((pair) => pair.deck && pair.deck.length === 6 && pair.base.length === 6));
   assert.ok(v.pairs.every((pair) => pair.deck.filter((c) => c.borrowed).length === 1), "one friend's card each");
   // The decks are built from your cards: every owned slot is a card you have, at your limit break.
-  v.pairs.forEach((pair) => pair.base.filter((c) => !c.borrowed).forEach((c) => assert.equal(c.lb, owned[c.id], D.card(c.id).n)));
+  // (or a story event's free SSR, at LB4 once its event is over).
+  v.pairs.forEach((pair) => pair.base.filter((c) => !c.borrowed).forEach((c) => {
+    if (v.freeCards.has(c.id) && v.freeCards.get(c.id) < pair.date) assert.equal(c.lb, 4, D.card(c.id).n);
+    else assert.equal(c.lb, owned[c.id], D.card(c.id).n);
+  }));
+  const late = v.pairs[v.pairs.length - 1], free = [...v.freeCards].filter(([, by]) => by < late.date).map(([id]) => id);
+  assert.ok(free.length > 0 && free.every((id) => v.poolFor(late).some((c) => c.id === id && c.lb === 4)), "the free event SSRs are in your cards for the deck, at LB4");
 });
 
 test("a card counts only where it's clearly stronger, in enough cups; a banner only if its likely result is", () => {
@@ -166,4 +173,103 @@ test("copies after the pulls: the spark plus the binomial, capped at LB4", () =>
   assert.equal(PV.median(PV.binom(200, 0.0075)), 1, "200 pulls likely bring one more copy");
   assert.equal(PV.median(PV.binom(400, 0.0075)), 3);
   assert.equal(v.copiesDist(0.0075, 400, 3, 2)[5], 1, "two sparks from LB2 always reach LB4");
+});
+
+test("a rotating slot: each cup the uma of yours that fits it, a fresh one when another fits; no parent value", () => {
+  const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today)).map((t) => t.id));
+  const v = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { rotate: true }] }, umas: mine });
+  const rot = v.pairs.filter((p) => p.rotating);
+  const cups = [...new Set(v.pairs.map((p) => p.cup.id))];
+  assert.equal(rot.length, cups.length, "one rotating uma a cup");
+  const R = { S: 8, A: 7 };
+  rot.forEach((p) => {
+    const t = p.trainee, apt = t.apt;
+    assert.ok(R[apt[1]] && R[apt[{ Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.cup.course.dist]]] && R[apt[{ Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 }[p.member.style]]], t.n + " fits " + p.cup.id);
+    assert.ok([101401, 109801].every((id) => D.trainee(id).cid !== t.cid), "not a fixed uma's character");
+    assert.equal(v.parentValue(p, D.trainee(101401)), 0, "parents count for the fixed umas only");
+  });
+  for (let i = 1; i < rot.length; i++) assert.notEqual(rot[i].trainee.id, rot[i - 1].trainee.id, "a fresh uma each cup");
+  // Without umas of yours, the slot sits out (and says so).
+  const none = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { rotate: true }] }, umas: new Set() });
+  assert.equal(none.pairs.filter((p) => p.rotating).length, 0);
+  assert.equal(none.unrotated.length, cups.length);
+});
+
+test("scenario eras: each cup in the scenario of its date, estimates with the scenario's friend as link", () => {
+  const v = make();
+  const names = v.eras.map((e) => e.name);
+  assert.deepEqual(names.slice(0, 4), ["Grand Concert", "Grand Masters", "Project L'Arc", "U.A.F. Ready GO!"]);
+  const larc = v.eras.find((e) => e.name === "Project L'Arc");
+  assert.ok(larc.est && D.card(larc.link).n === "Mei Satake", "L'Arc's link is its opening banner's friend");
+  const w = T.weightsFor(larc.key, "friend");
+  assert.deepEqual(w.scenarioLink, [T.entry(larc.link, 4).char_name]);
+  assert.equal(w.scenarioBonus, 1000);
+  assert.ok(T.hasScenario("DYI") && !v.eras.find((e) => e.name === "Design Your Island").est, "Design Your Island from Euophrys' JP bundle");
+  v.pairs.forEach((p) => {
+    const e = v.eraAt(p.date);
+    assert.equal(p.era.key, e.key);
+    assert.ok(!e.start || e.start <= p.date);
+  });
+  assert.equal(v.eraAt("2026-11-20").name, "Grand Concert");
+  assert.equal(v.eraAt("2027-05-01").name, "Project L'Arc");
+});
+
+test("far-off cups count less: a year ahead loses the fade", () => {
+  const v = make({ fade: 0.2 });
+  assert.equal(v.weight(today), 1);
+  assert.ok(Math.abs(v.weight("2027-11-04") - 0.8) < 0.002);
+  assert.ok(v.weight("2028-11-04") < v.weight("2027-11-04"));
+  assert.equal(make().weight("2028-11-04"), 1, "no fade by default");
+});
+
+test("your plan: parsed from your planner's table, matched to the calendar, its carats as the budget", () => {
+  const plan = PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan.txt", "utf8"));
+  assert.equal(plan.length, 13);
+  assert.deepEqual(plan[1], { names: ["Mei Satake", "El Condor Pasa"], start: "2027-04-07", end: "2027-04-25", free: 197, carats: 92700, paid: 4750, max: 815, pulls: 400, target: "El Condor Pasa" });
+  assert.equal(plan[12].target, "Mr. C.B.", "two at once: the first one's MLB");
+  plan.forEach((x) => assert.equal(x.max, Math.floor(x.carats / 150) + x.free, "its Max Pulls: carats / 150 + Free/Tickets/Paid"));
+  const m = PV.matchPlan(plan, B, D);
+  m.forEach((x) => {
+    assert.ok(x.banner, x.names.join("+") + " on the calendar");
+    assert.ok(Math.abs(Date.parse(x.banner.start) - Date.parse(x.start)) <= 21 * 864e5);
+    assert.ok(x.names.every((n) => x.banner.pick.some(([id]) => D.card(id).n === n)));
+    assert.equal(D.card(x.targetId).n, x.target);
+  });
+  const budget = PV.budgetFrom(m, "2026-11-05", null);
+  assert.equal(budget("2026-12-01"), 60040);
+  assert.equal(budget("2029-05-18"), 399970);
+  const mid = budget("2027-02-02");
+  assert.ok(mid > 60040 && mid < 92700, "straight lines between the estimates");
+  assert.ok(budget("2026-11-05") < 60040 && budget("2026-11-05") > 0, "back to today at the first stretch's pace");
+  assert.equal(PV.budgetFrom(m, "2026-11-05", 40000)("2026-11-05"), 40000, "or from the carats you have now");
+});
+
+test("a locked plan: taken first at 400 with each banner's free pulls; what doesn't fit is reported", () => {
+  const m = PV.matchPlan(PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan.txt", "utf8")), B, D);
+  const locked = new Map(m.map((x) => [x.banner.id, { level: 2, free: x.free, target: x.targetId }]));
+  const v = make({ locked, reuse: prepared() });
+  v.pairs.forEach((pair) => v.buildPair(pair));
+  v.prepare();
+  const solo = v.standalone();
+  assert.ok(solo.length > 20 && solo.every((x) => x.v2 >= x.v1 - 1e-6 || x.item.most < 2));
+  const rt = v.route(PP, { today, budget: PV.budgetFrom(m, today, null) });
+  while (rt.step());
+  const { plan, gains } = rt.result();
+  const mine = v.items.filter((it) => it.locked);
+  assert.equal(mine.length, 13, "every banner of the plan, past the window too");
+  mine.forEach((it) => assert.ok(plan.chosen.get(it.key) === 2 || plan.missed.indexOf(it.key) !== -1, it.key));
+  assert.ok(plan.missed.length >= 1, "13 × 400 is more than the table's carats");
+  plan.steps.forEach((s) => {
+    const it = v.byKey.get(s.key);
+    assert.ok(s.left >= -1e-6);
+    if (it.locked) {
+      assert.equal(s.pulls, 400);
+      assert.equal(s.free, Math.min(400, it.free));
+      assert.equal(s.carats, (400 - s.free) * 150);
+      const c = v.committed.get(s.key);
+      if (!it.blind && (gains.get(s.key) || 0) === 0) assert.ok(c.spark.every((id) => id === it.target), "nothing helps: your target gets the sparks");
+    }
+  });
+  const blind = mine.filter((it) => it.blind);
+  assert.ok(blind.length >= 2 && blind.every((it) => it.date >= "2028-10-01"), "the banners with no Euophrys data yet");
 });

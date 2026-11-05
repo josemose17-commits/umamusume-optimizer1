@@ -37,6 +37,22 @@ test("banners: anniversaries on Global's calendar, in JP's order, every half yea
   assert.ok(half && !half.est && half.start.slice(0, 4) === "2026", "Global's 1.5 Anniversary is announced, in 2026");
 });
 
+test("banners: the scenarios ahead in order, and the story events' free SSRs", () => {
+  assert.ok(B.scenarios.length >= 6);
+  B.scenarios.forEach((s, i) => {
+    assert.match(s.start, /^\d{4}-\d{2}-\d{2}$/);
+    if (i) assert.ok(s.id === B.scenarios[i - 1].id + 1 && s.start > B.scenarios[i - 1].start, "one after another");
+  });
+  // Grand Masters (GameTora's scenario 5) opens with JP's 2nd Anniversary on Global's calendar.
+  const gm = B.scenarios.find((s) => s.id === 5), second = B.events.find((e) => e.name === "2nd Anniversary");
+  assert.ok(gm && second && Math.abs(Date.parse(gm.start) - Date.parse(second.start)) <= 3 * 864e5);
+  assert.ok(B.storyEvents.length >= 10);
+  B.storyEvents.forEach((e) => {
+    assert.ok(e.cards.length > 0);
+    e.cards.forEach((id) => { const c = D.card(id); assert.ok(c && c.r === 3 && c.src === "story_event", id + " is an event SSR"); });
+  });
+});
+
 test("affinity: future characters take JP's groups; Global families keep Global's", () => {
   const cid = (n) => D.DATA.trainees.find((t) => t.n === n).cid;
   assert.ok(PD.affinityJp.length > 0);

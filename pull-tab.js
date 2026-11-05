@@ -1,17 +1,36 @@
-// The Pull planner tab: your carats and future teams, and the route through the banners ahead
-// by your rules: 200 or 400 pulls on a banner, the free and $20.99 selectors, and only cards
-// that make your decks clearly stronger in more than one cup. pull-values.js builds your decks
-// and values every banner and selector pick; pull-planner.js finds the route. Keeps state.pull.
+// The Pull planner tab: your plan (the banners you'll pull 400 on, with your carat estimates),
+// your teams, and the route through the banners ahead: 200 or 400 pulls elsewhere, the free and
+// $20.99 selectors, and only cards that make your decks clearly stronger in more than one cup.
+// pull-values.js builds your decks (in each cup's scenario) and values every banner, trainee and
+// selector pick on one scale; pull-planner.js finds the route. Keeps state.pull.
 (function (root) {
   "use strict";
   const STYLES = [["Nige", "Front Runner"], ["Senkou", "Pace Chaser"], ["Sasi", "Late Surger"], ["Oikomi", "End Closer"]];
-  // The teams you gave (by track): Sprint & Mile Late Surgers; Medium & Long two End Closers and a
-  // Late Surger; Dirt Pace Chasers. Change them in the tab.
+  // The teams you gave (by track): two fixed umas each (Late Surgers for Sprint & Mile; End
+  // Closers for Medium & Long; Pace Chasers for Dirt) and a third that rotates through your umas.
   const DEFAULT_TEAMS = {
-    sm: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi" }],
-    ml: [{ id: 111501, style: "Oikomi" }, { id: 111901, style: "Oikomi" }, { id: 102501, style: "Sasi" }],
-    dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou" }],
+    sm: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { rotate: true }],
+    ml: [{ id: 111501, style: "Oikomi" }, { id: 111901, style: "Oikomi" }, { rotate: true }],
+    dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { rotate: true }],
   };
+  // Your plan as you gave it (another planner's table): the banners you'll pull 400 on no matter
+  // what, with that planner's carat estimate by each (if you spend none) and the pulls that come
+  // free on that banner (its Free/Tickets/Paid). Paste a newer table in the tab to replace it.
+  const DEFAULT_PLAN = [
+    ["Mejiro Ramonu", "2026-12-01", 186, 60040, "Mejiro Ramonu"],
+    ["Mei Satake + El Condor Pasa", "2027-04-07", 197, 92700, "El Condor Pasa"],
+    ["Ryoka Tsurugi + Orfevre", "2027-08-09", 237, 144920, "Orfevre"],
+    ["Yayoi Akikawa + Nishino Flower", "2027-11-01", 166, 164650, "Yayoi Akikawa"],
+    ["Still in Love", "2027-12-16", 162, 188780, "Still in Love"],
+    ["Daiwa Scarlet + Air Shakur", "2028-02-02", 138, 208790, "Daiwa Scarlet"],
+    ["Embodiment of Legends + Almond Eye", "2028-04-24", 201, 263850, "Almond Eye"],
+    ["Tucker Bryne + Tamamo Cross", "2028-07-16", 154, 284820, "Tamamo Cross"],
+    ["Stay Gold + Admire Groove", "2028-08-29", 140, 311330, "Stay Gold"],
+    ["Kiyoko Hoshina + Tokai Teio", "2028-10-15", 103, 300350, "Tokai Teio"],
+    ["Casino Drive + Forever Young", "2029-01-10", 164, 367890, "Forever Young"],
+    ["Tazuna Hayakawa + Meisho Doto", "2029-04-07", 107, 373900, "Tazuna Hayakawa"],
+    ["Mr. C.B. + Efforia", "2029-05-18", 127, 399970, "Mr. C.B."],
+  ].map(([names, start, free, carats, target]) => ({ names: names.split(" + "), start, free, carats, target, pulls: 400 }));
   const RARITY = ["", "R", "SR", "SSR"];
   const num = (x) => (x == null || x === "" || isNaN(+x) ? 0 : Math.max(0, +x));
   const fmtN = (x) => Math.round(x).toLocaleString("en-US");
@@ -28,16 +47,28 @@
       const s = ctx.state();
       if (!s.pull) s.pull = {};
       const p = s.pull;
-      const def = { carats: "", perMonth: "", sTickets: "", tTickets: "", months: "18", minCups: "2", minPct: "10", parents: true, selFree: true, selPaid: true, selUma: true };
+      const def = { carats: "", perMonth: "", sTickets: "", tTickets: "", months: "all", minCups: "2", minPct: "10", fade: "20", usePlan: true, selFree: true, selPaid: true, selUma: true };
       Object.keys(def).forEach((k) => { if (p[k] == null) p[k] = def[k]; });
       delete p.luck;
+      delete p.parents;
       if (!p.teams) p.teams = JSON.parse(JSON.stringify(DEFAULT_TEAMS));
+      // Once: each team's third uma rotates (you keep two fixed and use your other umas there).
+      if (!p.teamsV) { Object.keys(p.teams).forEach((g) => { if (p.teams[g]) p.teams[g][2] = { rotate: true }; }); p.teamsV = 2; p.months = "all"; }
+      if (!p.plan) p.plan = JSON.parse(JSON.stringify(DEFAULT_PLAN));
       return p;
     }
-    const until = (p) => { const d = new Date(Date.parse(ctx.today) + (+p.months || 18) * 30.4375 * 864e5); return d.toISOString().slice(0, 10); };
+    // The last cup in the forecast (mid-2029): planning to it counts every cup a card will see.
+    const lastCup = () => P.list.filter((x) => x.global && x.global.start > ctx.today).map((x) => x.global.start).sort().pop() || ctx.today;
+    const until = (p) => {
+      if (p.months === "all") return lastCup();
+      const d = new Date(Date.parse(ctx.today) + (+p.months || 18) * 30.4375 * 864e5);
+      return d.toISOString().slice(0, 10);
+    };
+    // Your plan matched to the calendar.
+    const planned = (p) => (p.usePlan && p.plan && p.plan.length ? PV.matchPlan(p.plan, B, D) : []);
     // What the decks rest on (a re-plan with the same keeps them), and everything the route does.
-    const deckKey = (p) => JSON.stringify([ctx.today, until(p), p.teams, ctx.ownedCode(), ctx.settingsKey()]);
-    const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.minCups, p.minPct, p.parents, p.selFree, p.selPaid, p.selUma, [...ctx.myUmas()].sort()]);
+    const deckKey = (p) => JSON.stringify([ctx.today, until(p), p.teams, ctx.ownedCode(), ctx.settingsKey(), [...ctx.myUmas()].sort()]);
+    const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma]);
     const relT = (B && B.release && B.release.trainees) || {};
     const traineeOutDate = (t) => t.en || relT[t.id] || null;
     const cardName = (id) => { const c = D.card(id); return c ? c.n + " (" + RARITY[c.r] + " " + c.ty + ")" : "#" + id; };
@@ -49,6 +80,56 @@
 
     // ---------- the run ----------
     const tick = () => new Promise((r) => setTimeout(r, 0));
+    const total = (gains) => [...gains.values()].reduce((a, x) => a + (x || 0), 0);
+    // Decks, scoring and the route for one set of locks (o: { locked, budget, reuse, label }).
+    async function build(p, o) {
+      const end = until(p), label = o.label || "";
+      const v = PV.create({
+        D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(),
+        minCups: +p.minCups || 2, minPct: (+p.minPct || 10) / 100, fade: (+p.fade || 0) / 100, locked: o.locked, freePulls: o.freePulls,
+        selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma },
+        reuse: o.reuse, deckOpts: ctx.deckOpts, whites: ctx.whites, skillL: ctx.skillL,
+      });
+      const n = v.pairs.length;
+      for (let i = 0; i < n; i++) {
+        const pair = v.pairs[i];
+        job = { stage: label + "Your decks now: " + pair.trainee.n + " for " + pair.cup.name + " (" + (i + 1) + " of " + n + ")", f: 0.5 * i / n };
+        ctx.rerender();
+        await tick();
+        v.buildPair(pair);
+      }
+      job = { stage: label + "Shortlisting the selector picks…", f: 0.5 };
+      ctx.rerender();
+      await tick();
+      v.addSelectors();
+      for (let i = 0; i < n; i++) {
+        const pair = v.pairs[i];
+        job = { stage: label + "Trying the banner cards in " + pair.trainee.n + "'s deck for " + pair.cup.name + " (" + (i + 1) + " of " + n + ")", f: 0.5 + 0.2 * i / n };
+        ctx.rerender();
+        await tick();
+        v.scorePair(pair);
+      }
+      // Every banner on one scale, before the route.
+      const solo = v.standalone();
+      // The route: the step-by-step pass, then (when a pull came after a selector pick) the same
+      // pulls in date order with the selector picks on top (pull-values.js route()).
+      const rt = v.route(PP, {
+        today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth), budget: o.budget || undefined,
+        tickets: { support: num(p.sTickets), trainee: num(p.tTickets) },
+        pullCarats: B.meta.pullCarats, spark: B.meta.spark,
+      });
+      for (;;) {
+        const pass = rt.pass(), m = rt.moves();
+        job = pass === 1 ? { stage: label + "Choosing the route (" + m + " picks so far)…", f: 0.7 + 0.2 * (1 - Math.exp(-m / 8)) }
+          : pass === 2 ? { stage: label + "Checking the pulls in date order…", f: 0.9 }
+          : { stage: label + "Choosing the selector picks on top of the pulls…", f: 0.95 };
+        ctx.rerender();
+        await tick();
+        if (!rt.step()) break;
+      }
+      const out = rt.result();
+      return { v, end, solo, plan: out.plan, gains: out.gains, runners: out.runners };
+    }
     async function run() {
       const p = S();
       if (job) return;
@@ -57,59 +138,57 @@
       try {
         for (let i = 0; !ctx.euReady(); i++) { if (i > 600) throw new Error("The card data didn't load. Check your connection."); await new Promise((r) => setTimeout(r, 100)); }
         const end = until(p), dk = deckKey(p);
-        const teams = JSON.parse(JSON.stringify(p.teams));
         const cupIds = P.list.filter((x) => x.global.start > ctx.today && x.global.start <= end && PV.groupOf(x)).map((x) => x.id);
         job.stage = "Loading each cup's skill values…"; ctx.rerender();
         await ctx.ensureSkills(cupIds);
-        const v = PV.create({
-          D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams, owned: ctx.owned(), umas: ctx.myUmas(),
-          minCups: +p.minCups || 2, minPct: (+p.minPct || 10) / 100, parents: !!p.parents,
-          selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma },
-          reuse: result && result.deckKey === dk ? result.v : null,
-          deckOpts: ctx.deckOpts, whites: ctx.whites, skillL: ctx.skillL,
-        });
-        const n = v.pairs.length;
-        for (let i = 0; i < n; i++) {
-          const pair = v.pairs[i];
-          job = { stage: "Your decks now: " + pair.trainee.n + " for " + pair.cup.name + " (" + (i + 1) + " of " + n + ")", f: 0.5 * i / n };
-          ctx.rerender();
-          await tick();
-          v.buildPair(pair);
-        }
-        job = { stage: "Shortlisting the selector picks…", f: 0.5 };
-        ctx.rerender();
-        await tick();
-        v.addSelectors();
-        for (let i = 0; i < n; i++) {
-          const pair = v.pairs[i];
-          job = { stage: "Trying the banner cards in " + pair.trainee.n + "'s deck for " + pair.cup.name + " (" + (i + 1) + " of " + n + ")", f: 0.5 + 0.2 * i / n };
-          ctx.rerender();
-          await tick();
-          v.scorePair(pair);
-        }
-        // The route: the step-by-step pass, then the same pulls in date order with the selector
-        // picks on top (pull-values.js route()).
-        const rt = v.route(PP, {
-          today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth),
-          tickets: { support: num(p.sTickets), trainee: num(p.tTickets) },
-          pullCarats: B.meta.pullCarats, spark: B.meta.spark,
-        });
-        for (;;) {
-          const pass = rt.pass(), m = rt.moves();
-          job = pass === 1 ? { stage: "Choosing the pulls (" + m + " picks so far)…", f: 0.7 + 0.2 * (1 - Math.exp(-m / 8)) }
-            : pass === 2 ? { stage: "Checking the pulls in date order…", f: 0.9 }
-            : { stage: "Choosing the selector picks on top of the pulls…", f: 0.95 };
-          ctx.rerender();
-          await tick();
-          if (!rt.step()) break;
-        }
-        const out = rt.result();
-        result = { key: inputsKey(p), deckKey: dk, until: end, v, plan: out.plan, gains: out.gains, runners: out.runners, at: ctx.today };
+        // Your plan: its banners locked at 400 (with their free pulls and your target), and its
+        // carat estimates as the carats you'll have by each date.
+        const mine = planned(p);
+        const locked = new Map(mine.filter((x) => x.banner).map((x) => [x.banner.id, { level: 2, free: x.free || 0, target: x.targetId }]));
+        const budget = mine.length ? PV.budgetFrom(mine, ctx.today, p.carats) : null;
+        const freePulls = new Map(mine.filter((x) => x.banner).map((x) => [x.banner.id, x.free || 0]));
+        const r = await build(p, { locked, budget, freePulls, reuse: result && result.deckKey === dk ? result.v : null });
+        result = { key: inputsKey(p), deckKey: dk, until: r.end, v: r.v, plan: r.plan, gains: r.gains, runners: r.runners, at: ctx.today, solo: r.solo, mine, budget, freePulls, total: total(r.gains), alt: null };
       } catch (err) {
         ctx.flash(err.message || String(err));
       }
       job = null;
       ctx.rerender();
+    }
+    // The check: the planner's own best route with the same carats and none of your locks, on the
+    // same decks, so your plan can be weighed against it.
+    async function check() {
+      const p = S();
+      if (job || !result) return;
+      job = { stage: "The planner's own route…", f: 0 };
+      ctx.rerender();
+      try {
+        // The banners of your plan the model can't value (no Euophrys data) stay as you planned.
+        const keep = new Map(result.v.items.filter((it) => it.locked && it.blind).map((it) => [it.banner.id, { level: it.required === true ? 1 : it.required, free: it.free || 0, target: it.target }]));
+        const r = await build(p, { locked: keep, budget: result.budget, freePulls: result.freePulls, reuse: result.v, label: "The planner's own route: " });
+        result.alt = { v: r.v, plan: r.plan, gains: r.gains, total: total(r.gains) };
+      } catch (err) {
+        ctx.flash(err.message || String(err));
+      }
+      job = null;
+      ctx.rerender();
+    }
+    // Your plan against the planner's own route: total points, and the banners that differ.
+    function checkHTML() {
+      if (!result || !result.v.items.some((it) => it.locked)) return "";
+      if (!result.alt) {
+        return `<div class="row-wrap"><button type="button" class="btn ghost small" id="pullCheck" ${job ? "disabled" : ""}>Check my plan against the planner's own route</button>
+          <span class="mini">Plans the same carats with none of your banners locked (a minute or so) and compares.</span></div>`;
+      }
+      const a = result.alt, mineKeys = new Set(result.v.items.filter((it) => it.locked).map((it) => it.key));
+      const pulls = (plan, v) => plan.steps.map((s) => ({ s, it: v.byKey.get(s.key) })).filter((x) => x.it.kind !== "selector");
+      const theirs = pulls(a.plan, a.v), ours = pulls(result.plan, result.v);
+      const name = (it) => it.banner.pick.map(([id]) => (it.kind === "support" ? cardShort(id) : (D.trainee(id) || {}).n)).join(" + ");
+      const added = theirs.filter((x) => !mineKeys.has(x.it.key)), dropped = ours.filter((x) => !a.plan.chosen.get(x.it.key));
+      const blind = result.v.items.filter((it) => it.locked && it.blind).length;
+      return `<div class="pull-check"><p class="mini"><b>Your plan adds +${fmtN(result.total)} points</b> (selector picks included); <b>the planner's own route adds +${fmtN(a.total)}</b> with the same carats and free pulls${blind ? `, keeping the ${blind} banner${blind === 1 ? "" : "s"} of your plan it can't value (no Euophrys data yet) as you planned` : ""}. ${a.total > result.total * 1.02 ? "By the model, these changes would make your decks stronger:" : "By the model, your plan is about as strong as the planner's own route."}</p>
+        ${added.length ? `<ul class="mini">${added.map((x) => `<li>It pulls ${x.s.pulls} on <b>${esc(name(x.it))}</b> (${esc(when(x.it.banner))}), +${fmtN(a.gains.get(x.it.key) || 0)}</li>`).join("")}</ul>` : ""}
+        ${dropped.length ? `<p class="mini">It skips from your plan: ${dropped.map((x) => esc(name(x.it)) + " (" + esc(when(x.it.banner)) + ", +" + fmtN(result.gains.get(x.it.key) || 0) + " in your route)").join("; ")}.</p>` : ""}</div>`;
     }
 
     // ---------- the page ----------
@@ -123,27 +202,53 @@
           ${f("sTickets", "Support tickets", "0")}
           ${f("tTickets", "Trainee tickets", "0")}
         </div>
-        <p class="mini">${B ? `Global's rules: ${B.meta.pullCarats} carats a pull, so 200 pulls (one spark) are ${fmtN(200 * B.meta.pullCarats)} carats and 400 (two sparks) ${fmtN(400 * B.meta.pullCarats)}; spark points don't carry over to the next banner. ` : ""}The $20.99 selector packs add 1,500 carats each when you buy them (counted on their dates). Free income has no fixed figure, so type yours. Tickets pay for pulls on their kind of banner first.</p>
+        <p class="mini">${B ? `Global's rules: ${B.meta.pullCarats} carats a pull, so 200 pulls (one spark) are ${fmtN(200 * B.meta.pullCarats)} carats and 400 (two sparks) ${fmtN(400 * B.meta.pullCarats)}; spark points don't carry over to the next banner. ` : ""}${p.usePlan && p.plan && p.plan.length
+          ? `<b>Your plan's carat estimates are the budget</b> (below): carats per month and the $20.99 packs' carats aren't added on top. Carats now (if you type them) set where the estimate starts today.`
+          : `The $20.99 selector packs add 1,500 carats each when you buy them (counted on their dates). Free income has no fixed figure, so type yours.`} Tickets pay for pulls on their kind of banner first.</p>
+      </section>`;
+    }
+    // Your plan: the banners you'll pull 400 on no matter what, from another planner's table.
+    function planHTML(p) {
+      const mine = p.plan && p.plan.length ? PV.matchPlan(p.plan, B, D) : [];
+      const rows = mine.map((x) => `<tr><td>${esc(x.names.join(" + "))}${x.target && x.names.length > 1 ? `<div class="mini">your target: ${esc(x.target)}</div>` : ""}</td>
+        <td>${esc(fmtDate(x.start))}${x.banner ? `<div class="mini">calendar: ${esc(when(x.banner))}</div>` : `<div class="mini warn">not on the calendar</div>`}</td>
+        <td class="num">400</td><td class="num">${fmtN(x.free || 0)}</td><td class="num">${x.carats != null ? fmtN(x.carats) : "—"}</td></tr>`).join("");
+      return `<section class="panel">
+        <h3>Your plan</h3>
+        <label class="chip-toggle"><input type="checkbox" data-pull="usePlan" ${p.usePlan ? "checked" : ""}> Pull 400 on these no matter what, and use their carat estimates as my budget</label>
+        ${mine.length ? `<div class="table-wrap"><table><thead><tr><th>Banner</th><th>Starts</th><th class="num">Pulls</th><th class="num">Free on it</th><th class="num">Carats by then</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No plan yet: paste your planner's table below.</div>`}
+        <p class="mini">Carats by then: your planner's estimate of the carats you'll have by that banner if you spend none. Free on it: its Free/Tickets/Paid pulls, usable on that banner only (they're spent before carats). The route takes these banners first, in date order, and says which don't fit.</p>
+        <details><summary>Paste a newer table</summary>
+          <textarea id="pullPlanText" class="codebox" rows="6" placeholder="Paste your planner's table (each banner's Recommended:, Start:, Free/Tickets/Paid, Carat Est.)"></textarea>
+          <div class="row-wrap"><button type="button" class="btn small" id="pullPlanRead">Read my table</button><button type="button" class="btn ghost small" id="pullPlanReset">Back to the plan you sent</button></div>
+        </details>
       </section>`;
     }
     function teamsHTML(p) {
       const row = (g, i) => {
         const m = (p.teams[g] || [])[i] || { id: null, style: "Senkou" };
+        const rotate = `<label class="chip-toggle"><input type="checkbox" data-pull-rotate="${g}" data-i="${i}" ${m.rotate ? "checked" : ""}> A fresh uma each cup</label>`;
+        if (m.rotate) {
+          return `<div class="row-wrap pull-team-row"><span class="field grow"><span>Uma ${i + 1}</span><b>Rotating</b></span>${rotate}
+            <span class="mini">Each cup, the uma of yours (My umas, in the Trainees tab) with A or better on its surface, distance and her best running style, a different one from the cup before when another fits.</span></div>`;
+        }
         const t = m.id ? D.trainee(m.id) : null;
         let status = "";
         if (t) {
           const out = traineeOutDate(t);
-          status = "Counted as yours" + (ctx.myUmas().has(t.id) ? "" : out && out <= ctx.today ? " (on Global)" : out ? " (out on Global ~" + fmtDate(out) + ")" : " (not on Global yet)");
+          status = "Fixed, counted as yours" + (ctx.myUmas().has(t.id) ? "" : out && out <= ctx.today ? " (on Global)" : out ? " (out on Global ~" + fmtDate(out) + ")" : " (not on Global yet)");
         }
         return `<div class="row-wrap pull-team-row">
           <label class="field grow"><span>Uma ${i + 1}</span><input list="pullTrainees" data-pull-team="${g}" data-i="${i}" value="${esc(t ? tLabel(t) : "")}" placeholder="Name [version]" autocomplete="off"></label>
           <label class="field"><span>Style</span><select data-pull-style="${g}" data-i="${i}">${STYLES.map(([k, l]) => `<option value="${k}" ${m.style === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-          <span class="mini">${esc(status)}</span>
+          ${rotate}<span class="mini">${esc(status)}</span>
         </div>`;
       };
+      const rotating = Object.keys(PV.GROUPS).some((g) => (p.teams[g] || []).some((m) => m && m.rotate));
       return `<section class="panel">
         <h3>Your future teams</h3>
-        <p class="mini">One team per kind of track: every cup ahead uses the team for its track. They count as yours already, so no carats go to them, and each one races every cup of her track in the window.</p>
+        <p class="mini">One team per kind of track: every cup ahead uses the team for its track. The fixed umas count as yours already, so no carats go to them, and each one races every cup of her track in the window.</p>
+        ${rotating && !ctx.myUmas().size ? `<p class="mini warn">Tick the umas you own in the Trainees tab (My umas) so the rotating slot has umas to pick from; until then it sits out.</p>` : ""}
         ${Object.keys(PV.GROUPS).map((g) => `<div class="pull-team"><h4>${esc(PV.GROUPS[g].label)}</h4>${[0, 1, 2].map((i) => row(g, i)).join("")}</div>`).join("")}
         <datalist id="pullTrainees">${D.DATA.trainees.slice().sort((a, b) => tLabel(a).localeCompare(tLabel(b))).map((t) => `<option value="${esc(tLabel(t))}"></option>`).join("")}</datalist>
       </section>`;
@@ -156,7 +261,8 @@
       return `<section class="panel">
         <h3>Plan my pulls</h3>
         <div class="row-wrap">
-          <label class="field"><span>Plan ahead</span>${sel("months", [["12", "12 months"], ["18", "18 months"], ["24", "24 months"]])}</label>
+          <label class="field"><span>Plan ahead</span>${sel("months", [["all", "To mid-2029 (every forecast cup)"], ["12", "12 months"], ["18", "18 months"], ["24", "24 months"]])}</label>
+          <label class="field"><span>Far-off cups count less: a year ahead loses</span>${sel("fade", [["0", "nothing"], ["10", "10%"], ["20", "20%"], ["30", "30%"]])}</label>
           <label class="field"><span>Clearly stronger: beats the card it replaces by</span>${sel("minPct", [["5", "5% or more"], ["10", "10% or more"], ["15", "15% or more"], ["20", "20% or more"], ["30", "30% or more"]])}</label>
           <label class="field"><span>Not a one-time use: in at least</span>${sel("minCups", [["1", "1 cup"], ["2", "2 cups"], ["3", "3 cups"], ["4", "4 cups"], ["5", "5 cups"]])}</label>
         </div>
@@ -164,14 +270,13 @@
           ${box("selFree", "Free support selector")}
           ${box("selPaid", "$20.99 support selector")}
           ${box("selUma", "$20.99 Uma selector")}
-          ${box("parents", "Count trainees as parents")}
           <button type="button" class="btn" id="pullRun" ${job ? "disabled" : ""}>${job ? "Planning…" : result ? "Plan again" : "Plan my pulls"}</button>
         </div>
         ${job ? `<div class="row-wrap"><span class="progress"><i style="width:${Math.round(job.f * 100)}%"></i></span><span class="mini">${esc(job.stage)}</span></div>` : ""}
         ${owned < 6 ? `<p class="mini warn">Mark the support cards you own (and their limit breaks) under <b>My cards</b> in the Support cards tab: your decks are built from them.</p>` : ""}
-        ${!num(p.carats) && !num(p.perMonth) ? `<p class="mini warn">Type your carats and monthly income above so there's something to plan with.</p>` : ""}
+        ${!num(p.carats) && !num(p.perMonth) && !(p.usePlan && p.plan && p.plan.length) ? `<p class="mini warn">Type your carats and monthly income above (or use your plan) so there's something to plan with.</p>` : ""}
         ${stale ? `<p class="mini warn">Your inputs changed since this route was made. Plan again to update it.</p>` : ""}
-        <p class="mini">A run takes about half a minute: it builds every team uma's deck for every cup ahead (${esc(ctx.settingsText())}) and tries every banner card in them. Planning again with the same cards, teams and window keeps the decks, so it's quicker.</p>
+        <p class="mini">A run to mid-2029 takes a minute or two: it builds every team uma's deck for every cup ahead in the scenario Global trains in then (${esc(ctx.settingsText())}) and tries every banner card in them. Planning again with the same cards, teams and window keeps the decks, so it's quicker.</p>
       </section>`;
     }
 
@@ -217,11 +322,13 @@
         return `<tr><td>${esc(est(e) + fmtDate(e.start))}</td><td>${esc(e.name)}: ${esc(s0.label)}</td><td class="num">${s0.price ? "$" + s0.price.toFixed(2) + `<div class="mini">+${fmtN(s0.carats)} carats</div>` : "free"}</td>
           <td>Pick ${got}${altText}</td><td>${decks}</td>${left}<td class="num">+${fmtN(adds)}</td></tr>`;
       }
-      const pulls = `${fmtN(s.pulls)} pulls<div class="mini">${fmtN(s.carats)} carats${s.tickets ? " + " + fmtN(s.tickets) + " tickets" : ""}</div>`;
+      const pulls = `${fmtN(s.pulls)} pulls<div class="mini">${fmtN(s.carats)} carats${s.free ? " + " + fmtN(s.free) + " free on the banner" : ""}${s.tickets ? " + " + fmtN(s.tickets) + " tickets" : ""}</div>`;
       const featured = it.banner.pick.map(([id]) => (it.kind === "support" ? cardName(id) : umaName(id)));
-      const what = `${it.kind === "support" ? "Support banner" : "Trainee banner"}<div class="mini">${esc(featured.join(", "))}</div>`;
+      const what = `${it.locked ? `<span class="pill">your plan</span> ` : ""}${it.kind === "support" ? "Support banner" : "Trainee banner"}<div class="mini">${esc(featured.join(", "))}</div>`;
       let got = "";
-      if (it.kind === "support") {
+      if (it.blind) {
+        got = `<span class="mini">Euophrys has no data for these cards yet, so they can't be scored; the carats are set aside for your plan. The daily data update picks them up once Euophrys adds them.</span>`;
+      } else if (it.kind === "support") {
         // The target: the card the sparks go to. Side copies: what the pulls bring of the others.
         const spark = c.spark || [];
         const targets = [], sides = [];
@@ -233,7 +340,10 @@
           if (onIt) targets.push(`<div>${head}${onIt === 2 ? ` <span class="mini">(both sparks)</span>` : ""}<div class="mini">${spreadText(dist, have, have + onIt)}</div></div>`);
           else sides.push(`<div>${head} <span class="mini">likely; ${spreadText(dist, have, have)}</span></div>`);
         });
-        got = `<div class="mini">Spark for (likely result):</div>${targets.join("")}${sides.length ? `<div class="mini">Comes with the pulls, not a target:</div>${sides.join("")}` : ""}`;
+        // Your own target on a banner of your plan, when the sparks do more on another card.
+        const yours = it.locked && it.target && spark.indexOf(it.target) === -1
+          ? `<div class="mini">Your table targets ${esc(cardShort(it.target))}; the sparks add more on ${esc([...new Set(spark)].map(cardShort).join(" and "))} with your decks (${esc(cardShort(it.target))} still comes with the pulls).</div>` : "";
+        got = `<div class="mini">Spark for (likely result):</div>${targets.join("")}${yours}${sides.length ? `<div class="mini">Comes with the pulls, not a target:</div>${sides.join("")}` : ""}`;
       } else {
         const spark = c.spark || [];
         const also = [...(c.got || [])].filter((id) => spark.indexOf(id) === -1);
@@ -249,14 +359,32 @@
       // The $20.99 packs are bought for their carats too, picked from or not.
       const packs = v.selectors.filter((x) => x.price), dollars = packs.reduce((a, x) => a + x.price, 0);
       const bonus = v.bonus.reduce((a, b) => a + b.carats, 0);
-      const have = PP.caratsBy({ today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth) }, result.until) + bonus;
+      const last = steps.length ? steps[steps.length - 1] : null;
+      const lastDate = last ? v.byKey.get(last.key).date : result.until;
+      const have = result.budget ? result.budget(lastDate) : PP.caratsBy({ today: ctx.today, carats: num(p.carats), perMonth: num(p.perMonth) }, result.until) + bonus;
       const seen = new Map();
       const rows = steps.map((s) => stepRow(s, seen)).join("");
+      const lockedN = v.items.filter((it) => it.locked).length;
+      // Banners of your plan that don't fit: what they need, and what's left of your carats then.
+      const missed = plan.missed.map((key) => v.byKey.get(key)).filter(Boolean).map((it) => {
+        const need = Math.max(0, it.pullsAt(it.required === true ? 1 : it.required) - (it.free || 0)) * B.meta.pullCarats;
+        const before = steps.filter((s) => v.byKey.get(s.key).date <= it.date).reduce((a, s) => a + s.carats, 0);
+        const left = (result.budget ? result.budget(it.date) : have) - before;
+        return `<li><b>${esc(it.banner.pick.map(([id]) => cardShort(id)).join(" + "))}</b> (${esc(when(it.banner))}): 400 pulls need ${fmtN(need)} carats after its free pulls; ${left >= need
+          ? `you'd have ${fmtN(left)} then, but taking it would leave too few for a later banner of your plan`
+          : `you'd have about ${fmtN(Math.max(0, left))} then, ${fmtN(need - Math.max(0, left))} short`}.</li>`;
+      }).join("");
+      const intro = result.budget
+        ? `Budget: your plan's carat estimates (about ${fmtN(have)} by ${esc(fmtDate(lastDate))} if you spent none). This route spends ${fmtN(spent)} carats: your plan's ${lockedN} banner${lockedN === 1 ? "" : "s"} at 400 first, in date order (each banner's free pulls before carats), then whatever else makes your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}).`
+        : `From ${fmtN(num(p.carats))} carats now and ${fmtN(num(p.perMonth))} a month${bonus ? `, plus ${fmtN(bonus)} from the $20.99 packs` : ""}, you'll have about ${fmtN(have)} by ${esc(fmtDate(result.until))}. This route spends ${fmtN(spent)} of them on the pulls that make your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}), in banner order so the carats are there at each one.`;
       return `<section class="panel pull-route">
         <h3>The route</h3>
-        <p class="mini">From ${fmtN(num(p.carats))} carats now and ${fmtN(num(p.perMonth))} a month${bonus ? `, plus ${fmtN(bonus)} from the $20.99 packs` : ""}, you'll have about ${fmtN(have)} by ${esc(fmtDate(result.until))}. This route spends ${fmtN(spent)} of them on the pulls that make your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}), in banner order so the carats are there at each one.${packs.length ? ` The ${packs.length} $20.99 pack${packs.length === 1 ? "" : "s"} in the window come to $${dollars.toFixed(2)}.` : ""}</p>
+        <p class="mini">${intro}${packs.length ? ` The ${packs.length} $20.99 pack${packs.length === 1 ? "" : "s"} in the window come to $${dollars.toFixed(2)}.` : ""}</p>
+        ${missed ? `<div class="mini warn"><b>Your plan doesn't all fit your carat estimates:</b><ul>${missed}</ul></div>` : ""}
         ${steps.length ? `<div class="table-wrap"><table><thead><tr><th>When</th><th>What</th><th class="num">Cost</th><th>You get</th><th>Clearly stronger in</th><th class="num">Carats left</th><th class="num">Adds</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="mini">Spark for: the card the route pulls for, at its likely limit break (the spark plus the median pulled copies), with the chances of every other result. Comes with the pulls: the other featured cards' likely copies; they aren't why the route pulls there, but they count where they're clearly stronger. Next best here: the other picks on that selector and their points. Adds: the expected points to your decks over every cup after the banner, counting only the clearly stronger ones (the deck score's units; 60 = 1 L of race skills).</p>` : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`}
+        ${checkHTML()}
+        ${compareHTML()}
         ${selectorsHTML()}
         ${closeHTML(p)}
         ${v.unscorable.length ? `<p class="mini">${v.unscorable.length} featured card${v.unscorable.length === 1 ? "" : "s"} in this window can't be scored yet (Euophrys' data doesn't have ${v.unscorable.length === 1 ? "it" : "them"}), so ${v.unscorable.length === 1 ? "it isn't" : "they aren't"} planned.</p>` : ""}
@@ -298,6 +426,29 @@
         + (out.length ? `<details><summary>Left out by your rules (${Math.min(8, out.length)} of ${out.length})</summary><ul class="mini">${out.slice(0, 8).map(li).join("")}</ul></details>` : "");
     }
 
+    // Every banner on one scale: support cards for your decks and trainees as Parent 1, each on its
+    // own against your decks now, in the same points (is this parent stronger than that support?).
+    function compareHTML() {
+      const list = (result.solo || []).filter((x) => !x.blind);
+      if (!list.length) return "";
+      const best = (x) => Math.max(x.v1, x.v2);
+      const name = (x) => x.item.banner.pick.map(([id]) => (x.kind === "support" ? cardShort(id) : (D.trainee(id) || {}).n || "#" + id)).join(" + ");
+      const top = list.slice().sort((a, b) => best(b) - best(a)).slice(0, 14);
+      list.filter((x) => x.locked && top.indexOf(x) === -1).forEach((x) => top.push(x));
+      const perK = (x) => { const a = x.v1 / 30, b = x.v2 / 60; return Math.max(a, b); };
+      const rows = top.sort((a, b) => (a.item.date < b.item.date ? -1 : 1)).map((x) => `<tr><td>${esc(when(x.item.banner))}</td>
+        <td>${x.locked ? `<span class="pill">your plan</span> ` : ""}${x.kind === "support" ? "Support" : "Trainee"}<div class="mini">${esc(name(x))}</div></td>
+        <td class="num">+${fmtN(x.v1)}</td><td class="num">${x.item.most > 1 ? "+" + fmtN(x.v2) : "—"}</td><td class="num">${fmtN(perK(x))}</td></tr>`).join("");
+      const trainee = list.filter((x) => x.kind === "trainee").sort((a, b) => best(b) - best(a))[0];
+      const weakMine = list.filter((x) => x.locked && x.kind === "support").sort((a, b) => best(a) - best(b))[0];
+      const verdict = trainee && weakMine
+        ? `The best trainee banner (${esc(name(trainee))}, ${esc(when(trainee.item.banner))}) adds +${fmtN(best(trainee))} as Parent 1; the weakest support banner of your plan (${esc(name(weakMine))}) adds +${fmtN(best(weakMine))} to your decks. ${best(trainee) > best(weakMine) ? "Here the trainee is stronger." : "Here the support card is stronger."}`
+        : "";
+      return `<details><summary>Every banner on one scale (supports vs trainees)</summary>
+        <p class="mini">Each banner on its own, against your decks now (before the route): what 200 and 400 pulls would add, support cards to your decks, trainees as Parent 1 for your fixed umas, in the same points. ${verdict} A parent adds a few skills and an aptitude at her inspirations; a support card is in every training run of the decks it joins, so supports usually come out far ahead.</p>
+        <div class="table-wrap"><table><thead><tr><th>When</th><th>Banner</th><th class="num">200 pulls</th><th class="num">400 pulls</th><th class="num">Per 1,000 carats</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+    }
+
     // ---- your decks now ----
     function decksHTML() {
       if (!result) return "";
@@ -316,15 +467,21 @@
         if (!ps.length) return "";
         const bySlot = new Map();
         ps.forEach((x) => { if (!bySlot.has(x.slot)) bySlot.set(x.slot, []); bySlot.get(x.slot).push(x); });
-        return `<h4>${esc(PV.GROUPS[g].label)}</h4>${[...bySlot.values()].map((list) => `<div class="pull-decks"><b>${esc(umaName(list[0].trainee.id))}</b> <span class="mini">${esc((STYLES.find(([k]) => k === list[0].member.style) || [0, ""])[1])}</span><ul class="mini">${list.map((x) => {
-          if (!x.base) return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}: ${esc(x.error || "no deck")}</li>`;
+        const styleName = (k) => (STYLES.find(([s]) => s === k) || [0, ""])[1];
+        const era = (x) => (x.era ? ` <span class="mini">(${esc(x.era.name)}${x.era.est ? ", estimated scoring" : ""})</span>` : "");
+        return `<h4>${esc(PV.GROUPS[g].label)}</h4>${[...bySlot.values()].map((list) => `<div class="pull-decks">${list[0].rotating
+          ? `<b>Rotating uma</b> <span class="mini">a fresh one of yours each cup</span>`
+          : `<b>${esc(umaName(list[0].trainee.id))}</b> <span class="mini">${esc(styleName(list[0].member.style))}</span>`}<ul class="mini">${list.map((x) => {
+          const who = x.rotating ? `<b>${esc(x.trainee.n)}</b> (${esc(styleName(x.member.style))}): ` : "";
+          if (!x.base) return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}${era(x)}: ${who}${esc(x.error || "no deck")}</li>`;
           const now = new Set(x.base.map((c) => c.id + ":" + c.lb)), after = x.deck.filter((c) => !now.has(c.id + ":" + c.lb));
           const m = side.get(x.key) || new Map(), extra = after.filter((c) => !c.borrowed && m.get(c.id) === true), picked = after.filter((c) => extra.indexOf(c) === -1);
-          return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}: ${x.base.map(cardLine).join(" · ")}${picked.length ? `<div>With the route: ${picked.map(cardLine).join(" · ")}</div>` : ""}${extra.length ? `<div>Also from those pulls (not targets): ${extra.map(cardLine).join(" · ")}</div>` : ""}</li>`;
+          return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}${era(x)}: ${who}${x.base.map(cardLine).join(" · ")}${picked.length ? `<div>With the route: ${picked.map(cardLine).join(" · ")}</div>` : ""}${extra.length ? `<div>Also from those pulls (not targets): ${extra.map(cardLine).join(" · ")}</div>` : ""}</li>`;
         }).join("")}</ul></div>`).join("")}`;
       }).join("");
+      const skipped = v.unrotated.length ? `<p class="mini warn">${v.unrotated.length} rotating slot${v.unrotated.length === 1 ? "" : "s"} sat out: no uma of yours has A or better on ${v.unrotated.length === 1 ? "that cup's" : "those cups'"} surface, distance and a running style (tick more umas in My umas).</p>` : "";
       return `<details class="panel"><summary><b>Your decks now</b> (every team uma, every cup ahead, from the cards you own)</summary>
-        <p class="mini">Each deck is built the way CM &amp; decks builds it, with a friend's card. These are the decks a banner card has to beat. "With the route" lists the cards the route's sparks and selector picks put in; "Also from those pulls" lists copies of other featured cards the pulls likely bring, which go in wherever they're any better (they aren't what the route pulls for).</p>${groups}</details>`;
+        <p class="mini">Each deck is built the way CM &amp; decks builds it, with a friend's card, in the scenario Global trains in by that cup, and with the story events' free SSRs from their dates. These are the decks a banner card has to beat. "With the route" lists the cards the route's sparks and selector picks put in; "Also from those pulls" lists copies of other featured cards the pulls likely bring, which go in wherever they're any better (they aren't what the route pulls for).</p>${skipped}${groups}</details>`;
     }
     function calendarHTML(p) {
       if (!B) return "";
@@ -347,11 +504,14 @@
     }
     function howHTML() {
       return `<details class="panel"><summary><b>How it decides</b></summary><div class="mini">
-        <p><b>Your decks now.</b> Your teams count as yours already. For every cup in the window and every uma of the team for its track, it builds her racing deck the way CM &amp; decks does: Euophrys' scoring plus that race's skill values for her style, from the cards you own, with a friend's card.</p>
+        <p><b>Your plan.</b> The banners in your plan are pulled 400 no matter what, first, in date order, each banner's free pulls spent before carats; your planner's carat estimates (what you'd have by each banner if you spent none) are the budget, straight lines between them. A banner that doesn't fit is listed, not forced. On those banners the sparks go where they add the most to your decks, else to the card your table targets.</p>
+        <p><b>Your decks now.</b> Your fixed team umas count as yours already. For every cup in the window and every uma of the team for its track, it builds her racing deck the way CM &amp; decks does: Euophrys' scoring plus that race's skill values for her style, from the cards you own (and the story events' free SSRs, at LB4 once their event is over), with a friend's card. A rotating slot takes, each cup, the uma of yours with A or better on its surface, distance and her best running style, a different one from the cup before.</p>
+        <p><b>Scenarios.</b> Each cup's decks are trained in the scenario Global is on by then (GameTora's forecast: ${(result ? result.v.eras : []).filter((e) => e.start).map((e) => esc(e.name) + " ~" + esc(fmtDate(e.start))).join(", ") || "Grand Masters from the 2nd Anniversary, then a new one every few months"}). Euophrys scores Grand Concert, Grand Masters and Design Your Island; for the others it has no preset, so they're estimated: the nearest preset's weights with the scenario's own friend (or group) SSR as its link card, at the bonus Euophrys gives Tucker Bryne in Design Your Island. That's what makes a scenario's friend card count, and only while its scenario lasts.</p>
+        <p><b>Longevity.</b> A card counts in every cup after its banner up to the last forecast cup (mid-2029), and a cup a year ahead counts less by your fade (forecast uncertainty and newer cards).</p>
         <p><b>Clearly stronger.</b> A banner card counts in a deck only when it beats the card it would replace (the "Which cards would improve it?" test, with the other five fixed) by your margin, at the limit break your copies reach. A card you'd otherwise borrow counts as yours, with the next-best friend's card. And only when that happens in enough different cups after its banner: a card you'd use once isn't one you pull for.</p>
         <p><b>200 or 400 pulls.</b> ${B ? B.meta.spark : 200} pulls give one spark (a featured card of your choice), so 200 pulls on an SSR's banner likely end at LB1 (the spark and one pulled copy), and 400 at LB4. A pull counts only when its likely result already clears your rules; its value is then the expected points over every result the pulls can give (with the sparks where they help most once you see the pulls), the other featured cards' copies included.</p>
         <p><b>Selectors.</b> At each anniversary (JP's campaigns, on Global's calendar: its 1.5 Anniversary was in July 2026), a free support selector and the $20.99 ones (support and Uma, each with 1,500 carats). The pool: the gacha SSRs (or 3★ umas) JP had about ${PV.POOL_LAG || 45} days before that anniversary. A pick is one copy, valued like a pulled one; it's taken before any carats are spent.</p>
-        <p><b>Parents.</b> With "Count trainees as parents" on, a trainee counts as Parent 1 for your team umas (yours to train; Parent 2 is a friend's rental): her sparks fire at their base chance × (1 + her affinity with the ace / 100) at the ace's two inspirations, carrying the ace's top 3 race whites and her inherited unique at 2★. Same rules: clearly better than your best Parent 1 (your teams included), in enough cups. Future characters' affinity comes from JP's table.</p>
+        <p><b>Parents and supports on one scale.</b> A trainee counts as Parent 1 for your fixed team umas (yours to train; Parent 2 is a friend's rental): her sparks fire at their base chance × (1 + her affinity with the ace / 100) at the ace's two inspirations, carrying the ace's top 3 race whites and her inherited unique at 2★, and a 2★ pink spark where the ace lacks an A on the race (like El Condor Pasa's dirt B) and she has it. Blue sparks are left out: any parent can carry them. It's all in the same points as a deck card, so a trainee banner and a support banner compete for the same carats; "Every banner on one scale" shows them side by side. Same rules: clearly better than your best Parent 1 (your teams included), in enough cups. Future characters' affinity comes from JP's table.</p>
         <p><b>The route.</b> Step by step, the move with the most points per carat that still leaves enough carats at every banner (free selector picks first, then the pulls), counting your income up to each banner's date, the packs' carats and tickets first. After each step the decks take the step's likely cards, so the next card has to beat those. Then a second pass: back to your decks now, the same pulls in date order, and the selector picks chosen again on top of them, so no pick goes to a card a pull already brings to LB4. It's a careful step-by-step plan, not a search of every possible route.</p>
         <p><b>Dates.</b> Banners Global has announced keep their own dates and rates. Later ones, the anniversaries and the cups are GameTora's forecast from Global's pace against JP, so they can shift; plan again as banners are announced.</p>
       </div></details>`;
@@ -360,14 +520,32 @@
       const p = S();
       if (!B || !PV || !PP) { body.innerHTML = `<div class="empty">The banner data didn't load. Refresh the page.</div>`; return; }
       body.innerHTML = `<div class="pulls">
-        <section class="panel"><h2>Pull planner</h2><p class="mini">Which banners to pull 200 or 400 on, and what to pick on each selector, so your future teams' decks get clearly stronger in as many cups as your carats allow. It builds your best decks for every cup ahead from the cards you own, then checks each banner card against them, on the banners Global has announced and GameTora's forecast of the rest.</p></section>
-        ${budgetHTML(p)}${teamsHTML(p)}${controlsHTML(p)}${routeHTML(p)}${decksHTML()}${calendarHTML(p)}${howHTML()}
+        <section class="panel"><h2>Pull planner</h2><p class="mini">Your plan's banners at 400, and the best use of everything else (other banners, selector picks), so your teams' decks get clearly stronger in as many cups as your carats allow, through mid-2029. It builds your decks for every cup ahead from the cards you own, in the scenario of the time, and puts every support card and trainee on one scale, on the banners Global has announced and GameTora's forecast of the rest.</p></section>
+        ${planHTML(p)}${budgetHTML(p)}${teamsHTML(p)}${controlsHTML(p)}${routeHTML(p)}${decksHTML()}${calendarHTML(p)}${howHTML()}
       </div>`;
     }
 
     // ---------- events ----------
     function click(e) {
       if (e.target.closest("#pullRun")) { run(); return true; }
+      if (e.target.closest("#pullCheck")) { check(); return true; }
+      if (e.target.closest("#pullPlanRead")) {
+        const box = document.getElementById("pullPlanText"), got = PV.parsePlan(box ? box.value : "");
+        if (!got.length) { ctx.flash("That doesn't look like a planner table: each banner needs Recommended: and Start: lines."); return true; }
+        const p = S();
+        p.plan = got.map((x) => ({ names: x.names, start: x.start, free: x.free || 0, carats: x.carats, target: x.target, pulls: 400 }));
+        ctx.save();
+        ctx.flash("Read " + got.length + " banner" + (got.length === 1 ? "" : "s") + " from your table");
+        ctx.rerender();
+        return true;
+      }
+      if (e.target.closest("#pullPlanReset")) {
+        const p = S();
+        p.plan = JSON.parse(JSON.stringify(DEFAULT_PLAN));
+        ctx.save();
+        ctx.rerender();
+        return true;
+      }
       return false;
     }
     function change(e) {
@@ -394,6 +572,14 @@
         const i = +t.dataset.i;
         list[i] = Object.assign({ id: null }, list[i] || {}, { style: t.value });
         ctx.save();
+        return true;
+      }
+      if (t.dataset.pullRotate) {
+        const list = p.teams[t.dataset.pullRotate] || (p.teams[t.dataset.pullRotate] = []);
+        const i = +t.dataset.i;
+        list[i] = t.checked ? { rotate: true } : { id: null, style: "Senkou" };
+        ctx.save();
+        ctx.rerender();
         return true;
       }
       return false;

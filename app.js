@@ -2803,9 +2803,11 @@
         wait();
       }),
       // Her racing deck there, as CM & decks builds it (its makeup, friend card and skill weight).
-      deckOpts: (p, style, traineeId) => {
-        const sv = skillMap(p.id, style);
-        return { scenario: euScen(), overrides: euOver(), trainee: traineeId, skills: sv.map, costs: sv.costs, skillWeight: c().skillW != null ? +c().skillW : 1, must: [], independent: false, itManual: c().itManual != null ? +c().itManual : 0.5, eventSuccessRate: c().eventSuccessRate != null ? +c().eventSuccessRate : 0.5, comp: Object.assign({}, c().comp || {}), borrow: c().borrow !== false };
+      // scen: the scenario Global trains in by that cup (pull-values.js); your Euophrys weight
+      // changes apply in the scenario they're for.
+      deckOpts: (p, style, traineeId, scen) => {
+        const sv = skillMap(p.id, style), s = scen || euScen();
+        return { scenario: s, overrides: s === euScen() ? euOver() : {}, trainee: traineeId, skills: sv.map, costs: sv.costs, skillWeight: c().skillW != null ? +c().skillW : 1, must: [], independent: false, itManual: c().itManual != null ? +c().itManual : 0.5, eventSuccessRate: c().eventSuccessRate != null ? +c().eventSuccessRate : 0.5, comp: Object.assign({}, c().comp || {}), borrow: c().borrow !== false };
       },
       // The ace's race whites (Parents tab's rules), out on Global by that cup.
       whites: (p, style) => {

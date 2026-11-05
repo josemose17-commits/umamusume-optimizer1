@@ -696,6 +696,8 @@ table.pred .over { color: var(--accent); }
 .pull-decks { margin: 6px 0; }
 .pull-decks ul { margin: 4px 0 0; padding-left: 18px; }
 .pull-decks li { margin: 2px 0; }
-.pulls > * { min-width: 0; }
+.pulls > *, .pulls .panel > * { min-width: 0; }
 .pull-route td details summary { white-space: nowrap; }
 .pull-route td { vertical-align: top; }
+.pull-check { border-left: 3px solid var(--accent); padding-left: 10px; }
+.pull-check ul { margin: 4px 0; padding-left: 18px; }
