@@ -74,8 +74,10 @@
   const needsOf = (cup, style) => [cup.course.surface === "Dirt" ? 1 : 0, DIST_IX[cup.course.dist], STYLE_IX[style]].filter((i) => i != null);
 
   // o: { D, T, A, B (data/banners.js), P (data/presets.js), today, until, teams: { sm|ml|dirt:
-  //      [{ id, style } or { rotate: true } (a fresh uma of yours each cup)] }, owned: { cardId: lb },
-  //      umas: Set of trainee ids you own, minCups (2), minPct (0.1), parents (true), fade (share
+  //      [{ id, style, rotate }] (rotate: a flex slot, a fresh uma of yours each cup; its id, if
+  //      any, is an uma you'll have) }, owned: { cardId: lb }, umas: Set of trainee ids you own,
+  //      yours: Map(trainee id → date) (umas your plan gets, from then), lockedPicks: Map(selector
+  //      id → trainee or card id) (selector picks you've decided), minCups (2), minPct (0.1), parents (true), fade (share
   //      of value lost a year ahead, 0), selectors: { free, paid, uma } (all true),
   //      locked: Map(banner id → { level, free, target }) (banners you'll pull no matter what, at
   //      that level, with that banner's free pulls and the card you'd spark when nothing else
@@ -130,15 +132,24 @@
     });
     const eraAt = (date) => { let e = eras.get(NOW_ERA); eraList.forEach((s) => { if (s.start <= date && eras.has(s.id)) e = eras.get(s.id); }); return e; };
 
-    // Your team umas count as yours from today, out on Global or not.
+    // Your umas and when each is yours: My umas now; o.yours (the umas your plan gets: a trainee
+    // banner of it, a selector pick) from then; and your team umas (a flex slot's named uma
+    // included) from when they're out on Global if nothing says sooner: you'll have them.
+    const relT = (B.release && B.release.trainees) || {};
+    const yours = new Map();
+    const setYours = (id, d) => { id = +id; if (!trainee(id)) return; d = !d || d < today ? today : d; if (!yours.has(id) || d < yours.get(id)) yours.set(id, d); };
+    [...(o.umas || [])].forEach((id) => setYours(id, today));
+    (o.yours || new Map()).forEach((d, id) => setYours(id, d));
     const team = new Set();
-    Object.values(o.teams || {}).forEach((list) => (list || []).forEach((m) => { if (m && m.id && !m.rotate && trainee(m.id)) team.add(+m.id); }));
-    const owned = [...(o.umas || [])].map(Number).filter((id) => trainee(id));
-    const umas = new Set(owned.concat([...team]));
+    Object.values(o.teams || {}).forEach((list) => (list || []).forEach((m) => { if (m && m.id && trainee(m.id)) team.add(+m.id); }));
+    team.forEach((id) => { if (!yours.has(id)) { const t = trainee(id); setYours(id, t.en || relT[id] || today); } });
+    const yoursBy = (id, date) => yours.has(+id) && yours.get(+id) < date;
+    const umas = new Set(yours.keys());
 
-    // A rotating slot: each cup, the uma of yours that fits it best (A or better on its surface,
+    // A flex slot: each cup, the uma of yours that fits it best (A or better on its surface,
     // distance and her best running style), a different one from the cup before when another
-    // fits as well. The team's fixed umas (and their characters) race already.
+    // fits as well. The umas racing that cup already (and their characters) are out. A fixed uma
+    // you won't have yet by a cup leaves her slot flex there.
     function fitFor(t, cup) {
       const surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
       let best = null;
@@ -146,14 +157,14 @@
       const s = RANK[t.apt[surf]] || 0, d = RANK[t.apt[dist]] || 0;
       return { style: best.st, good: s >= 7 && d >= 7 && best.g >= 7, score: Math.min(s, d, best.g) * 100 + s + d + best.g };
     }
-    const lastRotated = {}; // group → the uma rotated in last
-    const rotateFor = (cup, group, fixed) => {
-      const chars = new Set(fixed.map((t) => t.cid));
-      const list = owned.map((id) => trainee(id)).filter((t) => t && !chars.has(t.cid)).map((t) => Object.assign({ t }, fitFor(t, cup)))
-        .sort((a, b) => (b.good - a.good) || ((a.t.id === lastRotated[group]) - (b.t.id === lastRotated[group])) || (b.score - a.score) || (a.t.id - b.t.id));
+    const lastRotated = {}; // group:slot → the uma rotated in last
+    const rotateFor = (cup, key, used) => {
+      const list = [...yours.keys()].filter((id) => yoursBy(id, cup.global.start)).map((id) => trainee(id)).filter((t) => t && !used.has(t.cid))
+        .map((t) => Object.assign({ t }, fitFor(t, cup)))
+        .sort((a, b) => (b.good - a.good) || ((a.t.id === lastRotated[key]) - (b.t.id === lastRotated[key])) || (b.score - a.score) || (a.t.id - b.t.id));
       const pick = list[0];
       if (!pick || !pick.good) return null;
-      lastRotated[group] = pick.t.id;
+      lastRotated[key] = pick.t.id;
       return pick;
     };
 
@@ -162,16 +173,20 @@
       .sort((a, b) => (a.global.start < b.global.start ? -1 : 1));
     const pairs = [], unrotated = [];
     cups.forEach((cup) => {
-      const g = groupOf(cup), list = o.teams[g] || [], era = eraAt(cup.global.start);
-      const fixed = list.filter((m) => m && m.id && !m.rotate).map((m) => trainee(m.id)).filter(Boolean);
+      const g = groupOf(cup), list = o.teams[g] || [], date = cup.global.start, era = eraAt(date);
+      const fixedNow = (m) => m && m.id && !m.rotate && yoursBy(m.id, date);
+      const used = new Set(list.filter(fixedNow).map((m) => trainee(m.id).cid));
       list.forEach((m, slot) => {
-        let t = null, member = m, rotating = false;
-        if (m && m.rotate) {
-          const r = rotateFor(cup, g, fixed);
-          if (!r) { unrotated.push({ cup, slot }); return; }
-          t = r.t; member = { id: r.t.id, style: r.style, rotate: true }; rotating = true;
-        } else t = m && m.id ? trainee(m.id) : null;
-        if (t) pairs.push({ key: [cup.id, slot, t.id, member.style, era.key].join(":"), cup, date: cup.global.start, group: g, slot, member, trainee: t, rotating, era });
+        if (!m || (!m.id && !m.rotate)) return;
+        let t, member = m, rotating = false;
+        if (fixedNow(m)) t = trainee(m.id);
+        else {
+          const r = rotateFor(cup, g + ":" + slot, used);
+          if (!r) { unrotated.push({ cup, slot, waiting: !m.rotate ? +m.id : null }); return; }
+          t = r.t; member = { id: r.t.id, style: r.style, rotate: true, waiting: !m.rotate ? +m.id : null }; rotating = true;
+          used.add(t.cid);
+        }
+        pairs.push({ key: [cup.id, slot, t.id, member.style, era.key].join(":"), cup, date, group: g, slot, member, trainee: t, rotating, era });
       });
     });
 
@@ -184,7 +199,8 @@
     const lock = (it) => {
       if (freePulls.has(it.banner.id)) it.free = +freePulls.get(it.banner.id) || 0;
       const L = locked.get(it.banner.id);
-      if (L) { it.required = L.level || 2; it.free = +L.free || it.free || 0; it.locked = true; it.target = L.target || null; }
+      // Locked at that level exactly: the route doesn't take it further (your plan is fixed).
+      if (L) { it.required = L.level || 2; it.most = it.required; it.free = +L.free || it.free || 0; it.locked = true; it.target = L.target || null; }
       return it;
     };
     B.support.filter(later).forEach((b) => {
@@ -197,8 +213,11 @@
       if (feat.length || locked.has(b.id)) items.push(lock({ key: "s" + b.id, kind: "support", banner: b, date: dateOf(b), feat, most: 2, pullsAt: (k) => spark * k, blind: !feat.length }));
     });
     if (parentsOn) B.trainee.filter(later).forEach((b) => {
+      // Umas you'll have anyway (your team, your plan's) aren't what these pulls are worth; a
+      // locked banner of yours for one of them just sets its carats aside.
       const feat = b.pick.filter(([id]) => trainee(id) && !umas.has(id)).map(([id, rate]) => ({ id, rate }));
-      if (feat.length || locked.has(b.id)) items.push(lock({ key: "t" + b.id, kind: "trainee", banner: b, date: dateOf(b), feat, most: Math.max(1, Math.min(2, feat.length)), pullsAt: (k) => spark * k, blind: !feat.length }));
+      const mine = b.pick.map(([id]) => id).filter((id) => umas.has(id));
+      if (feat.length || locked.has(b.id)) items.push(lock({ key: "t" + b.id, kind: "trainee", banner: b, date: dateOf(b), feat, mine, most: Math.max(1, Math.min(2, feat.length)), pullsAt: (k) => spark * k, blind: !feat.length }));
     });
     const byKey = new Map(items.map((it) => [it.key, it]));
     // The story events' free SSRs, yours to LB4 by the end of their event.
@@ -553,7 +572,7 @@
       if (memo.has(mk)) return memo.get(mk);
       let best = 0;
       const see = (id) => { best = Math.max(best, parentValue(pair, trainee(id))); };
-      umas.forEach(see);
+      umas.forEach((id) => { if (yoursBy(id, pair.date)) see(id); });
       committed.forEach((x, key) => { if (key !== skipKey && x.got && byKey.get(key).date < pair.date) x.got.forEach(see); });
       memo.set(mk, best);
       return best;
@@ -658,6 +677,22 @@
             items.push(it);
             byKey.set(it.key, it);
           });
+      });
+      // Your own picks on a selector (o.lockedPicks: selector id → trainee or card id): taken
+      // first, like a locked banner.
+      (o.lockedPicks || new Map()).forEach((id, sid) => {
+        const s = selectors.find((x) => x.id === sid);
+        if (!s || !(s.kind === "trainee" ? trainee(id) : card(id))) return;
+        const pick = s.kind === "trainee" ? "trainee" : "support", key = "x" + s.id + ":" + id;
+        let it = byKey.get(key);
+        if (!it) {
+          it = { key, kind: "selector", pick, sel: s, id: +id, date: s.date, group: "x" + s.id, most: 1, pullsAt: () => 0 };
+          items.push(it);
+          byKey.set(key, it);
+          if (pick === "support") addCand(+id, s.date);
+        }
+        it.required = true;
+        it.locked = true;
       });
     }
     function prepare() {
@@ -893,41 +928,68 @@
       GROUPS, groupOf, cups, pairs, items, byKey, unscorable, selectors, bonus, minCups, minPct, team,
       buildPair, addSelectors, scorePair: (pair) => scorePair(pair), prepare, value, commit, committed, route, snapshot, reset,
       copiesBy, copiesAtPick, copiesDist, review, selectorFallback, alternatives, deckScore, parentValue, parentAffinity, bestParent,
-      standalone, eras: [...eras.values()], eraAt, freeCards, unrotated, weight,
+      standalone, eras: [...eras.values()], eraAt, freeCards, unrotated, weight, yours, yoursBy,
       poolFor, borrowFor, shortlist, binom, median,
     };
   }
 
   // ---- your own plan (another planner's table, pasted) ----
-  // Each banner block: "Recommended:A + B", "Start: 2026/12/1", "End: …", "Free/Tickets/Paid" then
-  // "120/30/36", "Carat Est." then "60,040", "Paid Carat Est." then a number, "Max Pulls" then
-  // its number and then # Pulls. → [{ names, start, end, free, carats, paid, max, pulls }].
+  // One row a banner, in the table's order, each with its "Start: 2026/12/1" line. Above it, the
+  // banner's own lines: its title, and "Recommended:A + B" for a support banner (a trainee
+  // banner names the uma instead; a step-up says "Step-Up"). Below it: "End: …",
+  // "Free/Tickets/Paid" then "120/30/36", "Carat Est." then "60,040", "Paid Carat Est.", and "Max
+  // Pulls" then its number and then the row's # Pulls ("Step #" for a step-up), then the odds
+  // ("Odds for X", or "X MLB + Y" for two at once: the card you're after).
+  // → [{ names, title, kind ("support" | "trainee" | "stepup"), start, end, free, carats, paid,
+  //      max, pulls, target }].
   function parsePlan(text) {
+    const lines = String(text || "").replace(/\r/g, "").split("\n").map((l) => l.trim());
+    const date = (s) => { const m = /(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(s || ""); return m ? m[1] + "-" + m[2].padStart(2, "0") + "-" + m[3].padStart(2, "0") : null; };
+    const num = (s) => (s == null || !/\d/.test(s) ? null : +String(s).replace(/[^\d.]/g, ""));
+    const odds = (s) => /%$/.test(s) || /^(None|[0-4]LB|MLB|[1-5]x)$/.test(s) || /^MLB & /.test(s) || /^Odds for /.test(s) || / MLB \+ /.test(s) || /^[\d.,]+$/.test(s);
+    const tableHead = (s) => /^(Type|Images|Banner|Start \/ End Date|Derived Stats|# Pulls|Reserved|% Chance)/.test(s);
+    const starts = [];
+    lines.forEach((l, i) => { if (/^Start:/.test(l)) starts.push(i); });
     const out = [];
-    const date = (m) => (m ? m[1] + "-" + String(m[2]).padStart(2, "0") + "-" + String(m[3]).padStart(2, "0") : null);
-    const num = (s) => (s == null ? null : +String(s).replace(/,/g, ""));
-    String(text || "").split(/Recommended:\s*/).slice(1).forEach((blk) => {
-      const names = blk.split(/\n/)[0].split("+").map((s) => s.trim()).filter(Boolean);
-      const start = date(blk.match(/Start:\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/)), end = date(blk.match(/End:\s*(\d{4})\/(\d{1,2})\/(\d{1,2})/));
-      const ftp = blk.match(/Free\/Tickets\/Paid\s*([\d,]+)\s*\/\s*([\d,]+)\s*\/\s*([\d,]+)/);
-      const carats = blk.match(/(?:^|\n)\s*Carat Est\.\s*([\d,]+)/), paid = blk.match(/Paid Carat Est\.\s*([\d,]+)/);
-      const max = blk.match(/Max Pulls\s*([\d,]+)\s*\n\s*([\d,]+)/);
-      // The card the odds are for ("Odds for X", or "X MLB + Y" for two at once): your target.
-      const odds = blk.match(/Odds for ([^\n]+)/) || blk.match(/\n\s*([^\n]+?) MLB \+/);
-      if (!names.length || !start) return;
-      out.push({ names, start, end, free: ftp ? num(ftp[1]) + num(ftp[2]) + num(ftp[3]) : 0, carats: carats ? num(carats[1]) : null,
-        paid: paid ? num(paid[1]) : null, max: max ? num(max[1]) : null, pulls: max ? num(max[2]) : null,
-        target: odds ? odds[1].trim() : names[0] });
+    starts.forEach((si, n) => {
+      const head = [];
+      for (let i = si - 1; i >= 0 && lines[i] && !odds(lines[i]) && !tableHead(lines[i]) && !/^Start:/.test(lines[i]); i--) head.unshift(lines[i]);
+      const body = lines.slice(si, n + 1 < starts.length ? starts[n + 1] : lines.length);
+      const after = (label, k) => { const i = body.indexOf(label); return i >= 0 ? body[i + (k || 1)] : null; };
+      const rec = head.find((l) => /^Recommended:/.test(l));
+      const stepUp = head.some((l) => /Step-Up/i.test(l)) || body.indexOf("Step #") !== -1;
+      let names, title = null;
+      if (rec) {
+        names = rec.replace(/^Recommended:\s*/, "").split("+").map((s) => s.trim()).filter(Boolean);
+        if (head.length > 2) title = head[0];
+      } else if (stepUp) {
+        names = head.length ? [head[0]] : [];
+        title = head.find((l) => /Step-Up/i.test(l)) || null;
+      } else {
+        names = head.length ? [head[head.length - 1]] : [];
+        if (head.length > 1 && head[0] !== names[0]) title = head[0];
+      }
+      const ftp = after("Free/Tickets/Paid"), parts = ftp ? ftp.split("/").map(num) : [];
+      const target = body.map((l) => /^Odds for (.+)$/.exec(l) || /^(.+?) MLB \+ /.exec(l)).find(Boolean);
+      if (!names.length) return;
+      out.push({
+        names, title, kind: stepUp ? "stepup" : rec ? "support" : "trainee", start: date(body[0]), end: date(body.find((l) => /^End:/.test(l))),
+        free: parts.reduce((a, x) => a + (x || 0), 0), carats: num(after("Carat Est.")), paid: num(after("Paid Carat Est.")),
+        max: num(after(stepUp ? "Max Steps" : "Max Pulls")), pulls: stepUp ? num(after("Step #")) : num(after("Max Pulls", 2)),
+        target: target ? target[1].trim() : names[0],
+      });
     });
     return out;
   }
-  // The banner of the calendar each entry is (its featured cards by name, the nearest start
-  // within three weeks): [{ ...entry, banner, kind }] (banner null when none matches).
+  // The banner of the calendar each entry is (its featured cards, or its uma, by name, the
+  // nearest start within three weeks): [{ ...entry, banner, kind, targetId }] (banner null when
+  // none matches; a step-up isn't on the calendar).
   function matchPlan(entries, B, D) {
     const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
     return entries.map((e) => {
       let best = null;
-      [["support", B.support, (id) => D.card(id)], ["trainee", B.trainee, (id) => D.trainee(id)]].forEach(([kind, list, get]) => list.forEach((b) => {
+      const kinds = e.kind === "stepup" ? [] : [["support", B.support, (id) => D.card(id)], ["trainee", B.trainee, (id) => D.trainee(id)]].filter(([k]) => !e.kind || e.kind === k);
+      kinds.forEach(([kind, list, get]) => list.forEach((b) => {
         const names = b.pick.map(([id]) => { const x = get(id); return x ? norm(x.n) : ""; });
         if (!e.names.every((n) => names.indexOf(norm(n)) !== -1)) return;
         const gap = Math.abs(Date.parse(b.start) - Date.parse(e.start)) / DAY;
@@ -936,14 +998,25 @@
       // Your target as a card (or trainee) id on that banner.
       const get = best && best.kind === "trainee" ? (id) => D.trainee(id) : (id) => D.card(id);
       const target = best && e.target ? (best.banner.pick.map(([id]) => id).find((id) => { const x = get(id); return x && norm(x.n) === norm(e.target); }) || null) : null;
-      return Object.assign({}, e, { banner: best ? best.banner : null, kind: best ? best.kind : null, targetId: target });
+      return Object.assign({}, e, { banner: best ? best.banner : null, kind: best ? best.kind : e.kind || null, targetId: target });
     });
   }
-  // Carats you'll have by a date if you spend none, from a plan's estimates: straight lines
-  // between them, from what you have today (or the first stretch's pace back to today), and on at
-  // the plan's average pace after its last banner.
+  // Carats you'll have by a date if you spend none, from a plan's estimates. Each row's Carat
+  // Est. is that planner's balance at the row: what you'll have there after the pulls of the rows
+  // above it (two rows on one day show it). Adding back what those rows cost (their # Pulls past
+  // their free pulls, at 150 carats) gives the carats you'd have by each date if you spent none;
+  // two rows on one day keep the lower. Straight lines between, from what you have today (or the
+  // first stretch's pace back to today), and on at the plan's average pace after its last row.
   function budgetFrom(entries, today, caratsNow) {
-    const pts = entries.filter((e) => e.carats != null && e.start).map((e) => [e.start, e.carats]).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    let spent = 0;
+    const byDate = new Map();
+    entries.forEach((e) => {
+      if (e.carats == null || !e.start) return;
+      const cum = e.carats + spent;
+      byDate.set(e.start, byDate.has(e.start) ? Math.min(byDate.get(e.start), cum) : cum);
+      if (e.kind !== "stepup") spent += Math.max(0, (+e.pulls || 0) - (+e.free || 0)) * 150;
+    });
+    const pts = [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
     if (!pts.length) return null;
     const t = (d) => Date.parse(d) / DAY;
     const rate = pts.length > 1 ? (pts[pts.length - 1][1] - pts[0][1]) / Math.max(1, t(pts[pts.length - 1][0]) - t(pts[0][0])) : 0;

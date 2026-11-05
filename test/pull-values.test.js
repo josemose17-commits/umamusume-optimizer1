@@ -31,12 +31,15 @@ const prepared = () => {
   return base;
 };
 
-test("your team counts as yours: every Dirt cup ahead has all three, out on Global or not", () => {
-  const v = make();
+test("your team counts as yours, from when you'll have her: every Dirt cup has its three, a flex until then", () => {
+  const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today)).map((t) => t.id));
+  const v = make({ umas: mine });
   const dirtCups = P.list.filter((p) => p.global.start > today && p.global.start <= until && PV.groupOf(p) === "dirt");
-  assert.equal(v.pairs.length, dirtCups.length * 3);
+  assert.equal(v.pairs.length + v.unrotated.length, dirtCups.length * 3);
+  // Valentine Yukino Bijin isn't out on Global until her release: her slot is a flex before it.
   const out = B.release.trainees["102902"];
-  assert.ok(v.pairs.some((x) => x.trainee.id === 102902 && x.date < out), "Valentine Yukino Bijin races before her Global release");
+  assert.ok(v.pairs.filter((x) => x.trainee.id === 102902 && !x.rotating).every((x) => x.date > out));
+  assert.ok(v.pairs.some((x) => x.member.waiting === 102902 && x.date <= out && x.rotating), "a flex in her slot before");
   assert.ok(v.items.every((it) => it.kind !== "trainee" || it.feat.every((f) => !v.team.has(f.id))), "no carats go to a team uma");
   assert.ok(v.items.every((it) => !it.required));
 });
@@ -222,32 +225,46 @@ test("far-off cups count less: a year ahead loses the fade", () => {
   assert.equal(make().weight("2028-11-04"), 1, "no fade by default");
 });
 
-test("your plan: parsed from your planner's table, matched to the calendar, its carats as the budget", () => {
-  const plan = PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan.txt", "utf8"));
-  assert.equal(plan.length, 13);
-  assert.deepEqual(plan[1], { names: ["Mei Satake", "El Condor Pasa"], start: "2027-04-07", end: "2027-04-25", free: 197, carats: 92700, paid: 4750, max: 815, pulls: 400, target: "El Condor Pasa" });
-  assert.equal(plan[12].target, "Mr. C.B.", "two at once: the first one's MLB");
-  plan.forEach((x) => assert.equal(x.max, Math.floor(x.carats / 150) + x.free, "its Max Pulls: carats / 150 + Free/Tickets/Paid"));
+test("your plan: parsed from your planner's table, matched to the calendar, its Carat Est. read as a balance", () => {
+  const old = PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan.txt", "utf8"));
+  assert.equal(old.length, 13);
+  assert.deepEqual(old[1], { names: ["Mei Satake", "El Condor Pasa"], title: "Project L'Arc", kind: "support", start: "2027-04-07", end: "2027-04-25", free: 197, carats: 92700, paid: 4750, max: 815, pulls: 400, target: "El Condor Pasa" });
+  const plan = PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan-2.txt", "utf8"));
+  assert.equal(plan.length, 16);
+  assert.deepEqual(plan.map((x) => x.kind).filter((k) => k !== "support"), ["stepup", "trainee", "trainee"]);
+  const dj = plan.find((x) => x.names[0] === "Dream Journey"), step = plan.find((x) => x.kind === "stepup");
+  assert.deepEqual([dj.title, dj.start, dj.pulls, dj.free, dj.carats], ["Great Food Festival", "2027-11-01", 200, 224, 164650]);
+  assert.deepEqual([step.names[0], step.pulls, step.max], ["Yukino Bijin (Valentine)", 0, 5], "a step-up with 0 steps");
+  assert.deepEqual(plan.filter((x) => x.kind !== "stepup").map((x) => x.pulls), [400, 400, 400, 200, 200, 400, 200, 200, 400, 400, 400, 200, 400, 400, 400]);
+  assert.equal(plan[15].target, "Mr. C.B.", "two at once: the first one's MLB");
+  plan.filter((x) => x.kind !== "stepup").forEach((x) => assert.equal(x.max, Math.floor(x.carats / 150) + x.free, "its Max Pulls: carats / 150 + Free/Tickets/Paid"));
   const m = PV.matchPlan(plan, B, D);
   m.forEach((x) => {
+    if (x.kind === "stepup") { assert.equal(x.banner, null, "a step-up isn't on the calendar"); return; }
     assert.ok(x.banner, x.names.join("+") + " on the calendar");
     assert.ok(Math.abs(Date.parse(x.banner.start) - Date.parse(x.start)) <= 21 * 864e5);
-    assert.ok(x.names.every((n) => x.banner.pick.some(([id]) => D.card(id).n === n)));
-    assert.equal(D.card(x.targetId).n, x.target);
+    const get = x.kind === "trainee" ? (id) => D.trainee(id) : (id) => D.card(id);
+    assert.ok(x.names.every((n) => x.banner.pick.some(([id]) => get(id).n === n)));
+    assert.equal(get(x.targetId).n, x.target);
   });
+  assert.equal(m.find((x) => x.kind === "trainee" && x.target === "Orfevre").banner.start, "2028-04-25", "Orfevre's own banner, not the UAF card");
+  // Two rows on one day show the balance: Carat Est. is what's left after the rows above it.
+  // Adding back their costs gives the carats you'd have by each date if you spent none.
   const budget = PV.budgetFrom(m, "2026-11-05", null);
   assert.equal(budget("2026-12-01"), 60040);
-  assert.equal(budget("2029-05-18"), 399970);
-  const mid = budget("2027-02-02");
-  assert.ok(mid > 60040 && mid < 92700, "straight lines between the estimates");
+  const cost = (x) => Math.max(0, x.pulls - x.free) * 150;
+  assert.equal(budget("2027-04-07"), 92700 + cost(m[0]));
+  const before = m.slice(0, 15).filter((x) => x.kind !== "stepup").reduce((a, x) => a + cost(x), 0);
+  assert.equal(budget("2029-05-18"), 287920 + before);
   assert.ok(budget("2026-11-05") < 60040 && budget("2026-11-05") > 0, "back to today at the first stretch's pace");
   assert.equal(PV.budgetFrom(m, "2026-11-05", 40000)("2026-11-05"), 40000, "or from the carats you have now");
 });
 
-test("a locked plan: taken first at 400 with each banner's free pulls; what doesn't fit is reported", () => {
-  const m = PV.matchPlan(PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan.txt", "utf8")), B, D);
-  const locked = new Map(m.map((x) => [x.banner.id, { level: 2, free: x.free, target: x.targetId }]));
-  const v = make({ locked, reuse: prepared() });
+test("your plan, locked: each row at its # Pulls, free pulls first, and it fits your planner's carats", () => {
+  const m = PV.matchPlan(PV.parsePlan(fs.readFileSync(__dirname + "/fixtures/pull-plan-2.txt", "utf8")), B, D).filter((x) => x.banner);
+  const locked = new Map(m.filter((x) => x.pulls > 0).map((x) => [x.banner.id, { level: x.pulls >= 400 ? 2 : 1, free: x.free, target: x.targetId }]));
+  const yours = new Map(m.filter((x) => x.kind === "trainee").map((x) => [x.targetId, x.banner.start]));
+  const v = make({ locked, yours, reuse: prepared() });
   v.pairs.forEach((pair) => v.buildPair(pair));
   v.prepare();
   const solo = v.standalone();
@@ -255,21 +272,57 @@ test("a locked plan: taken first at 400 with each banner's free pulls; what does
   const rt = v.route(PP, { today, budget: PV.budgetFrom(m, today, null) });
   while (rt.step());
   const { plan, gains } = rt.result();
-  const mine = v.items.filter((it) => it.locked);
-  assert.equal(mine.length, 13, "every banner of the plan, past the window too");
-  mine.forEach((it) => assert.ok(plan.chosen.get(it.key) === 2 || plan.missed.indexOf(it.key) !== -1, it.key));
-  assert.ok(plan.missed.length >= 1, "13 × 400 is more than the table's carats");
+  const mine = v.items.filter((it) => it.locked && it.kind !== "selector");
+  assert.equal(mine.length, 15, "every banner of the plan (past the window too), not the step-up");
+  assert.deepEqual(plan.missed, [], "it fits your planner's carats");
+  mine.forEach((it) => assert.equal(plan.chosen.get(it.key), locked.get(it.banner.id).level, it.key));
+  mine.forEach((it) => assert.equal(it.most, it.required, "your plan is fixed: a 200 stays 200"));
+  // Even with carats to spare, a locked 200 isn't taken to 400.
+  const rich = make({ locked, yours, reuse: prepared() });
+  rich.pairs.forEach((pair) => rich.buildPair(pair));
+  rich.prepare();
+  const rt2 = rich.route(PP, { today, budget: () => 1e9 });
+  while (rt2.step());
+  rich.items.filter((it) => it.locked && it.kind !== "selector").forEach((it) => assert.equal(rt2.result().plan.chosen.get(it.key), it.required));
   plan.steps.forEach((s) => {
     const it = v.byKey.get(s.key);
     assert.ok(s.left >= -1e-6);
-    if (it.locked) {
-      assert.equal(s.pulls, 400);
-      assert.equal(s.free, Math.min(400, it.free));
-      assert.equal(s.carats, (400 - s.free) * 150);
-      const c = v.committed.get(s.key);
-      if (!it.blind && (gains.get(s.key) || 0) === 0) assert.ok(c.spark.every((id) => id === it.target), "nothing helps: your target gets the sparks");
-    }
+    if (!it.locked || it.kind === "selector") return;
+    assert.equal(s.free, Math.min(s.pulls, it.free));
+    assert.equal(s.carats, (s.pulls - s.free) * 150);
+    const c = v.committed.get(s.key);
+    if (!it.blind && (gains.get(s.key) || 0) === 0) assert.ok(c.spark.every((id) => id === it.target), "nothing helps: your target gets the sparks");
   });
-  const blind = mine.filter((it) => it.blind);
-  assert.ok(blind.length >= 2 && blind.every((it) => it.date >= "2028-10-01"), "the banners with no Euophrys data yet");
+  const team = mine.filter((it) => it.kind === "trainee");
+  assert.deepEqual(team.map((it) => D.trainee(it.mine[0]).n).sort(), ["Dream Journey", "Orfevre"], "your team umas' own banners");
+  assert.ok(team.every((it) => it.blind), "their carats set aside; she's yours from there");
 });
+
+test("your team by date: a fixed uma races once she's yours, a flex slot in between; your selector picks first", () => {
+  const teams = { sm: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi", rotate: true }],
+    ml: [{ id: 111501, style: "Oikomi" }, { id: 111901, style: "Oikomi" }, { id: 102501, style: "Sasi", rotate: true }], dirt: [] };
+  const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today) && [105301, 102501].indexOf(t.id) === -1).map((t) => t.id));
+  const yours = new Map([[111901, "2027-11-06"], [111501, "2028-04-25"], [105301, "2026-11-29"], [102501, "2027-04-05"]]);
+  const lockedPicks = new Map([["anniv2-uma", 105301], ["anniv2.5-uma", 102501]]);
+  const v = make({ teams, umas: mine, yours, lockedPicks, until: "2028-09-30" });
+  ["Orfevre", "Dream Journey"].forEach((n) => {
+    const id = D.DATA.trainees.find((t) => t.n === n && yours.has(t.id)).id, from = yours.get(id);
+    const own = v.pairs.filter((p) => !p.rotating && p.trainee.id === id), wait = v.pairs.filter((p) => p.member.waiting === id);
+    assert.ok(own.length && own.every((p) => p.date > from), n + " races once she's yours");
+    assert.ok(wait.length && wait.every((p) => p.date <= from && p.rotating), "her slot is a flex until then");
+  });
+  // Ikuno Dictus isn't in the plan: hers from her Global release.
+  const ikuno = v.pairs.filter((p) => !p.rotating && p.trainee.id === 106301);
+  assert.ok(ikuno.length && ikuno.every((p) => p.date > B.release.trainees["106301"]));
+  // The named third is yours (a parent, a flex pick), but her slot is the flex.
+  assert.ok(v.pairs.filter((p) => p.slot === 2).every((p) => p.rotating));
+  assert.ok(v.yoursBy(102501, "2027-05-01") && !v.yoursBy(102501, "2027-03-01"), "Manhattan Cafe from your 2.5 Anniversary pick");
+  // Your Uma selector picks are taken first, before anything else on those selectors.
+  v.addSelectors();
+  const picks = v.items.filter((it) => it.kind === "selector" && it.locked);
+  assert.deepEqual(picks.map((it) => [it.sel.id, it.id]).sort(), [["anniv2-uma", 105301], ["anniv2.5-uma", 102501]]);
+  const p = PP.plan(v.items, { today, carats: 0, perMonth: 0, value: () => 0, onStep: (s) => v.commit(s.key, s.k) });
+  picks.forEach((it) => assert.equal(p.chosen.get(it.key), 1));
+  assert.ok(v.items.filter((it) => it.kind === "selector" && it.group === picks[0].group && !it.locked).every((it) => !p.chosen.get(it.key)), "one pick per selector");
+});
+

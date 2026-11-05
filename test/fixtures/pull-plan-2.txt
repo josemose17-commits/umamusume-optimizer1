@@ -1,0 +1,470 @@
+Type
+Images
+Banner
+Start / End Date
+Derived Stats (Auto-Calculated)
+# Pulls
+ReservedSelector ticketSSR crystal
+% Chance to MLB (5x Copies)
+Mejiro Ramonu
+Recommended:Mejiro Ramonu
+Start: 2026/12/1
+End: 2026/12/25
+Free/Tickets/Paid
+120/30/36
+Carat Est.
+60,040
+Paid Carat Est.
+3,000
+Max Pulls
+586
+400
+0
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Project L'Arc
+Mei SatakeEl Condor Pasa
+Recommended:Mei Satake + El Condor Pasa
+Start: 2027/4/7
+End: 2027/4/25
+Free/Tickets/Paid
+100/53/44
+Carat Est.
+92,700
+Paid Carat Est.
+4,750
+Max Pulls
+815
+400
+0
+
+Odds for El Condor Pasa
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+U.A.F. Ready GO!
+Ryoka TsurugiOrfevre
+Recommended:Ryoka Tsurugi + Orfevre
+Start: 2027/8/9
+End: 2027/9/4
+Free/Tickets/Paid
+120/54/63
+Carat Est.
+144,920
+Paid Carat Est.
+6,800
+Max Pulls
+1203
+400
+0
+
+Odds for Orfevre
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Yukino Bijin (Valentine)
+3rd Anniversary ★3 Select Step-Up
+Start: 2027/8/9
+End: 2027/9/4
+Step #
+0
+Carat Est.
+115,070
+Paid Carat Est.
+5,450
+Max Steps
+5
+0
+0
+None
+100.0%
+1x
+0.0%
+2x
+0.0%
+3x
+0.0%
+4x
+0.0%
+5x
+0.0%
+
+Great Food Festival
+Dream Journey
+Dream Journey
+Start: 2027/11/1
+End: 2027/11/24
+Free/Tickets/Paid
+0/171/53
+Carat Est.
+164,650
+Paid Carat Est.
+5,450
+Max Pulls
+1321
+200
+0
+None
+0.0%
+1x
+22.2%
+2x
+33.5%
+3x
+25.2%
+4x
+12.6%
+5x
+6.5%
+
+Yayoi AkikawaNishino Flower
+Recommended:Yayoi Akikawa + Nishino Flower
+Start: 2027/11/1
+End: 2027/11/24
+Free/Tickets/Paid
+80/33/45
+Carat Est.
+163,900
+Paid Carat Est.
+4,250
+Max Pulls
+1250
+200
+0
+
+Odds for Yayoi Akikawa
+None
+0.0%
+0LB
+22.2%
+1LB
+33.5%
+2LB
+25.2%
+3LB
+12.6%
+MLB
+6.5%
+
+Still in Love
+Recommended:Still in Love
+Start: 2027/12/16
+End: 2028/1/2
+Free/Tickets/Paid
+100/22/32
+Carat Est.
+188,030
+Paid Carat Est.
+3,050
+Max Pulls
+1407
+400
+0
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Hashire! Mecha Umamusume
+Daiwa ScarletAir Shakur
+Recommended:Daiwa Scarlet + Air Shakur
+Start: 2028/2/2
+End: 2028/2/22
+Free/Tickets/Paid
+80/21/29
+Carat Est.
+178,040
+Paid Carat Est.
+2,150
+Max Pulls
+1316
+200
+0
+
+Odds for Daiwa Scarlet
+None
+0.0%
+0LB
+22.2%
+1LB
+33.5%
+2LB
+25.2%
+3LB
+12.6%
+MLB
+6.5%
+
+The Twinkle Legends
+Orfevre
+Orfevre
+Start: 2028/4/24
+End: 2028/5/19
+Free/Tickets/Paid
+0/82/34
+Carat Est.
+233,100
+Paid Carat Est.
+2,600
+Max Pulls
+1670
+200
+0
+None
+0.0%
+1x
+22.2%
+2x
+33.5%
+3x
+25.2%
+4x
+12.6%
+5x
+6.5%
+
+Embodiment of LegendsAlmond Eye
+Recommended:Embodiment of Legends + Almond Eye
+Start: 2028/4/24
+End: 2028/5/19
+Free/Tickets/Paid
+120/39/26
+Carat Est.
+219,300
+Paid Carat Est.
+1,300
+Max Pulls
+1647
+400
+0
+
+Odds for Almond Eye
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Design Your Island
+Tucker BryneTamamo Cross
+Recommended:Tucker Bryne + Tamamo Cross
+Start: 2028/7/16
+End: 2028/8/10
+Free/Tickets/Paid
+80/40/0
+Carat Est.
+240,270
+Paid Carat Est.
+0
+Max Pulls
+1721
+400
+0
+
+Odds for Tamamo Cross
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Stay GoldAdmire Groove
+Recommended:Stay Gold + Admire Groove
+Start: 2028/8/29
+End: 2028/9/24
+Free/Tickets/Paid
+100/16/0
+Carat Est.
+232,880
+Paid Carat Est.
+0
+Max Pulls
+1668
+400
+0
+
+Odds for Stay Gold
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Paradise ♪ Yukoma Hot Springs
+Kiyoko HoshinaTokai Teio
+Recommended:Kiyoko Hoshina + Tokai Teio
+Start: 2028/10/15
+End: 2028/11/5
+Free/Tickets/Paid
+80/23/0
+Carat Est.
+218,300
+Paid Carat Est.
+0
+Max Pulls
+1558
+200
+0
+
+Odds for Tokai Teio
+None
+0.0%
+0LB
+22.2%
+1LB
+33.5%
+2LB
+25.2%
+3LB
+12.6%
+MLB
+6.5%
+
+Beyond Dreams
+Casino DriveForever Young
+Recommended:Casino Drive + Forever Young
+Start: 2029/1/10
+End: 2029/2/13
+Free/Tickets/Paid
+120/44/0
+Carat Est.
+285,840
+Paid Carat Est.
+0
+Max Pulls
+2069
+400
+0
+
+Odds for Forever Young
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Order Up! Tracen Ramen!
+Tazuna HayakawaMeisho Doto
+Recommended:Tazuna Hayakawa + Meisho Doto
+Start: 2029/4/7
+End: 2029/4/29
+Free/Tickets/Paid
+80/27/0
+Carat Est.
+291,850
+Paid Carat Est.
+0
+Max Pulls
+2052
+400
+0
+
+Odds for Tazuna Hayakawa
+None
+0.0%
+0LB
+0.0%
+1LB
+4.9%
+2LB
+14.9%
+3LB
+22.4%
+MLB
+57.8%
+
+Mr. C.B.Efforia
+Recommended:Mr. C.B. + Efforia
+Start: 2029/5/18
+End: 2029/6/20
+Free/Tickets/Paid
+100/27/0
+Carat Est.
+287,920
+Paid Carat Est.
+0
+Max Pulls
+2046
+400
+0
+
+Mr. C.B. MLB + Efforia
+MLB & None
+1.1%
+MLB & 0LB
+4.2%
+MLB & 1LB
+8.5%
+MLB & 2LB
+11.6%
+MLB & 3LB
+11.7%
+MLB & MLB
+20.6%
