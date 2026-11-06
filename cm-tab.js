@@ -78,9 +78,11 @@
       const d = c.decks[k], defaults = ctx.deckDefaults();
       Object.entries({ comp: {}, borrow: defaults.borrow, skillW: defaults.skillW, must: [], exclude: [], locked: [], cards: null }).forEach(([k, v]) => { if (d[k] == null) d[k] = v; });
       if (!c.decks[k].targets) c.decks[k].targets = {};
-      if (!c.decks[k].rental) c.decks[k].rental = { pink: "none", blue: "auto", sort: "affinity", quality: "recommended", required: [] };
+      if (!c.decks[k].rental) c.decks[k].rental = { pink: "auto", blue: "auto", sort: "affinity", quality: "recommended", required: [], version: 3 };
       const prefs = c.decks[k].rental;
-      if (!prefs.version) { if (prefs.pink === "auto") prefs.pink = "none"; prefs.sort = "affinity"; prefs.required = [...new Set(prefs.required || [])].slice(0, 2); prefs.version = 2; }
+      if (!prefs.version) { prefs.sort = "affinity"; prefs.required = [...new Set(prefs.required || [])].slice(0, 2); }
+      // v3: pink follows your rule by default (S distance; S surface for a sprint).
+      if ((prefs.version || 0) < 3) { if (prefs.pink === "none") prefs.pink = "auto"; prefs.version = 3; }
       return c.decks[k];
     }
     // The deck with your limit breaks now (a friend's card is always LB4).
@@ -91,8 +93,10 @@
     const settings = (d, keep) => ({ comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: d.must, exclude: d.exclude, targets: targetsOf(d), rankGoal: d.rankGoal || "",
       locked: [...new Set((d.locked || []).concat(keep.filter((x) => !x.borrowed).map((x) => x.id)))], friend: (keep.find((x) => x.borrowed) || {}).id || null });
     function freshOf(d) {
-      if (!d.fresh) d.fresh = { parentMode: "rental", picks: {}, rental: { pink: "none", blue: "auto", quality: "recommended", sort: "affinity", required: [], version: 2 } };
+      if (!d.fresh) d.fresh = { parentMode: "rental", picks: {}, rental: { pink: "auto", blue: "auto", quality: "recommended", sort: "affinity", required: [], version: 3 } };
       d.fresh.picks = d.fresh.picks || {};
+      const r = d.fresh.rental || (d.fresh.rental = {});
+      if ((r.version || 0) < 3) { if (!r.pink || r.pink === "none") r.pink = "auto"; r.version = 3; }
       return d.fresh;
     }
     const inputsKey = (c) => JSON.stringify([c.parentRank, ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.rentals(), ctx.family(), current(c) && freshOf(deckOf(c, current(c)))]);
@@ -550,7 +554,7 @@
         <div class="row-wrap">
           <label class="field"><span>Blue stat</span><select data-cmp-rental="blue" ${attr}>${options([["auto", "Auto (" + l.blue[0].label + ")"], ...F.STAT_LABELS.map((v, i) => [i, v])], prefs.blue == null ? "auto" : prefs.blue)}</select></label>
           <label class="field"><span>Search width</span><select data-cmp-rental="quality" ${attr}>${options([["recommended", "Own 3★ · lineage 7–9★"], ["broad", "Wider: own 2–3★ · lineage 6–9★"]], l.broad ? "broad" : "recommended")}</select></label>
-          <label class="field"><span>Pink focus</span><select data-cmp-rental="pink" ${attr}>${options([["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.pink ? l.pink.i : "none")}</select></label>
+          <label class="field"><span>Pink focus</span><select data-cmp-rental="pink" ${attr}>${options([["auto", "Your rule" + (l.auto ? " (" + l.auto.label + " → " + l.auto.target + ")" : ": none needed")], ["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.mode)}</select></label>
           <label class="field"><span>Sort</span><select data-cmp-rental="sort" ${attr}>${options([["affinity", "Affinity first"], ["whites", "Whites first"]], l.sort)}</select></label>
         </div>
         <fieldset class="cmp-required"><legend class="mini">Required whites · choose up to two (all checked must be in the rental branch)</legend><div class="row-wrap">${l.whites.map(w => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}" ${attr}${selected.has(w.id) ? " checked" : ""}>${esc(ctx.skillName(w.id))}</label>`).join("") || '<span class="mini">No missing race whites.</span>'}</div></fieldset>

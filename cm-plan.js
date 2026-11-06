@@ -365,9 +365,12 @@
     function rentalSearch(x, p1, opts = {}) {
       const needs = want(x), course = x.race.preset.course;
       const indexes = [...new Set([course.surface === "Dirt" ? 1 : 0, DIST(course.distance), STYLE_INDEX[x.race.style]].filter((i) => i != null))];
-      const choices = indexes.map((i) => ({ i, label: MOE_STYLES[i] || F.APT_LABELS[i], grade: (x.ace.apt || [])[i] || "?", needed: needs.pink.some((p) => p.i === i) }));
-      const auto = choices.find((p) => p.needed) || choices.find((p) => p.i === DIST(course.distance));
-      const focus = opts.pink === "auto" ? auto : choices.find((p) => String(p.i) === String(opts.pink));
+      const choices = indexes.map((i) => { const n = needs.pink.find((p) => p.i === i); return { i, label: MOE_STYLES[i] || F.APT_LABELS[i], grade: (x.ace.apt || [])[i] || "?", needed: !!n, target: n ? n.target : null }; });
+      // Your rule: the aptitude she still has to take to S (her distance; her surface in a sprint),
+      // else one still below A; none when she's already there.
+      const auto = choices.find((p) => p.needed && p.target === "S") || choices.find((p) => p.needed) || null;
+      const mode = opts.pink == null || opts.pink === "auto" ? "auto" : opts.pink === "none" ? "none" : String(opts.pink);
+      const focus = mode === "auto" ? auto : mode === "none" ? null : choices.find((p) => String(p.i) === mode);
       const pink = focus ? Object.assign({}, focus, { min: 3, main: false }) : null;
       const blueIndex = opts.blue != null && opts.blue !== "auto" && BLUE_IDS[+opts.blue] ? +opts.blue : (needs.blue[0] || { i: 0 }).i;
       const blue = [{ i: blueIndex, label: F.STAT_LABELS[blueIndex] }];
@@ -380,7 +383,7 @@
         .filter((g) => g.owners.length).slice(0, 3);
       const saddles = [...new Set(opts.saddles || saddlesOf(p1))], broad = opts.quality === "broad", sort = opts.sort === "whites" ? "whites" : "affinity";
       const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: blueIndex, pink, whites, required, sort, quality: broad ? "broad" : "recommended" };
-      return Object.assign(umaMoe(q), { q, blue, pink, choices, whites, required, green, wins: saddles.length, broad, sort,
+      return Object.assign(umaMoe(q), { q, blue, pink, auto, mode, choices, whites, required, green, wins: saddles.length, broad, sort,
         focused: green.map((g) => ({ skill: g, search: Object.assign(umaMoe(Object.assign({}, q, { green: g.owners.map((t) => t.id) })), { q: Object.assign({}, q, { green: g.owners.map((t) => t.id) }) }) })) });
     }
     // All fields set by umaMoe, including a unique-focus link's extra requirement.

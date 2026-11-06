@@ -180,7 +180,7 @@ test("uma.moe codec: one blue stat across the branch, version target, legacy win
 for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`Parent 2 search decodes every field: ${quality}, ${sort}`, () => {
   const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
   p1.v.saddles = [10, 11];
-  const q = plan.rentalSearch(x, p1, { quality, sort, blue: 0 });
+  const q = plan.rentalSearch(x, p1, { quality, sort, blue: 0, pink: "none" });
   const f = decode(q), broad = quality === "broad";
   assert.deepEqual(f.t, [ace.id, null, null, null, null, null, null]);
   assert.equal(f.p2c, uniq[0].id); assert.deepEqual(f.p2w, [10, 11]);
@@ -209,11 +209,15 @@ for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", 
   });
 });
 
-test("search defaults use the top key blue; pink is optional, lineage-only; whites are required only when checked", () => {
+test("search defaults use the top key blue; pink follows the rule, lineage-only; whites are required only when checked", () => {
   const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
   const defaults = decode(plan.rentalSearch(x, p1));
   assert.equal(defaults.mb[0][0], CP.BLUE_IDS[plan.want(x).blue[0].i]);
-  assert.ok(!defaults.ow && !defaults.omw && !defaults.p && !defaults.mp && !defaults.w);
+  assert.ok(!defaults.ow && !defaults.omw && !defaults.mp && !defaults.w);
+  const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
+  if (need) assert.deepEqual(defaults.p, [[CP.PINK_IDS[need.i], 3, 9]], "pink per the rule by default");
+  else assert.ok(!defaults.p, "no pink when she's already there");
+  assert.ok(!decode(plan.rentalSearch(x, p1, { pink: "none" })).p, "pink can be turned off");
   const q = plan.rentalSearch(x, p1, { blue: 4, pink: "7", required: [top[0]] });
   const f = decode(q);
   assert.deepEqual(f.b, [[50, 7, 9]]); assert.deepEqual(f.mb, [[50, 3, 3]]);
@@ -250,7 +254,7 @@ function freshFixture() {
 for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`borrowed parent for X search: ${quality}, ${sort}`, () => {
   const { x, t, v, fresh } = freshFixture();
   assert.equal(fresh.parentMode, "rental"); assert.equal(fresh.parents.length, 1, "one veteran plus an unfilled rental");
-  const q = plan.trainingRentalSearch(x, fresh, { quality, sort, blue: 0 });
+  const q = plan.trainingRentalSearch(x, fresh, { quality, sort, blue: 0, pink: "none" });
   const f = decode(q), broad = quality === "broad";
   assert.deepEqual(f.t, [t.id, null, null, null, null, null, null]);
   assert.equal(f.p2c, v.tid); assert.deepEqual(f.p2w, [...new Set(v.saddles.concat(v.self.wins.map(n => saddles[n]).filter(Boolean)))]);
