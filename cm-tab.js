@@ -83,9 +83,10 @@
     }
     // Search settings. v3: pink follows your rule by default (S distance; S surface in a sprint).
     function prefsOf(r) {
-      r = r || { pink: "auto", blue: "auto", sort: "affinity", quality: "recommended", required: [], version: 3 };
-      if (!r.version) { r.sort = "affinity"; r.required = [...new Set(r.required || [])].slice(0, 2); }
-      if ((r.version || 0) < 3) { if (!r.pink || r.pink === "none") r.pink = "auto"; r.version = 3; }
+      r = r || { pink: "auto", blue: "auto", sort: "whites", quality: "recommended", required: [], version: 4 };
+      if ((r.version || 0) < 3) { if (!r.pink || r.pink === "none") r.pink = "auto"; r.required = [...new Set(r.required || [])]; }
+      // v4: every listed white goes in as a preferred white by default (it ranks, never filters).
+      if ((r.version || 0) < 4) { r.sort = "whites"; r.version = 4; }
       return r;
     }
     const cardsNow = (d) => (d.cards || []).map((x) => Object.assign({}, x, { lb: x.borrowed ? 4 : ctx.owned()[x.id] != null ? +ctx.owned()[x.id] : x.lb }));
@@ -402,9 +403,9 @@
           <label class="field"><span>Blue stat</span><select data-cmp-rental="blue" ${attr}>${options([["auto", "Her biggest gap (" + l.blue[0].label + ")"], ...F.STAT_LABELS.map((v, i) => [i, v])], prefs.blue == null ? "auto" : prefs.blue)}</select></label>
           <label class="field"><span>Blue stars</span><select data-cmp-rental="quality" ${attr}>${options([["recommended", "Own 3★ · lineage 7–9★"], ["broad", "Wider: own 2–3★ · lineage 6–9★"]], l.broad ? "broad" : "recommended")}</select></label>
           <label class="field"><span>Pink</span><select data-cmp-rental="pink" ${attr}>${options([["auto", "Your rule" + (l.auto ? " (" + l.auto.label + " → " + l.auto.target + ")" : ": none needed")], ["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.mode)}</select></label>
-          <label class="field"><span>Sort</span><select data-cmp-rental="sort" ${attr}>${options([["affinity", "Affinity first"], ["whites", "Whites first"]], l.sort)}</select></label>
+          <label class="field"><span>Whites</span><select data-cmp-rental="sort" ${attr}>${options([["whites", "In the link as preferred (P0/P1/P2), then affinity"], ["affinity", "Not in the link: affinity only"]], l.sort)}</select></label>
         </div>
-        <fieldset class="cmp-required"><legend class="mini">Require up to two whites</legend><div class="row-wrap">${l.whites.map(w => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}" ${attr}${selected.has(w.id) ? " checked" : ""}>${esc(ctx.skillName(w.id))}</label>`).join("") || '<span class="mini">No race whites missing.</span>'}</div></fieldset>
+        <fieldset class="cmp-required"><legend class="mini">Require whites (each one you tick must be ${scope === "training" ? "on her" : "in her line"}; every tick cuts the results)</legend>${l.whites.length ? `<div class="row-wrap"><button type="button" class="btn ghost small" data-cmp-require="all" ${attr}>Require all</button><button type="button" class="btn ghost small" data-cmp-require="none" ${attr}>Clear</button></div>` : ""}<div class="row-wrap">${l.whites.map(w => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}" ${attr}${selected.has(w.id) ? " checked" : ""}>${esc(ctx.skillName(w.id))}</label>`).join("") || '<span class="mini">No race whites missing.</span>'}</div></fieldset>
         ${l.focused.length ? `<details><summary class="mini">Search for an inherited unique</summary>${l.focused.map(g => `<p><a href="${esc(g.search.url)}" target="_blank" rel="noopener">${esc(ctx.skillName(g.skill.id))} · ${g.skill.owners.map(t => esc(tName(t))).join(" / ")}</a></p><ul class="mini cmp-filters">${CP.searchSummary(g.search, ctx.skillName).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`).join("")}</details>` : ""}
       </details>`;
     }
@@ -513,7 +514,7 @@
         <li><b>Whites:</b> the race's skills her deck doesn't already give. A parent you train turns a learned skill into a spark about 20% of the time (40% with its gold), +2.5% per copy her parents and grandparents carry; at SS, sparks come out 1★/2★/3★ 20/70/10%.</li>
         <li><b>Parent 1:</b> any of My umas, trained from your best veteran for her and a borrowed grandparent, ranked by what she gives the ace. Families under ${MIN_AFFINITY} affinity aren't suggested. Each G1 two family members both won adds +3.</li>
         <li><b>Her races:</b> career goals, then G1s her veteran won, then G1s rentals often won, at B aptitude or better, as many as keep ${pct}% of runs at SS: from your veterans' ratings in the scenario you train in (or the simulation when you have too few).</li>
-        <li><b>uma.moe searches:</b> the affinity target and the other parent (her G1 wins) make uma.moe's affinity sort count the whole family. Blue asks for one stat, her biggest gap: 3★ on the rental and 7–9★ across her and her parents. Pink follows your rule, 3★+ across her line. Whites are listed, not required, unless you tick up to two. Both parents' characters are left out.</li>
+        <li><b>uma.moe searches:</b> the affinity target and the other parent (her G1 wins) make uma.moe's affinity sort count the whole family. Blue asks for one stat, her biggest gap: 3★ on the rental and 7–9★ across her and her parents. Pink follows your rule, 3★+ across her line. Every listed white goes in as a preferred white (P0 first), which ranks rentals without removing any; the ones you tick are required (any number). Both parents' characters are left out.</li>
       </ul></details>`;
     }
 
@@ -557,6 +558,13 @@
       if ((el = t.closest("[data-cmp-edit]"))) { editAce = editAce === +el.dataset.cmpEdit ? null : +el.dataset.cmpEdit; ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-ace-remove]"))) { aces(c).splice(+el.dataset.cmpAceRemove, 1); editAce = null; ctx.save(); ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-sel]"))) { c.sel[c.cup] = +el.dataset.cmpSel; ctx.save(); ctx.rerender(); return true; }
+      const req = t.closest("[data-cmp-require]");
+      if (req && a) {
+        const prefs = req.dataset.cmpRentalScope === "training" ? freshOf(deckOf(c, a)).rental : deckOf(c, a).rental;
+        const box = req.closest("fieldset");
+        prefs.required = req.dataset.cmpRequire === "all" ? [...box.querySelectorAll("[data-cmp-rental-white]")].map((x) => x.dataset.cmpRentalWhite) : [];
+        ctx.save(); ctx.rerender(); return true;
+      }
       const send = t.closest("[data-cmp-send]");
       if (send && a) {
         const r = found.get(keyOf(c, a));
@@ -594,7 +602,6 @@
       if (a && ds.cmpRental != null) { (ds.cmpRentalScope === "training" ? freshOf(deckOf(c, a)).rental : deckOf(c, a).rental)[ds.cmpRental] = t.value; ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpRentalWhite != null) {
         const prefs = ds.cmpRentalScope === "training" ? freshOf(deckOf(c, a)).rental : deckOf(c, a).rental, have = new Set(prefs.required || []);
-        if (t.checked && !have.has(ds.cmpRentalWhite) && have.size >= 2) { ctx.flash("Choose at most two required whites."); t.checked = false; return true; }
         if (t.checked) have.add(ds.cmpRentalWhite); else have.delete(ds.cmpRentalWhite);
         prefs.required = [...have]; ctx.save(); ctx.rerender(); return true;
       }

@@ -209,11 +209,11 @@ for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", 
   });
 });
 
-test("search defaults use the top key blue; pink follows the rule, lineage-only; whites are required only when checked", () => {
+test("search defaults: top key blue, pink by the rule, every listed white preferred, required only when ticked", () => {
   const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
   const defaults = decode(plan.rentalSearch(x, p1));
   assert.equal(defaults.mb[0][0], CP.BLUE_IDS[plan.want(x).blue[0].i]);
-  assert.ok(!defaults.ow && !defaults.omw && !defaults.mp && !defaults.w);
+  assert.ok(defaults.ow && defaults.ow.length, "listed whites go in as preferred whites"); assert.ok(!defaults.mp && !defaults.w, "nothing required by default");
   const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
   if (need) assert.deepEqual(defaults.p, [[CP.PINK_IDS[need.i], 3, 9]], "pink per the rule by default");
   else assert.ok(!defaults.p, "no pink when she's already there");
@@ -223,11 +223,14 @@ test("search defaults use the top key blue; pink follows the rule, lineage-only;
   assert.deepEqual(f.b, [[50, 7, 9]]); assert.deepEqual(f.mb, [[50, 3, 3]]);
   assert.deepEqual(f.p, [[220, 3, 9]]); assert.ok(!f.mp);
   assert.deepEqual(f.w, [[+SB.DATA.skills[top[0]][0] * 10, 1, 9]]);
-  assert.ok(!f.ow && !f.omw);
+  assert.ok(f.ow.every(o => (Array.isArray(o) ? o[0] : o) !== f.w[0][0]), "a required white isn't also preferred");
+  const off = decode(plan.rentalSearch(x, p1, { sort: "affinity" }));
+  assert.ok(!off.ow && !off.omw, "affinity only leaves whites out of the link");
   const same = Object.keys(SB.DATA.skills).find(id => id !== top[0] && SB.DATA.skills[id][0] === SB.DATA.skills[top[0]][0]);
   const req = plan.rentalSearch(x, p1, { sort: "whites", required: [top[0], same || top[0], top[1], top[2]] });
   const rf = decode(req);
-  assert.equal(rf.w.length, 2, "at most two distinct required families");
+  const families = new Set([top[0], same || top[0], top[1], top[2]].map(id => SB.DATA.skills[id][0]));
+  assert.equal(rf.w.length, families.size, "every ticked family is required, one each");
   assert.ok(rf.w.every(w => !rf.ow.some(o => (Array.isArray(o) ? o[0] : o) === w[0])));
 });
 
@@ -336,9 +339,10 @@ test("the ace's gaps pick the blue for both searches; the grandparent search use
   const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
   assert.ok(need && need.target === "S", "Special Week takes Medium to S");
   assert.deepEqual(gf.mp, [[CP.PINK_IDS[need.i], 2, 3]], "pink by the ace's rule, on her"); assert.ok(!gf.p && !gf.ow && !gf.w);
+  assert.deepEqual(gf.omw, gq.whites.map(w => w.priority ? [+SB.DATA.skills[w.id][0] * 10, w.priority] : +SB.DATA.skills[w.id][0] * 10), "the ace's missing whites preferred on her");
   assert.deepEqual(gq.whites.map(w => w.id), plan.missingWhites(x, fresh.s).slice(0, 12).map(w => w.id), "the ace's missing whites, listed");
   const text = plan.searchSummary(gq).join(" · ");
-  ["Affinity target: " + t.n, "Other parent (legacy): " + uniq[3].n, "Blue: Stamina", "to take the ace to S", "Exclude:", "Sort: affinity first"].forEach(s => assert.ok(text.includes(s), s));
+  ["Affinity target: " + t.n, "Other parent (legacy): " + uniq[3].n, "Blue: Stamina", "to take the ace to S", "Her own preferred whites", "Exclude:", "Sort: rentals with P0 whites first"].forEach(s => assert.ok(text.includes(s), s));
 });
 
 test("the ace's family affinity once you borrow: open slots take the best-affinity characters with popular G1s", () => {

@@ -403,7 +403,7 @@
         const id = factor(typeof w === "object" ? w.id : w), priority = typeof w === "object" ? Math.max(0, Math.floor(w.priority || 0)) : 0;
         if (id && (!ws.has(id) || priority < ws.get(id))) ws.set(id, priority);
       });
-      const required = [...new Set((q.required || []).map(factor).filter(Boolean))].slice(0, 2);
+      const required = [...new Set((q.required || []).map(factor).filter(Boolean))];
       required.forEach((id) => ws.delete(id));
       if (q.sort === "whites" && ws.size) {
         if (own) c.omw = [...ws].map(([id, p]) => p ? [id, p] : id);
@@ -439,13 +439,13 @@
       const blueIndex = opts.blue != null && opts.blue !== "auto" && BLUE_IDS[+opts.blue] ? +opts.blue : left != null ? left : (needs.blue[0] || { i: 0 }).i;
       const blue = [{ i: blueIndex, label: F.STAT_LABELS[blueIndex] }];
       const whites = (opts.whites || missingWhites(x, p1.s)).slice(0, 12).map((w, i) => Object.assign({}, w, { priority: i < 3 ? 0 : i < 7 ? 1 : 2 }));
-      // At most two explicitly checked families; keep them visible after a deck change.
+      // The whites you ticked (any number, one per family); kept visible after a deck change.
       const families = new Set(), required = [];
-      (opts.required || []).map(String).filter(id => meta[id]).forEach(id => { if (required.length < 2 && !families.has(meta[id][0])) { families.add(meta[id][0]); required.push(id); } });
+      (opts.required || []).map(String).filter(id => meta[id]).forEach(id => { if (!families.has(meta[id][0])) { families.add(meta[id][0]); required.push(id); } });
       required.forEach((id) => { if (!whites.some((w) => meta[w.id][0] === meta[id][0])) whites.push({ id, priority: 0, need: 0, L: 0 }); });
       const green = needs.green.map((g) => Object.assign({}, g, { owners: g.owners.filter((t) => +t.cid !== +x.ace.cid && +t.cid !== +p1.f.p1.cid && (!o.today || t.en && t.en <= o.today)) }))
         .filter((g) => g.owners.length).slice(0, 3);
-      const saddles = [...new Set(opts.saddles || saddlesOf(p1))], broad = opts.quality === "broad", sort = opts.sort === "whites" ? "whites" : "affinity";
+      const saddles = [...new Set(opts.saddles || saddlesOf(p1))], broad = opts.quality === "broad", sort = opts.sort === "affinity" ? "affinity" : "whites";
       const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: blueIndex, pink, whites, required, sort, quality: broad ? "broad" : "recommended", own: !!opts.own };
       return Object.assign(umaMoe(q), { q, blue, pink, auto, mode, remaining, given: given || null, choices, whites, required, green, wins: saddles.length, broad, sort,
         focused: green.map((g) => ({ skill: g, search: Object.assign(umaMoe(Object.assign({}, q, { green: g.owners.map((t) => t.id) })), { q: Object.assign({}, q, { green: g.owners.map((t) => t.id) }) }) })) });
@@ -461,11 +461,10 @@
       if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " on the rental herself" + (c.b ? " · " + c.b[0][1] + "–9★ across her and her parents" : " (her own sparks only: her parents don't reach the ace)"));
       lines.push("Pink: " + (c.mp ? aptName(c.mp[0][0]) + " · " + c.mp[0][1] + "–3★ on the rental herself" + toS : c.p ? aptName(c.p[0][0]) + " · 3–9★ across her and her parents; none needed on her" + toS : "off"));
       lines.push("Required whites: " + (q.required.length ? q.required.map(skillName).join(", ") + (c.mw ? " · on the rental herself, 1–3★ each" : " · 1–9★ each") + "; all required" : "none"));
-      lines.push((q.sort === "whites" ? "Preferred whites: " : "Whites to look for (no filter): ") + (names.join(", ") || "none"));
-      if (c.omw && !c.ow) lines.push("Preferred whites are hers, not her parents'");
-      else if (c.omw) lines.push("Own preferred whites: " + q.whites.filter(w => w.priority === 0 && !required.has(meta[w.id][0])).map(w => skillName(w.id) + " (P0)").join(", "));
+      lines.push((q.sort === "whites" ? (q.own ? "Her own preferred whites (rank, don't filter): " : "Preferred whites (rank, don't filter): ") : "Whites to look for (not in the link): ") + (names.join(", ") || "none"));
+      if (c.omw && c.ow) lines.push("Own preferred whites: " + q.whites.filter(w => w.priority === 0 && !required.has(meta[w.id][0])).map(w => skillName(w.id) + " (P0)").join(", "));
       if (c.mg) lines.push("Own unique: " + q.green.map(tn).join(" or ") + " · 1–3★");
-      lines.push("Exclude: " + (c.emp || []).map(char).join(", ") + " (all versions)", "Sort: " + (q.sort === "whites" ? "P0, P1, P2, then affinity" : "affinity first"), "Any rental rank · trainers below 1,000 followers (site default)");
+      lines.push("Exclude: " + (c.emp || []).map(char).join(", ") + " (all versions)", "Sort: " + (q.sort === "whites" ? "rentals with P0 whites first, then P1, P2, then affinity" : "affinity only"), "Any rental rank · trainers below 1,000 followers (site default)");
       return lines;
     }
     // X is the target; V is the other parent. X's race whites are the ace's relevant
