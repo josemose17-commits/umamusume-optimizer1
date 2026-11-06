@@ -408,8 +408,8 @@
       setTimeout(() => {
         pending = false;
         const el = ctx.container();
-        if (!el || ctx.state().tab !== (ctx.merged ? "cm" : "parents")) return;
-        if (!el.querySelector(".parents")) { render(el); return; }
+        if (!el || ctx.state().tab !== "parents") return;
+        if (!el.querySelector(".parents")) { if (ctx.renderTab) ctx.renderTab(); else render(el); return; }
         const p = st();
         const sig = syncDeck(p);
         if (sig !== deckSig) {

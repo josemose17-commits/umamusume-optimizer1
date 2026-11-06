@@ -298,7 +298,8 @@
         <button type="button" role="tab" data-tab="log">Career log</button>
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
         <button type="button" role="tab" data-tab="all">All scenarios</button>
-        <button type="button" role="tab" data-tab="cm" id="tabCM">CM/LoH</button>
+        <button type="button" role="tab" data-tab="cm" id="tabCM">CM &amp; decks</button>
+        <button type="button" role="tab" data-tab="parents" id="tabParents">Parents</button>
         <button type="button" role="tab" data-tab="tiers" id="tabTiers">Tier list</button>
         <button type="button" role="tab" data-tab="pulls" id="tabPulls">Pull planner</button>
         <button type="button" role="tab" data-tab="cards" id="tabCards">Support cards</button>
@@ -738,15 +739,16 @@
 
     document.querySelector(".tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); } });
     $("#tabBody").addEventListener("click", (e) => {
-      if (state.tab === "cm" && parents() && parents().click(e)) return;
+      if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
-      if (state.tab === "cm" && cmPlan() && cmPlan().click(e)) return;
+      if (deckTab() && cmPlan() && cmPlan().click(e)) return;
       const nav = e.target.closest("[data-goto-tab]");
       if (nav) {
-        const dest = nav.dataset.gotoTab;
-        state.tab = ["cm", "cmplan", "parents"].includes(dest) ? "cm" : dest;
+        const dest = nav.dataset.gotoTab === "cmplan" ? "cm" : nav.dataset.gotoTab;
+        state.tab = dest;
         save(); renderTab();
-        if (["cm", "cmplan", "parents"].includes(dest)) showSection(dest === "parents" ? "training" : "deck");
+        if (nav.dataset.gotoSection) showSection(nav.dataset.gotoSection);
+        else window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
       const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -808,10 +810,10 @@
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
-    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "cm" && parents()) parents().change(e); });
+    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
-    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "cm" && cmPlan()) cmPlan().change(e); });
-    $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "cm" && parents()) parents().onToggle(e); }, true);
+    $("#tabBody").addEventListener("change", (e) => { if (deckTab() && cmPlan()) cmPlan().change(e); });
+    $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "parents" && parents()) parents().onToggle(e); }, true);
     $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null || e.target.dataset.cmTarget != null) setTimeout(renderTab, 0); });
     $("#tabBody").addEventListener("input", (e) => {
       if (e.target.dataset.own != null) {
@@ -1652,7 +1654,7 @@
       const mine = myUmas();
       if (d.town) list = list.filter((t) => (d.town === "yes") === mine.has(t.id));
       list.sort((a, b) => a.n.localeCompare(b.n));
-      el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}. Tick <b>Own</b> on the umas you have (${mine.size} ticked): CM/LoH picks the ace and Parent 1 from them. Importing your veterans ticks the versions you've trained.</p>
+      el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}. Tick <b>Own</b> on the umas you have (${mine.size} ticked): CM &amp; decks picks your team from them and Parents picks Parent 1. Importing your veterans ticks the versions you've trained.</p>
         <div class="table-wrap"><table class="trainees"><thead><tr><th>Own</th><th>Trainee</th><th>Aptitudes (surface · distance · style)</th><th>Growth</th><th>Unique skill</th><th></th></tr></thead><tbody>
         ${list.map((t) => `<tr${state.deck.trainee === t.id ? ' class="cur"' : ""}><td><input type="checkbox" data-own-trainee="${t.id}" aria-label="I own ${esc(t.n)} [${esc(t.t)}]"${mine.has(t.id) ? " checked" : ""}></td><td><b>${esc(t.n)}</b><div class="jp">${esc(t.t)} · ${"★".repeat(t.r)}${t.en ? " · Global " + t.en : " · JP " + t.jp}</div></td><td>${aptChips(t)}</td><td>${growthText(t)}</td><td>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</td><td><button type="button" class="btn ghost small" data-use-trainee="${t.id}">Use</button></td></tr>`).join("")}
         </tbody></table></div>`;
@@ -2263,8 +2265,8 @@
     svCache[id] = "loading";
     fetch("data/skillvalues/" + id + ".json?v=" + ASSET_V)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { svCache[id] = j; if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); })
-      .catch(() => { svCache[id] = "error"; if (state.tab === "cm") renderCM(); });
+      .then((j) => { svCache[id] = j; renderCM(); if (state.tab === "tiers") renderTiers(); })
+      .catch(() => { svCache[id] = "error"; renderCM(); });
   }
 
   const skillInfo = (id) => (SV && SV.skills[id]) || [D.DATA.skills[id] || "#" + id, D.skillCost(id) || 0, 1, 1];
@@ -2323,7 +2325,7 @@
       euLoading = true;
       const sc = document.createElement("script");
       sc.src = "data/euophrys-cards.js?v=" + ASSET_V;
-      sc.onload = () => { if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); };
+      sc.onload = () => { renderCM(); if (state.tab === "tiers") renderTiers(); };
       sc.onerror = () => { euLoading = false; flash("Couldn't load the tier list data. Check your connection."); };
       document.head.appendChild(sc);
     }
@@ -2467,11 +2469,12 @@
       j.optResult = result;
       if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
       if (deckTrainee(host) === tid) saved.forTrainee = tid;
+      if (host === "cm" && deckTrainee(host) === tid && c.goal === "race" && est) { const g = raceGaps(result, saved); saved.predicted = { stats: g.stats, target: g.target, sp: est.sp }; }
       save();
       j.wish = null;
-      if (state.tab === "cm") renderCM();
+      renderCM();
     };
-    const fail = (err) => { flash(String(err.message || err)); j.optRun = null; if (state.tab === "cm") renderCM(); };
+    const fail = (err) => { flash(String(err.message || err)); j.optRun = null; renderCM(); };
     let link = null;
     setTimeout(() => {
       try {
@@ -2556,14 +2559,14 @@
     const job = OPT.sensitivity(sim, candidates);
     j.sensitivityJob = job; renderCM();
     const tick = () => {
-      if (j.optResult !== r || r.key !== optKey(host)) { j.sensitivityJob = null; if (state.tab === "cm") renderCM(); return; }
+      if (j.optResult !== r || r.key !== optKey(host)) { j.sensitivityJob = null; renderCM(); return; }
       try {
         const more = job.next();
         const progress = deckElement(host, "#sensitivityProgress"); if (progress) progress.textContent = Math.round(job.progress() * 100) + "%";
         if (more) { setTimeout(tick, 0); return; }
         r.sensitivity = job.result(); j.sensitivityJob = null;
-        if (state.tab === "cm") renderCM();
-      } catch (err) { j.sensitivityJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
+        renderCM();
+      } catch (err) { j.sensitivityJob = null; flash(err.message || String(err)); renderCM(); }
     };
     setTimeout(tick, 0);
   }
@@ -2602,7 +2605,7 @@
       const out = []; let at = 0;
       const tick = () => {
         if (j.wishJob !== token) return;
-        if (j.optResult !== r || r.key !== optKey(host)) { j.wishJob = null; if (state.tab === "cm") renderCM(); return; }
+        if (j.optResult !== r || r.key !== optKey(host)) { j.wishJob = null; renderCM(); return; }
         try {
           if (at < jobs.length) {
             const job = jobs[at++];
@@ -2615,8 +2618,8 @@
           const seen = new Set();
           j.wish = out.sort((a, b) => b.gain - a.gain).filter((x) => !seen.has(x.id) && seen.add(x.id)).slice(0, 10);
           r.wishMeta = { runs: 8, seed: 857563, candidates: jobs.length }; j.wishJob = null;
-          if (state.tab === "cm") renderCM();
-        } catch (err) { j.wishJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
+          renderCM();
+        } catch (err) { j.wishJob = null; flash(err.message || String(err)); renderCM(); }
       };
       setTimeout(tick, 0); return;
     }
@@ -2633,16 +2636,51 @@
     renderCM();
   }
 
-  function renderCM() { if (state.tab === "cm") renderTab(); }
+  // CM & decks (the racing deck) and Parents (the ace's parents and the Ace-parent deck).
+  function deckTab() { return state.tab === "cm" || state.tab === "parents"; }
+  function renderCM() { if (deckTab()) renderTab(); }
 
-  function cmHeader(p) {
+  // CM & decks' header: the cup and your team for it (cm-tab.js), the course, her style.
+  function cmHeader(p, c, team) {
     const [stCls, stText] = presetStatus(p);
+    const s = p.stats;
     return `<section class="panel cm-head">
-      <div class="cm-title"><h2>${esc(p.name)}</h2><span class="chip cm-${stCls}">${stText}</span></div>
-      <div class="cm-facts"><div class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight" : p.course.turn + "-handed"}${p.course.layout ? " · " + esc(p.course.layout) : ""} · ${p.course.dist}</div>
-        <div>${esc(p.conditions)}</div><div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div></div>
-      <button type="button" class="btn ghost small" data-cm-build="${p.build}"${state.build === p.build ? " disabled" : ""}>${state.build === p.build ? "Coach build: " : "Set coach build: "}${esc(E.BUILDS[p.build].label)}</button>
+      ${team}
+      <div class="cm-title"><h2>${esc(p.name)}</h2>
+        <span class="chip">${p.kind === "loh" ? "League of Heroes " + p.no : "Champions Meeting #" + p.no}</span>
+        <span class="chip cm-${stCls}">${stText}</span></div>
+      <div class="cm-facts">
+        <div class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + esc(p.course.layout) + ")" : ""} · ${p.course.dist}</div>
+        <div>${esc(p.conditions)}</div>
+        <div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div>
+      </div>
+      ${c ? `<div class="row-wrap">
+        <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
+        <button type="button" class="btn ghost small" data-cm-build="${p.build}" ${state.build === p.build ? "disabled" : ""}>${state.build === p.build ? "Turn coach build: " + esc(E.BUILDS[p.build].label) : "Set the turn coach to " + esc(E.BUILDS[p.build].label)}</button>
+      </div>` : ""}
+      <p class="mini">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
     </section>`;
+  }
+
+  // The CM & decks tab: the cup and your team, then the selected ace's racing deck, exactly
+  // as the deck optimizer builds it, with her gaps (target minus predicted) for Parents.
+  function renderDecks(body) {
+    if (!P || !T) { body.innerHTML = `<div class="empty">The CM data didn't load. Refresh the page.</div>`; return; }
+    const plan = cmPlan(), x = W.current(state), p = presetById(x.cup) || defaultPreset();
+    loadSkillValues(p.id);
+    euReady();
+    const c = x.ace ? cm("cm") : null;
+    body.innerHTML = `<div class="cm">${cmHeader(p, c, plan.teamHTML())}${c ? cmOptimizer(p, c, "cm") + cmSkills(p, c, "cm") : `<section class="panel"><p class="mini">Add an ace to your team above to build her deck.</p></section>`}</div>`;
+  }
+
+  // Her gaps: each stat's target (yours, else the race build's, within the caps) against the
+  // predicted average. Parents fills what's short with blue sparks.
+  function raceGaps(r, c) {
+    const p = presetById(r.preset), caps = E.capsFor(state, scenario()), mine = cmTargets(c || {}) || {};
+    const bt = p ? E.BUILDS[p.build].target : {};
+    const target = E.STATS.map((s) => Math.min(caps[s] != null ? caps[s] : Infinity, r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
+    const stats = r.est.stats.slice();
+    return { target, stats, short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
   }
 
   function cmOptimizer(p, c, host = deckHost()) {
@@ -2802,7 +2840,7 @@
       predictCache.set(job.k, { stats: est.stats, sp: est.sp, races: est.races, finals: est.finals });
     } catch (err) { predictCache.set(job.k, null); }
     if (predictQueue.length) predictTimer = setTimeout(predictNext, 0);
-    if (predictDone && state.tab === "cm") predictDone();
+    if (predictDone && state.tab === "parents") predictDone();
   }
 
   // Resolves once every cup's skill values are loaded (the pull planner and the CM planner).
@@ -2860,38 +2898,8 @@
     return { cards: r.cards, skills: r.skills, offers: T.deckOffers(x.opts, r.cards), link: x.link };
   }
 
-  function setRaceResult(p, a, d, v, sim) {
-    const j = deckJob("cm"), c = cm("cm");
-    if (!sim) { j.optResult = null; j.wish = null; return; }
-    j.optResult = Object.assign({}, v.result, { key: optKey("cm"), cards: v.cards, goal: "race", preset: p.id, style: a.style || bestTraineeStyle(D.trainee(a.tid)), scen: euScen(),
-      est: sim.est, fit: sim.fit || null, simulationMeta: { scenario: scenario().id, trainee: a.tid }, independent: !!c.independent, link: v.setup.link, skillsUsed: Object.keys(skillMap(p.id, c.style).map).length });
-    if (sim.est.supportEvents) j.optResult.skills = sim.est.skills;
-    j.wish = null;
-  }
-  function racingLocksHTML(d) {
-    const outside = (d.locked || []).filter(id => D.card(id) && !(d.cards || []).some(x => x.id === id));
-    return `<div class="row-wrap"><label class="field grow"><span>Keep a card in the search</span><input id="cmLock" list="cardListAll" placeholder="Card name" autocomplete="off"></label><button type="button" class="btn ghost small" id="cmLockAdd">Add</button></div>
-      ${outside.map(id => `<span class="chip">${esc(D.card(id).n)} <button type="button" class="linkish" data-cm-unlock="${id}">Remove</button></span>`).join("")}`;
-  }
-  // Advanced tools read the same deck the planner edits, with no transfer step.
-  function raceToolsHTML(p, a, d) {
-    const c = cm("cm"), j = deckJob("cm"), r = j.optResult;
-    const concert = concertSettingsHTML(c);
-    return `<details class="pred-help cmp-more" data-cmp-open="deck-tools"><summary>More deck tools</summary><div class="cm" data-deck-host="cm">
-      ${cmSkills(p, c, "cm")}
-      ${euSettingsHTML("speed", "cm")}
-      <label class="chip-toggle"><input type="checkbox" data-cm="independent"${c.independent ? " checked" : ""}> Independent Training</label>
-      ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${IT_MANUAL_OPTS.map(([v, l]) => `<option value="${v}"${c.itManual === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
-      ${concert}
-      ${state.scenario === "grandlive" ? `<div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${["0.25", "0.5", "0.75"].map(v => `<option value="${v}"${c.eventSuccessRate === v ? " selected" : ""}>${+v * 100}%</option>`).join("")}</select></label><label class="field"><span>Chain-rate boost per song level</span><select data-cm="eventSongBoost">${["0", "0.05", "0.1"].map(v => `<option value="${v}"${c.eventSongBoost === v ? " selected" : ""}>${+v * 100}%</option>`).join("")}</select></label></div>` : ""}
-      ${r ? `<div class="row-wrap"><button type="button" class="btn ghost small" id="cmWish"${j.wishJob ? " disabled" : ""}>${j.wishJob ? "Comparing…" : "Which cards would improve it?"}</button><button type="button" class="btn ghost small" id="cmSensitivity"${j.sensitivityJob || comparisonDecks(r, c).length < 2 ? " disabled" : ""}>${j.sensitivityJob ? "Checking…" : "Check ranking sensitivity"}</button><button type="button" class="btn ghost small" data-use-opt>Use this deck in the coach</button></div>${sensitivityHTML(r)}
-        ${Array.isArray(j.wish) ? `<div class="wish"><h4>Cards worth getting</h4><ul>${j.wish.map(x => `<li>${esc(D.card(x.id).n)} LB4 · +${Math.round(x.gain)} · replacing ${esc(D.card(x.replaces).n)}</li>`).join("") || '<li>No shortlisted upgrade improved this deck.</li>'}</ul></div>` : ""}
-        <details class="pred-help"><summary>Simulation and skill details</summary>${predictedHTML(r, "cm")}${supportEventsHTML(r)}${r.est && r.est.skillBudget ? affordableSkillsHTML(r) : ""}${mustResultHTML(r, c)}${skillSourcesHTML(r.skills || [], !!(r.est && r.est.supportEvents))}</details>` : '<p class="mini">Search her deck for predictions and comparisons.</p>'}
-    </div></details>`;
-  }
-
-  // The CM/LoH planner tab (cm-tab.js): the cup and your aces, then for each her deck, Parent 1
-  // (a veteran, or a fresh one with her races) and the uma.moe search for Parent 2.
+  // cm-tab.js: CM & decks' team (the cup's aces) and the Parents tab (her gaps, Parent 1 and
+  // the grandparent search, training her, the Parent 2 search, the family check).
   let cmTab = null;
   const charNames = new Map();
   function cmPlan() {
@@ -2918,22 +2926,13 @@
       build: (p) => E.BUILDS[p.build] || null,
       deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
       deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
+      deckOffers: (opts, cards) => T.deckOffers(opts, cards),
       // A new ace's deck settings start from CM & decks'.
       deckDefaults: () => { const c = state.cm || {}; return { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", targets: Object.assign({}, c.targets || {}), rankGoal: c.rankGoal || "" }; },
       buildTarget: (p) => E.BUILDS[p.build].target,
       buildLabel: (p) => E.BUILDS[p.build].label,
       coachTargets: () => (state.targets && E.STATS.some((x) => state.targets[x] > 0) ? state.targets : null),
-      // CM & decks' simulated search toward target stats, from these cards (a stepper: next(),
-      // progress(), result()), with the planner's settings (locked cards stay).
-      targetSearch: (p, style, tid, s, cards) => {
-        const x = planSetup(p, style, tid, null, s), c = state.cm || {};
-        if (x.opts.rankGoal && !s.targets) x.opts.rankGoal.ignoreFit = true;
-        const sim = { scenario: scenario(), build: p.build, trainee: tid, target: s.targets || null, caps: E.capsFor(state, scenario()),
-          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: s.must || [], independent: !!c.independent, raceShare: itShare(c) };
-        return OPT.targetSearch(x.opts, sim, cards, x.pool, x.bp);
-      },
       sync: () => syncWorkflow(),
-      cupFacts: (p) => cmHeader(p, cm("cm"), true),
       familyHTML: () => parents().familyHTML(),
       family: () => parents().st().family || {},
       planFamily: (p1, train, userChoice) => {
@@ -2957,24 +2956,11 @@
       setParentRank: (value) => W.setParentRank(state, value),
       training: () => state.cmp.training || null,
       gotoParents: (section) => showSection(section),
-      moreDeckTools: (p, a, d) => raceToolsHTML(p, a, d),
-      deckChanged: (p, a, d, v, sim) => setRaceResult(p, a, d, v, sim),
-      lockHTML: (d) => racingLocksHTML(d),
       settingsKey: () => optKey("cm"),
       mustSkills: (d) => Object.keys(skillSources(Object.assign({}, d, { goal: "race" }))).map(id => ({ id, name: skillInfo(id)[0] })).sort((a, b) => a.name.localeCompare(b.name)),
       skillWeights: SKILL_W, compTypes: COMP_TYPES,
       // The race's skills for her style, most valuable first ({ id, L }), for must-haves.
       raceSkills: (p, style) => { const m = skillMap(p.id, style).map; return Object.keys(m).filter((id) => m[id] > 0 && D.DATA.skills[id] && released(id, p)).map((id) => ({ id, L: m[id] })).sort((a, b) => b.L - a.L); },
-      // Her racing deck's predicted run (CM & decks' readout: 16 simulated careers).
-      simulateRace: (p, style, tid, cards, must, target, rank) => {
-        const c = cm("cm"), sv = skillMap(p.id, style);
-        const sim = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, target: target || null, caps: E.capsFor(state, scenario()), runs: 16, skills: sv.map, costs: sv.costs,
-          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: must || [], independent: !!c.independent, raceShare: itShare(c), skillBudget: true });
-        const est = OPT.simulate(sim, cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
-        const goal = raceRankGoal(p, style, tid, rank || "S"), rating = (x) => PR.statsScore(x.stats) + Math.round(x.sp * goal.spRating) + goal.unique;
-        return { est, stats: est.stats, sp: est.sp, scenario: scenario().name, target: sim.target, caps: sim.caps, short: OPT.targetFit(sim, est.stats, est.sp).short,
-          rating: rating(est), rank: rank || "", hit: est.finals.filter((x) => rating(x) >= goal.ss).length, of: est.finals.length, cards: cards.length };
-      },
       // A parent's run with this deck and n extra races, as ② predicts it (16 careers).
       simulate: (p, tid, cards, n, blueStart = []) => {
         const c = state.pcm || {};
@@ -2997,7 +2983,7 @@
         return g ? (teams[g] || []).filter((m) => m && m.id).map((m) => ({ tid: +m.id, style: m.style || null })) : [];
       },
       trainParent: (o, section) => trainParent(o, section),
-      rerender: () => { if (state.tab === "cm") renderTab(); },
+      rerender: () => { if (deckTab()) renderTab(); },
     });
     return cmTab;
   }
@@ -3024,8 +3010,8 @@
     cm("parents").cards = (o.cards || []).map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
     state.pcm.forTrainee = o.p1.tid;
     ps.races = o.races.slice();
-    state.tab = "cm";
-    state.cmp.open.training = true;
+    state.tab = "parents";
+    state.cmp.open = Object.assign({}, state.cmp.open, { training: true });
     save();
     flash(`${D.trainee(o.p1.tid).n} is ready to train here: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
     renderTab();
@@ -3034,6 +3020,8 @@
   // Open a workflow section and any folded sections containing it.
   function showSection(section) {
     const id = { family: "cm-family", who: "pp-who", races: "pp-races", deck: "pp-deck", rating: "pp-rating" }[section] || "cm-" + section;
+    // Everything but the racing deck is in the Parents tab.
+    if (state.tab !== "parents" && section !== "deck-cm") { state.tab = "parents"; save(); renderTab(); }
     setTimeout(() => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -3077,7 +3065,7 @@
       },
       skillL: (p, style, id) => skillMap(p.id, style).map[id] || 0,
       settingsKey: () => JSON.stringify([euScen(), euOver(), c().comp || {}, c().borrow !== false, c().skillW]),
-      settingsText: () => "Euophrys' " + (T.SCENARIOS.find((x) => x[0] === euScen()) || [0, euScen()])[1] + " preset, with CM/LoH’s deck makeup, friend card and skill weight",
+      settingsText: () => "Euophrys' " + (T.SCENARIOS.find((x) => x[0] === euScen()) || [0, euScen()])[1] + " preset, with CM &amp; decks' deck makeup, friend card and skill weight",
       rerender: () => { if (state.tab === "pulls") renderTab(); },
     });
     return pullTab;
@@ -3147,6 +3135,7 @@
         setTrainee(id);
       },
       merged: true,
+      renderTab: () => renderTab(),
       rankGoal: () => state.cmp.parentRank,
       statusUpdated: () => cmTab && cmTab.refreshStatus(),
       // Your veterans' decks (umaextractor import): each card at least at the limit break you
@@ -3159,7 +3148,7 @@
         loadSkillValues(p.id);
         euReady();
         // The race's skill table (must-have ☆, Global-only releases) in a closed box.
-        const race = `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-cmp-jump="cup">change cup or ace</button>).</p>`;
+        const race = `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-goto-tab="cm">change cup or ace in CM &amp; decks</button>).</p>`;
         return deckIds(`<div class="cm" data-deck-host="parents">${race}${cmOptimizer(p, c, "parents")}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), ${skillsBy(p) ? "skills out on Global by this cup" : "Global releases only"}</summary>${cmSkills(p, c, "parents")}</details></div>`, "parents");
       },
       // ② Races sets ③ Deck's Independent Training race count (no re-render: the page is drawing).
@@ -3366,6 +3355,21 @@
   function predictedHTML(r, host = deckHost()) {
     if (!r.est) return "";
     const f = r.fit;
+    const parent = r.goal === "ace";
+    // The racing deck always shows her gaps: target (yours, else the build's), predicted, short.
+    if (!parent) {
+      const g = raceGaps(r, cm(host)), short = g.short.map((v, i) => v > 0 ? E.STAT_LABELS[E.STATS[i]] + " −" + v : "").filter(Boolean);
+      const gapTable = `<div class="predicted">
+      <b>Predicted stats and her gaps</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers, before inheritance)</span>
+      <div class="table-wrap"><table class="pred cm-gaps"><thead><tr><th></th>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
+        <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
+        <tr><th>Predicted</th>${g.stats.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr>
+        <tr><th>Short</th>${g.short.map((v, i) => `<td class="num ${v > 0 ? "short" : "over"}">${v > 0 ? "−" + v : "+" + (g.stats[i] - g.target[i])}</td>`).join("")}</tr></tbody></table></div>
+      <p class="mini">${short.length ? `<b>Her gaps: ${short.join(" · ")}.</b> Parents turns them into the blue sparks to look for.` : "<b>No gaps:</b> every target is reached."} ${host === "cm" ? `<button type="button" class="linkish" data-goto-tab="parents" data-goto-section="gaps">Fill them in Parents →</button>` : ""}</p>`;
+      return gapTable + `<p class="mini">Skill points: about ${r.est.sp}.</p>
+      ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : " Euophrys' pick was already the closest."}</p>` : ""}
+      ${simulationDiagnosticsHTML(r)}${predictedIncludesHTML(r)}</div>`;
+    }
     const cell = (i) => {
       const s = E.STATS[i];
       if (!f) return `<td class="num">${r.est.stats[i]}</td>`;
@@ -3373,7 +3377,6 @@
       const d = r.est.stats[i] - t;
       return `<td class="num">${r.est.stats[i]}<div class="mini">${t}</div><div class="mini ${d < 0 ? "short" : "over"}">${d < 0 ? d : "+" + d}</div></td>`;
     };
-    const parent = r.goal === "ace";
     const blue = (x) => (x > 1100 ? 10 : x >= 600 ? 5 : 0);
     return `<div class="predicted">
       <b>${f ? "Predicted stats vs your targets" : "Predicted stats"}</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers${f ? "; rows: predicted, target, difference" : ""})</span>
@@ -3383,12 +3386,15 @@
       <p class="mini">Skill points: about ${r.est.sp}.${parent ? " 3★: the chance of a 3-star blue spark if that stat is the one picked (uma.guide: 0% under 600, 5% to 1100, 10% over). Inheritance isn't in these numbers and adds more." : ""}</p>
       ${parent ? predictedRatingHTML(r, host) : ""}
       ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : " Euophrys' pick was already the closest."}</p>` : ""}
-      ${simulationDiagnosticsHTML(r)}
+      ${simulationDiagnosticsHTML(r)}${predictedIncludesHTML(r)}
+    </div>`;
+  }
+  function predictedIncludesHTML(r) {
+    return `
       <details class="pred-help"><summary>What the predicted stats include</summary>
         <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); ${r.est.supportEvents ? "parsed ordinary-support event choices with coupled stats, SP, energy, bond, mood and hints; whole-card aggregate fallbacks where incomplete;" : "each card's aggregate event stats, skill points and energy;"} about 120 per stat from random events; ${r.est.calendarAssumptions ? "scheduled goal and URA races with winning rewards and Race Bonus; optional races: " + (typeof r.est.races === "number" ? Math.round(r.est.races * 100) / 100 : "not reported") + " per career" : "optional races on " + (r.independent ? "about 1 turn in 4 (a G1-heavy Independent Training agenda)" : "about 1 turn in 10 after the debut (more in Trackblazer)") + " with your race bonus"}; half gains past 1200; your stat caps with sparks; ${r.est.grandConcert ? "Grand Concert Performance, sampled lesson shops, song mastery gains, delayed friendship/specialty buffs, concerts, and Light Hello's first/repeat/unlock events, five outings, max energy and completion-dependent ending" : "a flat multiplier for the scenario's own bonuses"}.</p>
         <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), ${r.est.calendarAssumptions ? "separate career-end and secret-event rewards" : "goal and finale race rewards"}, ${r.est.grandConcert ? "other Friend/Group outings, raw-text event conditions/free grants, guest placements, uncalibrated event-frequency magnitude, hint-event stats and random mood drops (Grand Concert starts at Normal mood and uses Recreation/Hello to raise it)" : "friend card outings, New Year events, hint-event stats, scenario mechanics beyond the flat multiplier, and mood drops (it assumes Great all career)"}. These are simplified estimates, not guaranteed results. Missing mechanics can change both the predicted stats and how decks compare.</p>
-      </details>
-    </div>`;
+      </details>`;
   }
 
   // How the deck covers each must-have: the chance it's offered and from which cards, or which
@@ -3493,10 +3499,15 @@
     const j = deckJob(host);
     const q = (selector) => deckElement(host, selector);
     const hit = (selector) => t.closest(deckSelector(host, selector));
-    const c = state.tab === "cm" ? cm(host) : null;
+    const c = deckTab() ? cm(host) : null;
     if (!c) return false;
     const style = hit("[data-cm-style]");
-    if (style) { c.style = style.dataset.cmStyle; skillLimit = 60; save(); renderCM(); return true; }
+    if (style) {
+      c.style = style.dataset.cmStyle;
+      const ace = host === "cm" ? W.current(state).ace : null;
+      if (ace) ace.style = c.style;
+      skillLimit = 60; save(); renderCM(); return true;
+    }
     const build = hit("[data-cm-build]");
     if (build) { state.build = build.dataset.cmBuild; commit(true); flash("Turn coach build set to " + E.BUILDS[state.build].label); return true; }
     const goalBtn = hit("[data-cm-goal]");
@@ -3510,8 +3521,7 @@
     }
     if (hit("#cmWish, #cmSensitivity")) {
       const run = hit("#cmWish") ? runWishlist : runSensitivity;
-      if (host === "cm" && j.optResult && j.optResult.key !== optKey(host)) cmPlan().predictCurrent().then(() => run(host));
-      else run(host);
+      run(host);
       return true;
     }
 
@@ -3634,6 +3644,8 @@
     }
     // The Parents tab picks her once, in ① Who.
     if (host === "parents") return `<details class="pred-help"><summary>Trainee: ${tr ? esc(label) : "choose her in ①"} · growth and skills</summary>${info}</details>`;
+    // CM & decks builds for the ace picked in the team above.
+    if (host === "cm") return `<div class="row-wrap tier-trainee"><span><b>Deck for ${tr ? esc(label) : "your ace"}</b></span>${info}</div>`;
     return `<div class="row-wrap tier-trainee">
       <label class="field grow"><span>Trainee (shared with the coach)</span><input data-pick-trainee="1" list="traineeList" value="${esc(label)}" placeholder="Type a trainee name" autocomplete="off"></label>
       ${info}
@@ -3806,7 +3818,12 @@
     }
     if (state.tab === "cm" && HAS_DATA && cmPlan()) {
       syncWorkflow();
-      cmPlan().render(body);
+      renderDecks(body);
+      return;
+    }
+    if (state.tab === "parents" && HAS_DATA && cmPlan()) {
+      syncWorkflow();
+      cmPlan().renderParents(body);
       return;
     }
     if (state.tab === "pulls" && HAS_DATA && pulls()) {

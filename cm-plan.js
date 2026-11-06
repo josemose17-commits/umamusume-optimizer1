@@ -63,7 +63,8 @@
       const t = trainee(tid || m.tid);
       return { cid: m.cid, tid: tid || m.tid || null, white: (m.white || []).map((w) => w.slice()), blue: (m.blue || [0, 0]).slice(), pink: (m.pink || [0, 0]).slice(), green: m.green || 0, wins: (m.wins || []).slice(), unique: inherited(t) };
     }
-    const charMember = (cid) => Object.assign(blank(), { cid });
+    // A character standing in for a rental you haven't picked (no sparks or wins known).
+    const charMember = (cid) => Object.assign(blank(), { cid, standIn: true });
     const familyOf = (f) => { const out = {}; F.SLOTS.forEach((k) => { out[k] = f[k] || null; }); return out; };
 
     // The x family.js scores against: the ace ({ cid, tid, apt }), her race ({ preset, style }),
@@ -72,7 +73,8 @@
       const t = trainee(c.ace.tid);
       const L = (c.rel && c.rel.L) || {};
       const uniques = Object.keys(L).filter((id) => /^9\d+$/.test(id) && owners.has(id)).map((id) => ({ id, L: L[id], owners: owners.get(id) }));
-      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel: c.rel, raceL: L, offers: c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, chars: [], mine: [], uniques, fam: {} };
+      // gaps: the ace's shortfall per stat (CM & decks' prediction against her targets), or null.
+      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel: c.rel, raceL: L, offers: c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, gaps: c.gaps || null, chars: [], mine: [], uniques, fam: {} };
     }
     const wantMemo = new WeakMap();
     const want = (x) => { if (!wantMemo.has(x)) wantMemo.set(x, fam.lookFor(x)); return wantMemo.get(x); };
@@ -195,7 +197,8 @@
     }
     const asVeteran = r => ({ id: "rental:" + r.friend, cid: r.parent.cid, tid: r.parent.tid, self: r.parent, parents: r.parents, rental: r.friend });
     function trainingContext(x, t, offers) {
-      return context({ ace: { cid: t.cid, tid: t.id }, race: x.race, rel: x.rel, offers: offers || {}, build: x.build });
+      // The parent you train looks for the blues that fill the ace's gaps.
+      return context({ ace: { cid: t.cid, tid: t.id }, race: x.race, rel: x.rel, offers: offers || {}, build: x.build, gaps: x.gaps });
     }
     function trainingFamily(parents) {
       const v = parents[0], r = parents[1];
@@ -271,6 +274,35 @@
     }
     // Is your best veteran good enough? A fresh one is worth training when she'd beat it by MARGIN.
     const freshWins = (vet, fresh) => !!fresh && (!vet || fresh.value > vet.value * (1 + MARGIN));
+
+    // ---- the ace's family affinity, before you borrow ----
+    // The total the game will show when you pick her parents, with the slots you haven't
+    // filled yet (the borrowed grandparent, Parent 2 and her parents) taken by the characters
+    // with the most affinity there, as uma.moe's affinity sort finds them. A rental is assumed
+    // to have won the G1s rentals most often win (popular(vets)); her own parents share those
+    // with her. Known members keep their real wins. { total, symbol, known, filled: [slot] }.
+    function outlook(x, f, vets) {
+      const ace = +x.ace.cid, pop = popular(vets).slice(0, 12).map((p) => p.name), out = {}, filled = [];
+      F.SLOTS.forEach((k) => { out[k] = f[k] && f[k].cid ? { cid: +f[k].cid, wins: (f[k].wins || []).slice(), known: !f[k].standIn } : null; });
+      const pick = (others, avoid) => {
+        let best = null;
+        (o.chars || []).forEach((c) => { if (avoid.includes(+c)) return; const pts = A.together(ace, ...others, +c); if (!best || pts > best.pts) best = { cid: +c, pts }; });
+        return best ? best.cid : null;
+      };
+      const rent = (k, cid) => { if (cid) { out[k] = { cid, wins: pop.slice(), known: false }; filled.push(k); } };
+      if (out.p1 && !out.g12) rent("g12", pick([out.p1.cid], [ace, out.p1.cid, out.g11 && out.g11.cid]));
+      if (out.p1 && (!out.p2 || !out.p2.known)) {
+        let best = null;
+        (o.chars || []).forEach((c) => { if ([ace, out.p1.cid].includes(+c)) return; const pts = A.together(ace, +c) + A.together(out.p1.cid, +c); if (!best || pts > best.pts) best = { cid: +c, pts }; });
+        rent("p2", best && best.cid);
+      }
+      if (out.p2 && !out.p2.known) { rent("g21", pick([out.p2.cid], [ace, out.p2.cid])); rent("g22", pick([out.p2.cid], [ace, out.p2.cid, out.g21 && out.g21.cid])); }
+      const L = { trainee: ace }, wins = {};
+      F.SLOTS.forEach((k) => { L[k] = out[k] ? out[k].cid : null; if (out[k]) wins[k] = out[k].wins; });
+      const t = A.total(L, wins), knownL = { trainee: ace }, knownW = {};
+      F.SLOTS.forEach((k) => { knownL[k] = out[k] && out[k].known ? out[k].cid : null; if (out[k] && out[k].known) knownW[k] = out[k].wins; });
+      return { total: t.total, symbol: t.symbol, known: A.total(knownL, knownW).total, filled, family: out };
+    }
 
     // ---- her races ----
     // The G1s your veterans (and the parents they were trained with, many of them rentals) won,
@@ -362,10 +394,11 @@
       if (excluded.length) c.emp = excluded;
       return { url: UMA_MOE + "?filters=" + encodeURIComponent(b64(JSON.stringify(c))), filters: c };
     }
+    // opts.pinkFor: whose aptitudes pink is for (the ace, when the target is the parent you train).
     function rentalSearch(x, p1, opts = {}) {
-      const needs = want(x), course = x.race.preset.course;
+      const needs = want(x), course = x.race.preset.course, px = opts.pinkFor || x, pinks = want(px).pink;
       const indexes = [...new Set([course.surface === "Dirt" ? 1 : 0, DIST(course.distance), STYLE_INDEX[x.race.style]].filter((i) => i != null))];
-      const choices = indexes.map((i) => { const n = needs.pink.find((p) => p.i === i); return { i, label: MOE_STYLES[i] || F.APT_LABELS[i], grade: (x.ace.apt || [])[i] || "?", needed: !!n, target: n ? n.target : null }; });
+      const choices = indexes.map((i) => { const n = pinks.find((p) => p.i === i); return { i, label: MOE_STYLES[i] || F.APT_LABELS[i], grade: (px.ace.apt || [])[i] || "?", needed: !!n, target: n ? n.target : null }; });
       // Your rule: the aptitude she still has to take to S (her distance; her surface in a sprint),
       // else one still below A; none when she's already there.
       const auto = choices.find((p) => p.needed && p.target === "S") || choices.find((p) => p.needed) || null;
@@ -392,9 +425,9 @@
       const char = cid => { const t = o.trainees.find(t => +t.cid === +cid); return t ? t.n : "#" + cid; };
       const required = new Set((q.required || []).map(id => meta[id] && meta[id][0]));
       const names = (q.whites || []).filter(w => !required.has(meta[w.id] && meta[w.id][0])).map(w => skillName(w.id) + (q.sort === "whites" ? " (P" + w.priority + ")" : ""));
-      const lines = ["Target: " + tn(c.t[0]), "Legacy: " + (c.p2c ? tn(c.p2c) + " · " + (c.p2w || []).length + " G1 wins" : "none")];
-      if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · own " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " · lineage " + c.b[0][1] + "–9★");
-      lines.push("Pink: " + (c.p ? (MOE_STYLES[PINK_IDS.indexOf(c.p[0][0])] || F.APT_LABELS[PINK_IDS.indexOf(c.p[0][0])]) + " · lineage 3–9★; no own minimum" : "off"));
+      const lines = ["Affinity target: " + tn(c.t[0]), "Other parent (legacy): " + (c.p2c ? tn(c.p2c) + " · her " + (c.p2w || []).length + " G1 wins" : "none")];
+      if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " on the rental herself · " + c.b[0][1] + "–9★ across her and her parents");
+      lines.push("Pink: " + (c.p ? (MOE_STYLES[PINK_IDS.indexOf(c.p[0][0])] || F.APT_LABELS[PINK_IDS.indexOf(c.p[0][0])]) + " · 3–9★ across her and her parents; none needed on her" + (q.pink && q.pink.target ? " (to take the ace to " + q.pink.target + ")" : "") : "off"));
       lines.push("Required whites: " + (q.required.length ? q.required.map(skillName).join(", ") + " · 1–9★ each; all required" : "none"));
       lines.push((q.sort === "whites" ? "Preferred whites: " : "Whites to look for (no filter): ") + (names.join(", ") || "none"));
       if (c.omw) lines.push("Own preferred whites: " + q.whites.filter(w => w.priority === 0 && !required.has(meta[w.id][0])).map(w => skillName(w.id) + " (P0)").join(", "));
@@ -408,7 +441,8 @@
       const v = fresh.parents[0], tx = trainingContext(x, fresh.t, fresh.offers);
       const f = { p1: member(v.self, v.tid), g11: member(v.parents[0]), g12: member(v.parents[1]) };
       const s = fam.score(familyOf(f), tx);
-      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s) }));
+      // Her grandparent is the ace's grandparent too: pink by the ace's rule, the ace's missing whites.
+      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s), pinkFor: x }));
     }
     function raceWins(races, n) {
       return [...new Set(upTo(races, n).map(r => r.name).concat((races.goals || []).filter(r => r.goal === "fixed" && g1Map.has(r.name)).map(r => r.name)))];
@@ -466,7 +500,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { context, outlook, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };

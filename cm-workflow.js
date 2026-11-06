@@ -1,5 +1,5 @@
-// Saved CM/LoH state: one cup, up to three aces, and one deck per ace and cup.
-// Older cm / cmplan / parents saves retain their settings and family entries.
+// Saved CM & decks / Parents state: one cup, up to three aces, and one deck per ace and cup.
+// Older cm / cmplan / parents saves keep their settings, family entries and tab.
 (function (root) {
   "use strict";
   const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -83,9 +83,12 @@
       const first = current(s);
       if (first.ace && !first.deck) c.decks[first.key] = clone(legacy);
       delete c.from; delete c.ssMust;
-      c.workflowVersion = 1;
+      c.workflowVersion = 2;
     }
-    if (["cm", "cmplan", "parents"].includes(s.tab)) s.tab = "cm";
+    // Two tabs again: CM & decks ("cm"; the planner's "cmplan" too) and Parents ("parents").
+    if (s.tab === "cmplan") s.tab = "cm";
+    // The one-tab CM/LoH page (version 1) saved "cm" for everything: it opens CM & decks, step 1.
+    if (c.workflowVersion < 2) c.workflowVersion = 2;
     return sync(s, o);
   }
 

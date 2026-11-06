@@ -1,5 +1,5 @@
-// The CM/LoH planner's logic (cm-plan.js): Parent 1 from your veterans given the ace's deck, a
-// fresh Parent 1 when none is good enough, her races, how many keep SS, and the uma.moe search.
+// The Parents tab's logic (cm-plan.js): Parent 1 from your veterans given the ace's deck, a
+// new Parent 1 and her races at SS, the affinity outlook, and both uma.moe searches.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const A = require("../affinity.js");
@@ -315,4 +315,39 @@ test("fresh-parent rental choice keeps X's borrowed parent and puts her shared G
   assert.deepEqual(limited.f.p1.wins, plan.raceWins(races, 1), "ace affinity never assumes X wins rank-cut races");
   A.goalG1s(t.cid).forEach(g => assert.ok(limited.f.p1.wins.includes(g.name), "fixed career G1 wins are kept even when not shared yet"));
   assert.equal(cut.s.own.g12, A.together(x.ace.cid, t.cid, rental.parent.cid) + 3 * A.shared(cut.f.p1.wins, rental.parent.wins).length);
+});
+
+test("the ace's gaps pick the blue for both searches; the grandparent search uses the ace's pink rule and missing whites", () => {
+  const gaps = [0, 300, 0, 120, 0];
+  const x = plan.context({ ace: { cid: ace.cid, tid: ace.id }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build], gaps });
+  assert.deepEqual(plan.want(x).blue.map(b => b.i), [1, 3], "gap stats, biggest first");
+  const p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
+  const f2 = decode(plan.rentalSearch(x, p1));
+  assert.deepEqual(f2.mb, [[CP.BLUE_IDS[1], 3, 3]]); assert.deepEqual(f2.b, [[CP.BLUE_IDS[1], 7, 9]]);
+  const t = uniq[2], v = vet(uniq[3], [], { saddles: [10] });
+  const fresh = plan.rankFresh(x, [v], [t.id], {})[0];
+  const gq = plan.trainingRentalSearch(x, fresh), gf = decode(gq);
+  assert.deepEqual(gf.t, [t.id, null, null, null, null, null, null], "the new parent is the affinity target");
+  assert.equal(gf.p2c, v.tid, "your veteran is the other parent");
+  assert.deepEqual(gf.emp, [t.cid, v.cid], "neither can be the grandparent");
+  assert.deepEqual(gf.mb, [[CP.BLUE_IDS[1], 3, 3]]); assert.deepEqual(gf.b, [[CP.BLUE_IDS[1], 7, 9]], "blue in the ace's biggest gap");
+  const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
+  assert.ok(need && need.target === "S", "Special Week takes Medium to S");
+  assert.deepEqual(gf.p, [[CP.PINK_IDS[need.i], 3, 9]], "pink by the ace's rule"); assert.ok(!gf.mp && !gf.ow && !gf.w);
+  assert.deepEqual(gq.whites.map(w => w.id), plan.missingWhites(x, fresh.s).slice(0, 12).map(w => w.id), "the ace's missing whites, listed");
+  const text = plan.searchSummary(gq).join(" · ");
+  ["Affinity target: " + t.n, "Other parent (legacy): " + uniq[3].n, "Blue: Stamina", "to take the ace to S", "Exclude:", "Sort: affinity first"].forEach(s => assert.ok(text.includes(s), s));
+});
+
+test("the ace's family affinity once you borrow: open slots take the best-affinity characters with popular G1s", () => {
+  const x = x0(), t = uniq[2], v = vet(uniq[3], [], { wins: open(t).slice(0, 2) });
+  const fresh = plan.rankFresh(x, [v], [t.id], {})[0];
+  const y = plan.outlook(x, fresh.f, [v]);
+  assert.deepEqual(y.filled.slice().sort(), ["g12", "g21", "g22", "p2"], "grandparent, Parent 2 and her parents are borrowed");
+  assert.ok(y.total > y.known, "borrowed slots add affinity");
+  assert.equal(y.known, A.total({ trainee: ace.cid, p1: t.cid, g11: v.cid }, { p1: fresh.f.p1.wins, g11: fresh.f.g11.wins }).total);
+  assert.ok(!y.family.g12.cid || y.family.g12.cid !== t.cid && y.family.g12.cid !== v.cid, "the grandparent is neither of her parents' characters");
+  const full = Object.assign({}, fresh.f, { g12: m(uniq[4]), p2: m(uniq[5]), g21: m(uniq[6]), g22: m(uniq[7]) });
+  const z = plan.outlook(x, full, [v]);
+  assert.deepEqual(z.filled, []); assert.equal(z.total, z.known, "nothing assumed once every member is known");
 });
