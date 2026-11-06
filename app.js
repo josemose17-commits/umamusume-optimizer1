@@ -3019,7 +3019,7 @@
     const c = state.cm || {}, cmp = state.cmp, k = f.cup + "|" + f.tid;
     cmp.decks = cmp.decks || {}; cmp.byCup = cmp.byCup || {}; cmp.sel = cmp.sel || {};
     const old = cmp.decks[k] || {};
-    cmp.decks[k] = { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", must: (c.must || []).map(String), exclude: old.exclude || [], targets: Object.assign({}, c.targets || {}), rankGoal: c.rankGoal || "",
+    cmp.decks[k] = { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", must: (c.must || []).map(String), exclude: old.exclude || [], targets: Object.assign({}, c.targets || {}), rankGoal: c.rankGoal || "", rental: old.rental,
       cards: r.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: true })), searched: null };
     const list = cmp.byCup[f.cup] || (cmp.byCup[f.cup] = []);
     const ace = list.find((x) => +x.tid === +f.tid);

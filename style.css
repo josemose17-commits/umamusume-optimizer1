@@ -720,6 +720,16 @@ table.pred .over { color: var(--accent); }
 .cmp-deck { margin: 4px 0; padding-left: 22px; }
 .cmp-deck li { margin: 2px 0; }
 .cmp-filters { margin: 4px 0 8px; overflow-wrap: anywhere; }
+.cmp-rental-settings { margin: 4px 0 10px; min-width: 0; }
+.cmp-rental-settings > .row-wrap { margin-top: 8px; }
+.cmp-required { min-width: 0; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; }
+.cmp-required .row-wrap { gap: 6px; }
+.cmp-filter-table { table-layout: fixed; }
+.cmp-filter-table th, .cmp-filter-table td { overflow-wrap: anywhere; }
+.cmp-filter-table thead th:first-child { width: 24%; }
+.cmp-filter-table thead th:nth-child(2) { width: 35%; }
+.cmp-filter-table tbody th { font-size: .78rem; font-weight: 600; }
+.cmp-filter-section th { background: var(--surface-2); color: var(--accent); text-align: left; }
 .cmp-train { margin-top: 12px; border-left: 3px solid var(--accent); padding-left: 10px; }
 .cmp-races tr.cmp-cut td { opacity: .55; }
 .cmp-rent, .cmp-import { margin-top: 6px; }

@@ -23,7 +23,7 @@
 
   function create(ctx) {
     const { D, P, A, F, PR, T, esc } = ctx;
-    const CP = root.UmaCmPlan.create({ A, F, skills: ctx.SB.DATA.skills, trainees: D.DATA.trainees, chars: ctx.chars(), saddles: ctx.saddles, SS: PR.SS });
+    const CP = root.UmaCmPlan.create({ A, F, skills: ctx.SB.DATA.skills, trainees: D.DATA.trainees, chars: ctx.chars(), saddles: ctx.saddles, SS: PR.SS, today: ctx.today });
     let job = null;             // a search in progress: { stage, f }
     const views = new Map();    // each ace's deck as it stands, described: { sig, … }
     const found = new Map();    // each ace's parents, with the deck they were found for
@@ -76,6 +76,7 @@
       const k = keyOf(c, a);
       if (!c.decks[k]) { const d = ctx.deckDefaults(); c.decks[k] = { comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: [], exclude: [], targets: d.targets || {}, rankGoal: d.rankGoal || "", cards: null, searched: null }; }
       if (!c.decks[k].targets) c.decks[k].targets = {};
+      if (!c.decks[k].rental) c.decks[k].rental = { pink: "auto", quality: "recommended", required: [] };
       return c.decks[k];
     }
     // The deck with your limit breaks now (a friend's card is always LB4).
@@ -287,11 +288,9 @@
     }
 
     // The uma.moe search for Parent 2 with this Parent 1.
-    function linkFor(x, t, p1, train) {
+    function linkFor(x, t, p1, train, prefs) {
       const saddles = train ? train.agenda.map((r) => ctx.saddles[r.name]).filter(Boolean) : CP.saddlesOf(p1);
-      const want = CP.want(x), whites = CP.missingWhites(x, p1.s).slice(0, 4);
-      const blue = want.blue.map((b) => b.i);
-      return Object.assign(CP.umaMoe({ ace: t.id, p1: { tid: p1.f.p1.tid, saddles }, blue, whites: whites.map((w) => w.id) }), { blue: want.blue, whites, pink: want.pink, green: want.green.slice(0, 3), wins: saddles.length });
+      return CP.rentalSearch(x, p1, Object.assign({}, prefs || {}, { saddles }));
     }
 
     // ---------- drawing ----------
@@ -430,7 +429,7 @@
       const btn = `<div class="row-wrap"><button type="button" class="btn" id="cmpParents"${job || !has ? " disabled" : ""}>${r ? "Find them again" : "Find her parents"}</button><span class="mini">${has ? "For her deck as it is above." : "Search deck finds them too."}</span>${stale ? `<span class="mini warn">The plan changed; find them again.</span>` : ""}</div>`;
       if (!r) return btn;
       return btn + `<h4 class="cmp-sub">Parent 1</h4>${p1HTML(r)}
-        <h4 class="cmp-sub">Parent 2: a friend's rental</h4>${p2HTML(r)}
+        <h4 class="cmp-sub">Parent 2: a friend's rental</h4>${p2HTML(r, c, a)}
         ${r.train ? `<details class="cmp-train" data-cmp-open="train"${(opened.train != null ? opened.train : r.useFresh) ? " open" : ""}><summary><b>${r.useFresh ? "Train her: " : "A fresh Parent 1, if you train one anyway: "}${esc(tName(r.train.f.t))}</b> · ${plural(r.train.ss.n, "extra race")}${r.train.ss.none ? ` (short of ${r.train.ss.rank})` : ""}</summary>${trainHTML(r, p)}</details>` : ""}`;
     }
 
@@ -455,21 +454,15 @@
       return out;
     }
 
-    function p2HTML(r) {
+    function p2HTML(r, c, a) {
       if (!r.p1) return `<p class="mini">Pick Parent 1 first.</p>`;
-      const l = r.link, p1 = r.p1, t = r.t;
-      const name = ctx.skillName;
+      const prefs = deckOf(c, a).rental;
+      const l = linkFor(r.x, r.t, r.p1, r.useFresh ? r.train : null, prefs), p1 = r.p1;
       const blue = l.blue.map((b) => `<b>${b.label} 3★</b>`).join(" or ");
-      const items = [
-        `Affinity: ${esc(tName(t))} + ${esc(p1.kind === "vet" ? vetName(p1.v) : tName(p1.t))} (${l.wins} G1 wins)`,
-        `Blue: ${blue}`,
-        l.whites.length ? `Preferred whites: ${l.whites.map((w) => esc(name(w.id))).join(", ")}` : "",
-        l.pink.length ? `Optional pink: ${l.pink.map((x) => x.label).join(", ")}` : "",
-        l.green.length ? `Optional green: ${l.green.map((g) => esc(name(g.id))).join(", ")}` : "",
-      ].filter(Boolean);
       const rents = CP.rankRentals(r.x, p1, ctx.rentals());
       return `<p><a class="btn small" href="${esc(l.url)}" target="_blank" rel="noopener">Search uma.moe for her Parent 2</a></p>
-        <p class="mini cmp-filters">${items.join(" · ")} · sort by affinity.</p>
+        <p class="mini cmp-filters">${blue} · ${l.pink ? `${l.pink.label} pink ${l.pink.min}–9★` : "any pink"} · preferred whites first, then affinity.</p>
+        ${rentalSettingsHTML(l, r, prefs)}
         <details class="cmp-rent" data-cmp-open="rent"${(opened.rent != null ? opened.rent : rents.length > 0) ? " open" : ""}><summary class="mini"><b>Paste rentals from uma.moe</b> · ${ctx.rentals().length ? `${ctx.rentals().length} pasted` : "none yet"}</summary>
           <p class="mini">Paste whole uma.moe parent cards to rank them with Parent 1.</p>
           <textarea class="fp-vets" data-cmp-rent-text rows="3" placeholder="Paste uma.moe parent cards here"></textarea>
@@ -477,6 +470,61 @@
           ${rents.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Rental (and her parents)</th><th>Friend</th><th class="num">Family</th><th class="num">Affinity</th></tr></thead><tbody>${rents.slice(0, 10).map((x) => `<tr><td>${esc(x.r.names[0])} <span class="mini">+ ${esc(x.r.names[1] || "")} + ${esc(x.r.names[2] || "")}</span><div class="mini">${sparks(x.r.parent)}${topSkills(x.s, ["p2", "g21", "g22"]) ? ` · best sparks: ${topSkills(x.s, ["p2", "g21", "g22"])}` : ""}</div></td><td>${esc(x.r.trainer)}<div class="mini">${esc(x.r.friend.replace(/(\d{3})(?=\d)/g, "$1 "))}</div></td><td class="num">${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td></tr>`).join("")}</tbody></table></div>` : ""}
           ${rents.hidden && rents.hidden.length ? `<p class="mini">Not shown (the game wouldn't allow them here): ${rents.hidden.map((h) => `${esc(h.r.trainer)}'s ${esc(h.r.names[0])} (${esc(h.why)})`).join("; ")}.</p>` : ""}
         </details>`;
+    }
+
+    function rentalSettingsHTML(l, r, prefs) {
+      const name = (id) => esc(ctx.skillName(id));
+      const list = (ids) => ids.length ? ids.map(name).join(", ") : "None";
+      const row = (field, value, why) => `<tr><th scope="row">${field}</th><td>${value}</td><td class="mini">${why}</td></tr>`;
+      const section = (title) => `<tr class="cmp-filter-section"><th colspan="3">${title}</th></tr>`;
+      const who = r.p1.kind === "vet" ? vetName(r.p1.v) : tName(r.p1.t);
+      const selected = new Set(l.required), grouped = [0, 1, 2].map((p) => ({ p, ids: l.whites.filter((w) => w.priority === p && !selected.has(w.id)).map((w) => w.id) })).filter((g) => g.ids.length);
+      const pink = l.pink ? `${l.pink.label}: ${l.pink.min}–9★` : "Any";
+      const wins = r.useFresh ? r.train.agenda.map((x) => x.name) : r.p1.f.p1.wins || [];
+      const allWins = [...new Set(wins)].map(esc).join(", ");
+      return `<details class="cmp-rental-settings" data-cmp-open="rental-settings"${opened["rental-settings"] ? " open" : ""}><summary><b>Full uma.moe settings</b> · factors, characters, rank and races</summary>
+        <div class="row-wrap"><label class="field"><span>Pink focus</span><select data-cmp-rental="pink"><option value="auto"${!prefs.pink || prefs.pink === "auto" ? " selected" : ""}>Auto (${l.pink ? l.pink.label : "none"})</option>${l.choices.map((p) => `<option value="${p.i}"${String(prefs.pink) === String(p.i) ? " selected" : ""}>${p.label} (ace: ${p.grade})</option>`).join("")}<option value="none"${prefs.pink === "none" ? " selected" : ""}>Any pink</option></select></label>
+          <label class="field"><span>Search width</span><select data-cmp-rental="quality"><option value="recommended"${!l.broad ? " selected" : ""}>More stars</option><option value="broad"${l.broad ? " selected" : ""}>More choices</option></select></label></div>
+        <p class="mini">More choices lowers the star limits and lets a grandparent carry the pink; your required whites stay.</p>
+        <fieldset class="cmp-required"><legend class="mini">Required white sparks (all checked skills must be in the rental branch)</legend><div class="row-wrap">${l.whites.map((w) => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}"${selected.has(w.id) ? " checked" : ""}>${name(w.id)}</label>`).join("") || '<span class="mini">No missing race whites.</span>'}</div></fieldset>
+        <div class="table-wrap"><table class="cmp-filter-table"><thead><tr><th>Field</th><th>Set it to</th><th>Why</th></tr></thead><tbody>
+          ${section("Affinity")}
+          ${row("Target character", esc(tName(r.t)), "The ace you're training.")}
+          ${row("Your legacy", `${esc(who)} · ${l.wins} G1 wins`, "Includes Parent 1 and her actual or planned shared wins in affinity.")}
+          ${section("Include / Exclude Umas · Support Cards · Search")}
+          ${row("Main Parent · Include", "Any character", "Compare whole families before locking a character.")}
+          ${row("Main Parent · Exclude", `${esc(tName(r.t))} + ${esc(who)} (all versions)`, "Neither can be Parent 2 under the game's rules.")}
+          ${row("Great Parent · Include / Exclude", "Any", "Keep good grandparents; sharing a character across branches can be legal.")}
+          ${row("Support Card & LB", "Any card · Any LB", "Your rental parent and borrowed support card can come from different trainers.")}
+          ${row("Search users", "Trainer ID and username blank", "Search all trainers.")}
+          ${section("Inheritance Factors · rental and her two parents")}
+          ${row("Blue Factors (Stats)", "No extra type limit", "The main parent's blue and the total below set the blue requirements.")}
+          ${row("Pink Factors (Aptitude)", pink, l.pink ? `${l.pink.known}★ of ${l.pink.label} is known on your Parent 1 branch. ${l.pink.needed ? `The ace starts at ${esc(l.pink.grade)} there; this is an aptitude gap to fix.` : "More carriers improve your chance at an S aptitude; the roll is not guaranteed."}` : "No pink requirement selected.")}
+          ${row("Green Factors (Unique)", "Any; focus links below", "Use a focus link when a specific inherited unique is essential.")}
+          ${row("White Factors · Required", l.required.length ? `${list(l.required)} · 1–9★ each · AND` : "None", "Check only skills you need this rental branch to supply.")}
+          ${row("Preferred White Factors", grouped.map((g) => `<b>P${g.p}:</b> ${list(g.ids)}`).join("<br>") || "None", "Missing skills first, accounting for her deck and Parent 1. P0 sorts before P1, then P2.")}
+          ${row("Lineage White Factors", "None", "Repeat stacks are optional; this search fills the ace's missing hints.")}
+          ${section("Main Parent Factors · the rental herself")}
+          ${row("Blue Factors (Stats)", l.blue.map((b) => `${b.label} 3★`).join(" OR "), "One key-stat blue on the rental, not just on a grandparent.")}
+          ${row("Pink Factors (Aptitude)", l.pink && l.pink.main ? `${l.pink.label} 3★` : "Any", l.pink && l.pink.main ? "Keep the focused pink on the direct parent too." : "The family pink filter can be met by a grandparent.")}
+          ${row("Green / Required White Factors", "Any / None", "The required whites may be anywhere in this rental branch.")}
+          ${row("Preferred White Factors", list(l.q.mainWhites) + (l.q.mainWhites.length ? " · P0" : ""), "Prefer the most valuable missing whites on the direct parent.")}
+          ${row("White categories · Common / Scenario / Race", "All minimums 0", "Useful skills matter more than unrelated factor counts.")}
+          ${section("General Criteria")}
+          ${row("Training Scenario", "Any scenario", "Compare the sparks she already has.")}
+          ${row("Min Win Count / Min White Factor Count", "0 / 0", "Shared G1 names and useful whites matter more than raw counts.")}
+          ${row("Parent Rank", "Any rank", "SS is the priority when training your own parent; a rental's existing sparks determine her value.")}
+          ${row("Max Follower Accounts", "Off (fewer than 1,000)", "uma.moe's default leaves out trainers with no free follower slot.")}
+          ${section("Total Star Count · rental branch only")}
+          ${row("Total Blue ★", String(l.q.totalBlue), l.broad ? "A broader search, keeping her own 3★ key blue." : "Three 3★ blues across this branch.")}
+          ${row("Total Pink / Green / White ★", "0 / 0 / 0", "The focused pink above is specific; unrelated total stars do not prove a good parent.")}
+          ${row("White categories · Common / Scenario / Race", "All minimums 0", "Preferred and required skills already guide this search.")}
+          ${section("Race Schedule Filter and sorting")}
+          ${row("Race Schedule Filter", "Blank", allWins ? `Shared wins to check: ${allWins}. Add specific wins only if you need to narrow the results.` : "The legacy context already accounts for shared wins; an extra hard calendar filter can discard useful families.")}
+          ${row("Sort by", "Preferred white groups, then Affinity", "uma.moe applies P0/P1/P2 first; paste candidates below for the planner's whole-family comparison.")}
+        </tbody></table></div>
+        ${l.focused.length ? `<p class="mini"><b>Focus an inherited unique:</b> ${l.focused.map((g) => `<a href="${esc(g.search.url)}" target="_blank" rel="noopener">${name(g.skill.id)} · ${g.skill.owners.map((t) => esc(tName(t))).join(" / ")}</a>`).join(" · ")}. Each link also requires that unique on the rental herself.</p>` : ""}
+      </details>`;
     }
 
     // Where her race count comes from, in words.
@@ -528,7 +576,7 @@
         <li><b>Parent 1:</b> the family score counts spark chances over two inspirations, affinity, blue start bonuses and needed pinks. A white her deck offers, or she has innately, counts only for its hint discount (about ${F.HINT_L} L).</li>
         <li><b>A fresh parent:</b> any of My umas with her best two veterans as parents, suggested only when she beats your best veteran by ${Math.round(root.UmaCmPlan.MARGIN * 100)}%. Expected whites use your veterans' learned skills and spark rates. Until 10 veterans with skills, defaults are 12 relevant skills, 30% sparks, and 1★/2★/3★ at 32/60/8%. Her unique counts at 2★; pink and blue land on a random aptitude and stat.</li>
         <li><b>Parent races:</b> career goals first, then shared G1s (+3 affinity per parent), then likely rental overlap, at B aptitude or better. Her rating keeps ${Math.round(root.UmaCmPlan.SS_SHARE * 100)}% of runs at S or SS; No minimum keeps every race. Ratings come from at least ${root.UmaCmPlan.BASE_MIN} veterans with at most ${root.UmaCmPlan.BASE_EXTRA} extra race in the coach's scenario, or the last one you used. Simulation estimates the cost per race; with too few veterans it supplies the ratings too.</li>
-        <li><b>Parent 2:</b> uma.moe opens with the ace and Parent 1 for affinity, shared G1 wins, a 3★ key-stat blue and missing whites as preferred factors. Pink and green suggestions are optional. Paste whole cards to compare their family scores.</li>
+        <li><b>Parent 2:</b> Full uma.moe settings shows each field and why it is set or left open. More stars asks for a 3★ key blue on her, 9 total blue stars and a focused pink; More choices relaxes stars. Required whites are AND conditions, while preferred whites use P0, then P1 and P2 before affinity. Green focus links require the selected inherited unique on the rental. Her rank is unrestricted: compare the sparks she already has. SS comes before extra affinity races when training your own parent.</li>
         <li><b>Train her:</b> learn relevant skills for whites and raise key stats for blue. The Parents tab buttons set her family, races, deck goal and target whites once, then open each step. Use the bar there to return; Set her up again starts over.</li>
       </ul></details></section>`;
     }
@@ -616,6 +664,12 @@
       if (a && ds.cmpSkillw != null) { deckOf(c, a).skillW = t.value; ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpMustAdd != null) { const d = deckOf(c, a); if (t.value && d.must.indexOf(t.value) === -1) d.must.push(t.value); ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpRank != null) { deckOf(c, a).rankGoal = t.value; ctx.save(); ctx.rerender(); return true; }
+      if (a && ds.cmpRental != null) { deckOf(c, a).rental[ds.cmpRental] = t.value; ctx.save(); ctx.rerender(); return true; }
+      if (a && ds.cmpRentalWhite != null) {
+        const prefs = deckOf(c, a).rental, have = new Set(prefs.required || []);
+        if (t.checked) have.add(ds.cmpRentalWhite); else have.delete(ds.cmpRentalWhite);
+        prefs.required = [...have]; ctx.save(); ctx.rerender(); return true;
+      }
       if (a && ds.cmpPick != null) { if (t.value) { setCard(c, a, +ds.cmpPick, +t.value); refreshPrediction(c, a); } return true; }
       if (ds.cmpRentText != null || t.id === "cmpVetsText") return true;
       return false;

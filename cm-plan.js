@@ -34,6 +34,8 @@
   // family.js's aptitude order (Turf, Dirt, Sprint, Mile, Medium, Long, Front, Pace, Late, End).
   const BLUE_IDS = [10, 20, 30, 40, 50];
   const PINK_IDS = [110, 120, 310, 320, 330, 340, 210, 220, 230, 240];
+  const STYLE_INDEX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 };
+  const MOE_STYLES = { 6: "Front Runner", 7: "Pace Chaser", 8: "Late Surger", 9: "End Closer" };
   const b64 = (s) => (typeof btoa === "function" ? btoa(s) : Buffer.from(s, "binary").toString("base64"));
 
   // o: { A (affinity.js), F (family.js), skills (skill-purchases' skills), trainees, chars
@@ -69,7 +71,7 @@
       const t = trainee(c.ace.tid);
       const L = (c.rel && c.rel.L) || {};
       const uniques = Object.keys(L).filter((id) => /^9\d+$/.test(id) && owners.has(id)).map((id) => ({ id, L: L[id], owners: owners.get(id) }));
-      return { ace: { cid: c.ace.cid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel: c.rel, raceL: L, offers: c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, chars: [], mine: [], uniques, fam: {} };
+      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel: c.rel, raceL: L, offers: c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, chars: [], mine: [], uniques, fam: {} };
     }
     const wantMemo = new WeakMap();
     const want = (x) => { if (!wantMemo.has(x)) wantMemo.set(x, fam.lookFor(x)); return wantMemo.get(x); };
@@ -275,9 +277,50 @@
         if (q.p1.saddles && q.p1.saddles.length) c.p2w = [...new Set(q.p1.saddles.map(Number))];
       }
       if (q.blue && q.blue.length) c.mb = q.blue.map((i, k) => (k ? [BLUE_IDS[i], 3, 3, 1] : [BLUE_IDS[i], 3, 3]));
-      const ws = [...new Set((q.whites || []).map((id) => (meta[id] ? +meta[id][0] * 10 : null)).filter(Boolean))];
-      if (ws.length) c.ow = ws;
+      const factor = (id) => meta[id] ? +meta[id][0] * 10 : null;
+      const ws = new Map();
+      (q.whites || []).forEach((w) => {
+        const id = factor(typeof w === "object" ? w.id : w), priority = typeof w === "object" ? Math.max(0, Math.floor(w.priority || 0)) : 0;
+        if (id && (!ws.has(id) || priority < ws.get(id))) ws.set(id, priority);
+      });
+      const required = [...new Set((q.required || []).map(factor).filter(Boolean))];
+      required.forEach((id) => ws.delete(id));
+      if (ws.size) c.ow = [...ws].map(([id, p]) => p ? [id, p] : id);
+      if (required.length) c.w = required.map((id) => [id, 1, 9]);
+      const mainWhites = [...new Set((q.mainWhites || []).map(factor).filter(Boolean))];
+      if (mainWhites.length) c.omw = mainWhites;
+      if (q.pink && PINK_IDS[q.pink.i]) {
+        c.p = [[PINK_IDS[q.pink.i], Math.max(1, Math.min(9, q.pink.min || 1)), 9]];
+        if (q.pink.main) c.mp = [[PINK_IDS[q.pink.i], 3, 3]];
+      }
+      if (q.totalBlue > 0) c.bss = Math.min(9, q.totalBlue);
+      if (q.green && q.green.length) c.mg = [...new Set(q.green)].map((tid, k) => k ? [+tid * 10, 1, 3, 1] : [+tid * 10, 1, 3]);
+      const excluded = [...new Set([q.ace, q.p1 && q.p1.tid].filter(Boolean).map((id) => Math.floor(+id / 100)))];
+      if (excluded.length) c.emp = excluded;
       return { url: UMA_MOE + "?filters=" + encodeURIComponent(b64(JSON.stringify(c))), filters: c };
+    }
+    // A complete rental search. SS is a goal for the parent you train, not a filter on an
+    // already-trained rental: her existing sparks decide her value. Compact fields follow
+    // uma.moe's published inheritance-factors codec; P0 sorts before P1, then P2.
+    function rentalSearch(x, p1, opts = {}) {
+      const needs = want(x), course = x.race.preset.course;
+      const indexes = [...new Set([course.surface === "Dirt" ? 1 : 0, DIST(course.distance), STYLE_INDEX[x.race.style]].filter((i) => i != null))];
+      const choices = indexes.map((i) => ({ i, label: MOE_STYLES[i] || F.APT_LABELS[i], grade: (x.ace.apt || [])[i] || "?", needed: needs.pink.some((p) => p.i === i) }));
+      const auto = choices.find((p) => p.needed) || choices.find((p) => p.i === DIST(course.distance));
+      const focus = opts.pink === "none" ? null : choices.find((p) => String(p.i) === String(opts.pink)) || auto;
+      const ownPink = focus ? [p1.f.p1, p1.f.g11, p1.f.g12].reduce((n, m) => n + (m && m.pink && m.pink[0] === focus.i ? m.pink[1] : 0), 0) : 0;
+      const broad = opts.quality === "broad";
+      const pink = focus ? Object.assign({}, focus, { known: ownPink, min: broad ? 1 : Math.max(3, 6 - ownPink), main: !broad }) : null;
+      const whites = missingWhites(x, p1.s).slice(0, 12).map((w, i) => Object.assign({}, w, { priority: i < 3 ? 0 : i < 7 ? 1 : 2 }));
+      // Keep explicitly required families available even after her deck changes.
+      const required = [...new Set((opts.required || []).map(String).filter((id) => meta[id]))];
+      required.forEach((id) => { if (!whites.some((w) => meta[w.id][0] === meta[id][0])) whites.push({ id, priority: 0, need: 0, L: 0 }); });
+      const green = needs.green.map((g) => Object.assign({}, g, { owners: g.owners.filter((t) => +t.cid !== +x.ace.cid && +t.cid !== +p1.f.p1.cid && (!o.today || t.en && t.en <= o.today)) }))
+        .filter((g) => g.owners.length).slice(0, 3);
+      const saddles = opts.saddles || saddlesOf(p1);
+      const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: needs.blue.map((b) => b.i), pink, whites, required, mainWhites: whites.filter((w) => w.priority === 0).map((w) => w.id), totalBlue: broad ? 6 : 9 };
+      return Object.assign(umaMoe(q), { q, blue: needs.blue, pink, choices, whites, required, green, wins: saddles.length, broad,
+        focused: green.map((g) => ({ skill: g, search: umaMoe(Object.assign({}, q, { green: g.owners.map((t) => t.id) })) })) });
     }
     // Parent 1's G1 saddles for uma.moe: a veteran's own, or a fresh one's planned wins.
     const saddlesOf = (p1) => (p1.kind === "vet" ? p1.v.saddles || [] : (p1.f.p1.wins || []).map((n) => saddleOf[n]).filter(Boolean));
@@ -297,7 +340,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { context, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };
