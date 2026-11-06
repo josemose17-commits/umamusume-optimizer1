@@ -10,6 +10,7 @@
   const STYLES = [["Nige", "Front"], ["Senkou", "Pace"], ["Sasi", "Late"], ["Oikomi", "End"]];
   const STYLE_LABEL = Object.fromEntries(STYLES);
   const MAX_ACES = 3, SWAP_TOP = 8;
+  const STATS = ["speed", "stamina", "power", "guts", "wit"];
   // A fresh parent's deck is first built for this many G1s (Race Bonus counts for them), before
   // her race plan is known.
   const PLAN_RACES = 10;
@@ -71,13 +72,16 @@
     // must-have skills, cards left out, and the deck itself (each card: locked or not).
     function deckOf(c, a) {
       const k = keyOf(c, a);
-      if (!c.decks[k]) { const d = ctx.deckDefaults(); c.decks[k] = { comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: [], exclude: [], cards: null, searched: null }; }
+      if (!c.decks[k]) { const d = ctx.deckDefaults(); c.decks[k] = { comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: [], exclude: [], targets: d.targets || {}, cards: null, searched: null }; }
+      if (!c.decks[k].targets) c.decks[k].targets = {};
       return c.decks[k];
     }
     // The deck with your limit breaks now (a friend's card is always LB4).
     const cardsNow = (d) => (d.cards || []).map((x) => Object.assign({}, x, { lb: x.borrowed ? 4 : ctx.owned()[x.id] != null ? +ctx.owned()[x.id] : x.lb }));
     // What the deck builder works with: the settings, these cards kept (locked).
-    const settings = (d, keep) => ({ comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: d.must, exclude: d.exclude,
+    // The stats you're aiming for ({ stat: value }, the ones you set), null for none.
+    const targetsOf = (d) => { const t = {}; STATS.forEach((x) => { if (d.targets[x] > 0) t[x] = +d.targets[x]; }); return Object.keys(t).length ? t : null; };
+    const settings = (d, keep) => ({ comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: d.must, exclude: d.exclude, targets: targetsOf(d),
       locked: keep.filter((x) => !x.borrowed).map((x) => x.id), friend: (keep.find((x) => x.borrowed) || {}).id || null });
     const inputsKey = (c) => JSON.stringify([c.ssMust, ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.rentals().length]);
 
@@ -129,6 +133,44 @@
         ctx.save();
       });
     }
+    // Search toward the stats you're aiming for: CM & decks' simulated search, from her deck as it
+    // stands (the quick search's first, if she has none), swapping a card at a time while the
+    // careers end closer to the targets (blank ones: the race build's), keeping her locked cards,
+    // makeup and must-haves.
+    async function searchTargets() {
+      const c = st(), p = cup(c), a = current(c);
+      if (!a) { ctx.flash("Pick an ace first."); return; }
+      await busy("Loading the card data…", async () => {
+        await ready(p);
+        const d = deckOf(c, a);
+        if (!d.cards || d.cards.length < 6) {
+          await stage("Searching her deck first…", 0.05);
+          const now = cardsNow(d), r = ctx.deck(p, styleOf(a), a.tid, null, settings(d, now.filter((x) => x.locked)));
+          const keep = new Set(now.filter((x) => x.locked).map((x) => x.id));
+          d.cards = r.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: keep.has(x.id) }));
+        }
+        const now = cardsNow(d), lockedIds = new Set(now.filter((x) => x.locked).map((x) => x.id));
+        const search = ctx.targetSearch(p, styleOf(a), a.tid, settings(d, now.filter((x) => x.locked)), now.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed })));
+        let more = true;
+        while (more) {
+          const t0 = Date.now();
+          while (more && Date.now() - t0 < 150) more = search.next();
+          await stage("Searching toward your targets: simulating careers for each swap…", 0.05 + 0.85 * search.progress());
+        }
+        await stage("Checking the best decks with more careers…", 0.92);
+        const fit = search.result();
+        d.cards = fit.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: lockedIds.has(x.id) }));
+        swap = null;
+        const v = view(c, a);
+        if (v) {
+          d.searched = v.total;
+          sims.set(keyOf(c, a), { sig: v.sig, stats: fit.after.stats, sp: fit.after.sp, short: fit.after.short, target: fit.target, caps: fit.caps, scenario: ctx.scenario().name,
+            before: { stats: fit.before.stats, short: fit.before.short }, swaps: fit.swaps });
+        }
+        ctx.save();
+      });
+    }
+
     // The cards that could go in slot i, best first: { id, lb, score, gain } (gain over hers).
     function swapOptions(c, a, i) {
       const v = view(c, a), d = deckOf(c, a);
@@ -325,8 +367,9 @@
           <label class="field"><span>Skill hints count</span><select data-cmp-skillw>${opt(ctx.skillWeights, d.skillW)}</select></label></div>
         ${must}</details>`;
       const run = `<div class="row-wrap"><button type="button" class="btn" id="cmpDeck"${job ? " disabled" : ""}>${d.cards ? "Search again" : "Search deck"}</button><span class="mini">${d.cards && d.cards.some((x) => x.locked) ? "Keeps your locked cards." : "From My cards at your limit breaks."}</span></div>`;
-      if (!d.cards) return opts + run + out;
-      if (!v) return opts + run + `<p class="mini">Loading the card data…</p>`;
+      const aim = targetsHTML(c, a, p, d) + `<div class="row-wrap"><button type="button" class="btn small" id="cmpTarget"${job ? " disabled" : ""}>Search toward my targets</button><span class="mini">Searches her deck first, then swaps toward your targets.</span></div>`;
+      if (!d.cards) return opts + run + out + aim;
+      if (!v) return opts + run + `<p class="mini">Loading the card data…</p>` + aim;
       const slots = v.cards.map((x, i) => {
         const card = D.card(x.id), open = swap && swap.k === k && swap.i === i;
         return `<li class="cmp-slot${x.locked ? " locked" : ""}"><div class="cmp-slot-main"><b>${esc(cardName(x.id))}</b> <span class="mini">${TYPE_LABEL[card.ty] || card.ty} · LB${x.lb}${x.borrowed ? " · a friend's card" : ""} · score ${fmtN(x.score)}${x.alt ? ` · next best ${esc(cardName(x.alt.id))} ${fmtN(x.alt.score)}` : ""}</span></div>
@@ -343,8 +386,31 @@
         <p class="mini"><b>Deck score ${fmtN(v.total)}</b>${diff}: each card's value with the other five fixed, added up.${note ? ` <span class="warn">${esc(note)}</span>` : ""}</p>
         ${offers ? `<p class="mini">Its best race skills, with the chance it offers each: ${offers}.</p>` : ""}
         ${out}
-        <div class="row-wrap"><button type="button" class="btn ghost small" id="cmpSim"${job || v.cards.length < 6 ? " disabled" : ""}>Simulate this deck</button><button type="button" class="btn ghost small" id="cmpUseCM"${v.cards.length ? "" : " disabled"}>Use this deck in CM &amp; decks</button></div>
-        ${simOk ? `<p class="mini">Predicted (${esc(sim.scenario)}, the coach's scenario, 16 careers): ${F.STAT_LABELS.map((l, i) => `${l} ${sim.stats[i]}`).join(" · ")} · ${fmtN(sim.sp)} SP.</p>` : ""}`;
+        ${targetsHTML(c, a, p, d)}
+        <div class="row-wrap"><button type="button" class="btn ghost small" id="cmpSim"${job || v.cards.length < 6 ? " disabled" : ""}>Simulate this deck</button><button type="button" class="btn small" id="cmpTarget"${job ? " disabled" : ""}>Search toward my targets</button><button type="button" class="btn ghost small" id="cmpUseCM"${v.cards.length ? "" : " disabled"}>Use this deck in CM &amp; decks</button></div>
+        ${simOk ? predictedHTML(sim, p, d) : ""}`;
+    }
+
+    // The stats you're aiming for: blank boxes show (and use) the race build's targets.
+    function targetsHTML(c, a, p, d) {
+      const bt = ctx.buildTarget(p), coach = ctx.coachTargets();
+      return `<div class="cmp-targets"><span class="mini"><b>Stats you're aiming for</b> (blank: the ${esc(ctx.buildLabel(p))} targets shown). <b>Search toward my targets</b> swaps cards until her simulated careers end closest to them; <b>Simulate this deck</b> shows how close this one gets.</span>
+        <div class="tg-row">${STATS.map((x, i) => `<label class="field"><span>${F.STAT_LABELS[i]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cmp-target="${x}" value="${d.targets[x] > 0 ? d.targets[x] : ""}" placeholder="${bt[x]}"></label>`).join("")}</div>
+        ${coach || targetsOf(d) ? `<div class="row-wrap">${coach ? `<button type="button" class="btn ghost small" id="cmpTgCoach">Use the turn coach's targets</button>` : ""}${targetsOf(d) ? `<button type="button" class="btn ghost small" id="cmpTgClear">Clear targets</button>` : ""}</div>` : ""}</div>`;
+    }
+    // Predicted stats against the targets (the race build's where you left one blank).
+    function predictedHTML(sim, p, d) {
+      const bt = ctx.buildTarget(p), mine = targetsOf(d) || {};
+      const tg = (x) => (sim.target && sim.target[x] != null ? sim.target[x] : mine[x] != null ? mine[x] : bt[x]);
+      let short = 0;
+      const rows = STATS.map((x, i) => {
+        const t = tg(x), have = sim.stats[i], gap = have - t;
+        if (gap < 0) short -= gap;
+        return `<tr><td>${F.STAT_LABELS[i]}</td><td class="num">${t}${mine[x] == null ? '<span class="mini"> build</span>' : ""}</td>${sim.before ? `<td class="num">${sim.before.stats[i]}</td>` : ""}<td class="num"><b>${have}</b></td><td class="num ${gap < 0 ? "warn" : ""}">${gap < 0 ? "−" + fmtN(-gap) + " short" : "+" + fmtN(gap)}</td></tr>`;
+      }).join("");
+      const swaps = sim.swaps && sim.swaps.length ? `<p class="mini">The search swapped ${sim.swaps.map((w) => `${esc(cardName(w.out))} → <b>${esc(cardName(w.in))}</b>`).join(", ")}: ${fmtN(sim.before.short)} short in all before, ${fmtN(sim.short)} after.</p>` : sim.before ? `<p class="mini">No swap got her careers closer to your targets: this deck is already the closest the search found (${fmtN(sim.short)} short in all).</p>` : "";
+      return `<div class="table-wrap"><table class="plan cmp-pred"><thead><tr><th>Stat</th><th class="num">Target</th>${sim.before ? '<th class="num">Before</th>' : ""}<th class="num">Predicted</th><th class="num"></th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="mini">${fmtN(short)} short in all · ${fmtN(sim.sp)} SP. Average of 16 simulated careers in ${esc(sim.scenario)} (the coach's scenario), before inheritance.</p>${swaps}`;
     }
 
     function swapHTML(c, a, i) {
@@ -456,7 +522,20 @@
         <details><summary class="mini">What the races cost: about ${Math.round(ss.perRace)} rating each, simulated</summary>
           <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th class="num">Extra races</th>${F.STAT_LABELS.map((l) => `<th class="num">${l.slice(0, 3)}</th>`).join("")}<th class="num">SP</th><th class="num">Rating</th><th class="num">SS</th></tr></thead><tbody>${ssRows}</tbody></table></div>
           <p class="mini">Simulated in ${esc(ss.simScen.name)} (the coach's scenario) with her deck above, Independent Training, 16 careers each, rated as the Parents tab does (skill points spent on her relevant skills). It leaves out inheritance, so its ratings run low; the planner takes only what each race costs from it${ss.from === "veterans" ? ", and the ratings you reach from your veterans" : ""}.</p></details>
-        <div class="row-wrap"><button type="button" class="btn small" data-cmp-send="${r.t.id}">Send her to the Parents tab</button><span class="mini">sets her as the parent you're training (also the coach's trainee), her races in ②, the ace's race in ③, these whites as spark ★ in ④, and this family in 2 · Her parents.</span></div>`;
+        ${stepsHTML(r)}`;
+    }
+
+    // Is she already set up in the Parents tab (sent from here for this ace and cup)?
+    function sentThere(r) {
+      const f = ctx.plannerFrom(), c = st();
+      return !!(f && f.kind === "parent" && f.cup === c.cup && +f.tid === +r.t.id && +f.p1 === +r.train.f.t.id);
+    }
+    // The Parents tab's steps for her, one click each (the first one sets her up there).
+    function stepsHTML(r) {
+      const ready = sentThere(r);
+      const step = (key, label) => `<button type="button" class="btn ${key === "family" ? "small" : "ghost small"}" data-cmp-send="${key}">${label}</button>`;
+      return `<div class="cmp-steps"><p class="mini"><b>Train her in the Parents tab</b>${ready ? ": she's set up there; each button takes you to that step (the bar at the top of the tab brings you back here)." : ": the first click sets her up there (her as the parent you're training, also the coach's trainee; her races in ②; the ace's race in ③; these whites as spark ★ in ④; this family in 2 · Her parents), then takes you to the step. The bar at the top of the tab brings you back here."}</p>
+        <div class="row-wrap">${step("family", "Her family")}${step("races", "② Her races and their cost")}${step("deck", "③ Her deck")}${step("rating", "④ Skills to buy for SS")}${ready ? `<button type="button" class="linkish" data-cmp-resend>Set her up there again</button>` : ""}</div></div>`;
     }
 
     function howHTML() {
@@ -475,19 +554,22 @@
       if (t.closest("#cmpDeck")) { searchDeck(false); return true; }
       if (t.closest("[data-cmp-fill]")) { searchDeck(true); return true; }
       if (t.closest("#cmpParents")) { findParents(); return true; }
+      if (t.closest("#cmpTarget")) { searchTargets(); return true; }
+      if (a && t.closest("#cmpTgCoach")) { const d = deckOf(c, a), ct = ctx.coachTargets() || {}; d.targets = {}; STATS.forEach((x) => { if (ct[x] > 0) d.targets[x] = +ct[x]; }); ctx.save(); ctx.rerender(); return true; }
+      if (a && t.closest("#cmpTgClear")) { deckOf(c, a).targets = {}; ctx.save(); ctx.rerender(); return true; }
       if (t.closest("#cmpSim")) {
         const v = a && view(c, a);
         if (!v) return true;
         busy("Simulating her deck…", async () => {
           await tick();
-          const r = ctx.simulateRace(cup(c), styleOf(a), a.tid, cardsNow(deckOf(c, a)), deckOf(c, a).must);
+          const d = deckOf(c, a), r = ctx.simulateRace(cup(c), styleOf(a), a.tid, cardsNow(d), d.must, targetsOf(d));
           sims.set(keyOf(c, a), Object.assign(r, { sig: v.sig }));
         });
         return true;
       }
       if (t.closest("#cmpUseCM") && a) {
         const d = deckOf(c, a);
-        ctx.useInCM({ cup: c.cup, style: styleOf(a), tid: a.tid, comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: d.must, cards: cardsNow(d) });
+        ctx.useInCM({ cup: c.cup, style: styleOf(a), tid: a.tid, comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: d.must, targets: d.targets, cards: cardsNow(d) });
         return true;
       }
       if (t.closest("#cmpImport")) {
@@ -521,12 +603,13 @@
         return true;
       }
       if (t.closest("[data-cmp-rent-clear]")) { ctx.clearRentals(); ctx.rerender(); return true; }
-      const send = t.closest("[data-cmp-send]");
-      if (send && a) {
+      const send = t.closest("[data-cmp-send]"), resend = t.closest("[data-cmp-resend]");
+      if ((send || resend) && a) {
         const r = found.get(keyOf(c, a));
         if (!r || !r.train) return true;
-        const f = r.train.f;
-        ctx.sendToParents({ cup: c.cup, style: r.style, ace: { cid: r.t.cid, tid: r.t.id }, p1: { cid: f.t.cid, tid: f.t.id }, parents: f.parents, races: r.train.agenda.filter((x) => !x.free).map((x) => x.name), wins: [...new Set(r.train.agenda.map((x) => x.name))], must: f.extra.whites.list.slice(0, 5).map((x) => x.id) });
+        const f = r.train.f, section = send ? send.dataset.cmpSend : "family";
+        if (send && sentThere(r)) { ctx.gotoParents(section); return true; }
+        ctx.sendToParents({ cup: c.cup, style: r.style, ace: { cid: r.t.cid, tid: r.t.id }, p1: { cid: f.t.cid, tid: f.t.id }, parents: f.parents, races: r.train.agenda.filter((x) => !x.free).map((x) => x.name), wins: [...new Set(r.train.agenda.map((x) => x.name))], must: f.extra.whites.list.slice(0, 5).map((x) => x.id) }, section);
         return true;
       }
       return false;
@@ -552,6 +635,7 @@
       if (ds.cmpStyle != null) { const x = aces(c)[+ds.cmpStyle]; if (x) x.style = t.value; ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpComp != null) { const d = deckOf(c, a); if (t.value === "") delete d.comp[ds.cmpComp]; else d.comp[ds.cmpComp] = +t.value; ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpBorrow != null) { const d = deckOf(c, a); d.borrow = t.checked; if (!t.checked && d.cards) d.cards = d.cards.filter((x) => !x.borrowed); ctx.save(); ctx.rerender(); return true; }
+      if (a && ds.cmpTarget != null) { const d = deckOf(c, a), n = +t.value; if (n > 0) d.targets[ds.cmpTarget] = n; else delete d.targets[ds.cmpTarget]; ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpSkillw != null) { deckOf(c, a).skillW = t.value; ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpMustAdd != null) { const d = deckOf(c, a); if (t.value && d.must.indexOf(t.value) === -1) d.must.push(t.value); ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpPick != null) { if (t.value) setCard(c, a, +ds.cmpPick, +t.value); ctx.rerender(); return true; }

@@ -741,3 +741,9 @@ table.pred .over { color: var(--accent); }
 .cmp-sub { margin: 10px 0 4px; font-size: .95rem; }
 .cmp-deckset { margin: 4px 0 8px; }
 .cmp-deckset .comp { margin: 6px 0; }
+.cmp-bar { border-left: 3px solid var(--accent); padding: 8px 12px; }
+.cmp-bar .row-wrap { align-items: center; }
+.cmp-targets { margin: 10px 0 6px; display: grid; gap: 6px; }
+.cmp-targets .tg-row input { width: 100%; }
+.cmp-pred { margin-top: 6px; }
+.cmp-steps { margin-top: 10px; }
