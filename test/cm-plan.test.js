@@ -1,5 +1,5 @@
-// The CM/LoH planner's logic (cm-plan.js): Parent 1 from your veterans given the ace's deck, a
-// fresh Parent 1 when none is good enough, her races, how many keep SS, and the uma.moe search.
+// The Parents tab's logic (cm-plan.js): Parent 1 from your veterans given the ace's deck, a
+// new Parent 1 and her races at SS, the affinity outlook, and both uma.moe searches.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const A = require("../affinity.js");
@@ -95,12 +95,12 @@ test("a fresh Parent 1: one of your umas, two veterans as her parents, the G1s s
   assert.equal(f.rates.spark, CP.SPARK_P);
 });
 
-test("a fresh Parent 1's whites: your veterans' own spark rate and stars", () => {
+test("a fresh Parent 1's whites: your veterans' own spark rate, SS stars, and copies in her lineage", () => {
   const vets = uniq.slice(10, 22).map((t) => vet(t, [[top[0], 1], [top[1], 2], [top[2], 2], [top[3], 3]], { learned: 20 }));
   const q = plan.rates(vets);
   assert.equal(q.vets, 12);
   assert.ok(Math.abs(q.spark - 48 / 240) < 1e-12, "48 white sparks over 240 skills learned");
-  assert.deepEqual(q.stars, [0.25, 0.5, 0.25]);
+  assert.deepEqual(q.stars, [0.2, 0.7, 0.1], "a parent you train is always SS: her white sparks come out 20/70/10%");
   assert.equal(q.learn, Math.round(20 * 0.75), "learns as many relevant skills as 3/4 of what your veterans learn");
   const none = plan.rates(uniq.slice(10, 22).map((t) => vet(t, [], { learned: 20 })));
   assert.equal(none.spark, 0.15, "a rate the game can't give is held to 15%..45%");
@@ -110,6 +110,8 @@ test("a fresh Parent 1's whites: your veterans' own spark rate and stars", () =>
   const eff = plan.fam.worthOf(x);
   const firstFam = SB.DATA.skills[w.list[0].id][0];
   assert.equal(eff[firstFam], Math.max(...Object.values(eff)), "the most valuable first");
+  const copies = { [firstFam]: 2 }, boosted = plan.freshWhites(x, all, 0, q, copies);
+  assert.ok(Math.abs(boosted.list[0].spark - w.list[0].learn * (q.spark + 0.05)) < 1e-12, "two copies in her parents and grandparents: +2.5% each");
 });
 
 test("is your best veteran good enough? a fresh one only when she beats it by the margin", () => {
@@ -178,7 +180,7 @@ test("uma.moe codec: one blue stat across the branch, version target, legacy win
 for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`Parent 2 search decodes every field: ${quality}, ${sort}`, () => {
   const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
   p1.v.saddles = [10, 11];
-  const q = plan.rentalSearch(x, p1, { quality, sort, blue: 0 });
+  const q = plan.rentalSearch(x, p1, { quality, sort, blue: 0, pink: "none" });
   const f = decode(q), broad = quality === "broad";
   assert.deepEqual(f.t, [ace.id, null, null, null, null, null, null]);
   assert.equal(f.p2c, uniq[0].id); assert.deepEqual(f.p2w, [10, 11]);
@@ -207,11 +209,15 @@ for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", 
   });
 });
 
-test("search defaults use the top key blue; pink is optional, lineage-only; whites are required only when checked", () => {
+test("search defaults use the top key blue; pink follows the rule, lineage-only; whites are required only when checked", () => {
   const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
   const defaults = decode(plan.rentalSearch(x, p1));
   assert.equal(defaults.mb[0][0], CP.BLUE_IDS[plan.want(x).blue[0].i]);
-  assert.ok(!defaults.ow && !defaults.omw && !defaults.p && !defaults.mp && !defaults.w);
+  assert.ok(!defaults.ow && !defaults.omw && !defaults.mp && !defaults.w);
+  const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
+  if (need) assert.deepEqual(defaults.p, [[CP.PINK_IDS[need.i], 3, 9]], "pink per the rule by default");
+  else assert.ok(!defaults.p, "no pink when she's already there");
+  assert.ok(!decode(plan.rentalSearch(x, p1, { pink: "none" })).p, "pink can be turned off");
   const q = plan.rentalSearch(x, p1, { blue: 4, pink: "7", required: [top[0]] });
   const f = decode(q);
   assert.deepEqual(f.b, [[50, 7, 9]]); assert.deepEqual(f.mb, [[50, 3, 3]]);
@@ -248,7 +254,7 @@ function freshFixture() {
 for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`borrowed parent for X search: ${quality}, ${sort}`, () => {
   const { x, t, v, fresh } = freshFixture();
   assert.equal(fresh.parentMode, "rental"); assert.equal(fresh.parents.length, 1, "one veteran plus an unfilled rental");
-  const q = plan.trainingRentalSearch(x, fresh, { quality, sort, blue: 0 });
+  const q = plan.trainingRentalSearch(x, fresh, { quality, sort, blue: 0, pink: "none" });
   const f = decode(q), broad = quality === "broad";
   assert.deepEqual(f.t, [t.id, null, null, null, null, null, null]);
   assert.equal(f.p2c, v.tid); assert.deepEqual(f.p2w, [...new Set(v.saddles.concat(v.self.wins.map(n => saddles[n]).filter(Boolean)))]);
@@ -283,6 +289,7 @@ test("rental ranking adds her own sparks for the ace and her lineage for X; grea
     assert.equal(row.f.g12.tid, rental.parent.tid);
     assert.deepEqual(row.trainingPart.start, [63, 0, 0, 0, 0], "all three blues help X's key-stat / SS targets");
     assert.deepEqual(row.acePart.start, [21, 0, 0, 0, 0], "only R's own blue helps the ace");
+    assert.ok(row.trainingPart.stats[0] > row.trainingPart.start[0], "over the run, blues add more at the inspirations");
     assert.deepEqual(row.trainingScore.own, A.individual({ trainee: t.cid, p1: v.cid, p2: rental.parent.cid, g11: v.parents[0].cid, g12: v.parents[1].cid, g21: rental.parents[0].cid, g22: rental.parents[1].cid }, { p1: v.self.wins, p2: rental.parent.wins, g11: [], g12: [], g21: [], g22: [] }));
   }
   const invalid = { ...rental, parent: m(t) };
@@ -308,4 +315,78 @@ test("fresh-parent rental choice keeps X's borrowed parent and puts her shared G
   assert.deepEqual(limited.f.p1.wins, plan.raceWins(races, 1), "ace affinity never assumes X wins rank-cut races");
   A.goalG1s(t.cid).forEach(g => assert.ok(limited.f.p1.wins.includes(g.name), "fixed career G1 wins are kept even when not shared yet"));
   assert.equal(cut.s.own.g12, A.together(x.ace.cid, t.cid, rental.parent.cid) + 3 * A.shared(cut.f.p1.wins, rental.parent.wins).length);
+});
+
+test("the ace's gaps pick the blue for both searches; the grandparent search uses the ace's pink rule and missing whites", () => {
+  const gaps = [0, 300, 0, 120, 0];
+  const x = plan.context({ ace: { cid: ace.cid, tid: ace.id }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build], gaps });
+  assert.deepEqual(plan.want(x).blue.map(b => b.i), [1, 3], "gap stats, biggest first");
+  const p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
+  const f2 = decode(plan.rentalSearch(x, p1));
+  assert.deepEqual(f2.mb, [[CP.BLUE_IDS[1], 3, 3]]); assert.deepEqual(f2.b, [[CP.BLUE_IDS[1], 7, 9]]);
+  const t = uniq[2], v = vet(uniq[3], [], { saddles: [10] });
+  const fresh = plan.rankFresh(x, [v], [t.id], {})[0];
+  const gq = plan.trainingRentalSearch(x, fresh), gf = decode(gq);
+  assert.deepEqual(gf.t, [t.id, null, null, null, null, null, null], "the new parent is the affinity target");
+  assert.equal(gf.p2c, v.tid, "your veteran is the other parent");
+  assert.deepEqual(gf.emp, [t.cid, v.cid], "neither can be the grandparent");
+  assert.deepEqual(gf.mb, [[CP.BLUE_IDS[1], 3, 3]]); assert.deepEqual(gf.b, [[CP.BLUE_IDS[1], 7, 9]], "blue in the ace's biggest gap");
+  const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
+  assert.ok(need && need.target === "S", "Special Week takes Medium to S");
+  assert.deepEqual(gf.p, [[CP.PINK_IDS[need.i], 3, 9]], "pink by the ace's rule"); assert.ok(!gf.mp && !gf.ow && !gf.w);
+  assert.deepEqual(gq.whites.map(w => w.id), plan.missingWhites(x, fresh.s).slice(0, 12).map(w => w.id), "the ace's missing whites, listed");
+  const text = plan.searchSummary(gq).join(" · ");
+  ["Affinity target: " + t.n, "Other parent (legacy): " + uniq[3].n, "Blue: Stamina", "to take the ace to S", "Exclude:", "Sort: affinity first"].forEach(s => assert.ok(text.includes(s), s));
+});
+
+test("the ace's family affinity once you borrow: open slots take the best-affinity characters with popular G1s", () => {
+  const x = x0(), t = uniq[2], v = vet(uniq[3], [], { wins: open(t).slice(0, 2) });
+  const fresh = plan.rankFresh(x, [v], [t.id], {})[0];
+  const y = plan.outlook(x, fresh.f, [v]);
+  assert.deepEqual(y.filled.slice().sort(), ["g12", "g21", "g22", "p2"], "grandparent, Parent 2 and her parents are borrowed");
+  assert.ok(y.total > y.known, "borrowed slots add affinity");
+  assert.equal(y.known, A.total({ trainee: ace.cid, p1: t.cid, g11: v.cid }, { p1: fresh.f.p1.wins, g11: fresh.f.g11.wins }).total);
+  assert.ok(!y.family.g12.cid || y.family.g12.cid !== t.cid && y.family.g12.cid !== v.cid, "the grandparent is neither of her parents' characters");
+  const full = Object.assign({}, fresh.f, { g12: m(uniq[4]), p2: m(uniq[5]), g21: m(uniq[6]), g22: m(uniq[7]) });
+  const z = plan.outlook(x, full, [v]);
+  assert.deepEqual(z.filled, []); assert.equal(z.total, z.known, "nothing assumed once every member is known");
+});
+
+test("the new parent's veteran: ranked best first, never the ace's own character", () => {
+  const x = x0(), t = uniq[2];
+  const own = vet(ace, top.map((id) => [id, 3]), { wins: open(t) });
+  const a = vet(uniq[3], [[top[0], 3]], { wins: open(t).slice(0, 2) }), b = vet(uniq[4], [], {});
+  const fresh = plan.rankFresh(x, [own, a, b], [t.id], {})[0];
+  assert.notEqual(fresh.parents[0].cid, ace.cid, "the ace's character would have 0 affinity as her grandparent");
+  assert.ok(fresh.vetOptions.every((o) => o.v.cid !== ace.cid && o.v.cid !== t.cid));
+  assert.deepEqual(fresh.vetOptions.map((o) => o.value), fresh.vetOptions.map((o) => o.value).slice().sort((p, q) => q - p), "best first");
+  assert.equal(fresh.parents[0], fresh.vetOptions[0].v, "the suggestion is the top one");
+  const picked = plan.rankFresh(x, [own, a, b], [t.id], {}, { picks: { [t.id]: { veteran: String(b.id) } } })[0];
+  assert.equal(picked.parents[0].id, b.id, "your pick wins"); assert.equal(picked.vetOptions.length, fresh.vetOptions.length, "and the list stays whole");
+});
+
+test("the parent you planned, once imported, is found by version and date or by her veteran parent", () => {
+  const t = uniq[2], plan0 = { tid: t.id, vet: uniq[3].cid, at: "2026-11-06T12:00:00Z" };
+  const older = Object.assign(vet(t, []), { at: "2026-10-01 10:00:00" });
+  assert.equal(plan.trainedParent(plan0, [older]), null, "a veteran of her from before the plan isn't the new one");
+  const made = Object.assign(vet(t, [], { parents: [uniq[3], uniq[8]] }), { at: "2026-11-07 09:30:00" });
+  const later = Object.assign(vet(t, []), { at: "2026-11-08 09:30:00" });
+  assert.equal(plan.trainedParent(plan0, [older, made]), made);
+  assert.equal(plan.trainedParent(plan0, [older, made, later]), later, "the newest one made after the plan");
+  assert.equal(plan.trainedParent({ tid: t.id, vet: uniq[3].cid }, [older, made]), made, "no date: her veteran parent identifies her");
+  assert.equal(plan.trainedParent(null, [made]), null);
+  assert.equal(plan.trainedParent(plan0, [vet(uniq[4], [])]), null, "another uma never counts");
+});
+
+test("Parent 2's blue goes to the gap her known family leaves open", () => {
+  const gaps = [0, 45, 0, 40, 0];
+  const x = plan.context({ ace: { cid: ace.cid, tid: ace.id }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build], gaps });
+  const covers = plan.rankVets(x, [vet(uniq[0], [], { blue: [1, 3], parents: [uniq[5], uniq[6]] })])[0];
+  assert.ok(covers.s.blueStats[1] >= 45, "her Stamina 3★ covers the Stamina gap");
+  const q = plan.rentalSearch(x, covers);
+  assert.equal(q.blue[0].i, 3, "so the rental's blue goes to Guts");
+  assert.deepEqual(q.remaining, [0, 0, 0, 40, 0]);
+  assert.deepEqual(decode(q).mb, [[CP.BLUE_IDS[3], 3, 3]]);
+  const none = plan.rankVets(x, [vet(uniq[0], [], { blue: [0, 3] })])[0];
+  assert.equal(plan.rentalSearch(x, none).blue[0].i, 1, "a family with no blue there leaves the biggest gap first");
 });

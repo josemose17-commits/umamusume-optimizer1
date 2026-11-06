@@ -28,15 +28,24 @@ test("a spark's chance: base by stars × (1 + affinity / 100), at two inspiratio
   assert.strictEqual(F.twice(F.WHITE, 1, 0), 1 - 0.97 * 0.97);
 });
 
-test("what to look for: relevant white sparks, the build's top stats, pink only where she lacks A", () => {
+test("what to look for: relevant white sparks, the build's top stats, pink to S distance (S surface for sprints), style only to A", () => {
   const w = fam.lookFor(base);
   assert.ok(w.white.length > 10);
   assert.ok(w.white.every((s) => !X[s.id]), "no debuffs for an ace");
   assert.ok(w.white.every((s) => SB.DATA.skills[s.id][3] === 1), "sparks are base whites");
-  assert.deepStrictEqual(w.blue.map((b) => b.label), ["Speed", "Power"], "medium build: Speed, then Power");
-  const weak = fam.lookFor(Object.assign({}, base, { ace: { cid: spe.cid, apt: spe.apt.map((g, i) => (i === 4 ? "C" : g)) } }));
-  assert.deepStrictEqual(weak.pink.map((p) => p.label), ["Medium"]);
-  assert.deepStrictEqual(fam.lookFor(Object.assign({}, base, { ace: { cid: spe.cid, apt: spe.apt.map(() => "A") } })).pink, []);
+  assert.deepStrictEqual(w.blue.map((b) => b.label), ["Speed", "Power"], "medium build, no gaps known: Speed, then Power");
+  const at = (g) => fam.lookFor(Object.assign({}, base, { ace: { cid: spe.cid, apt: spe.apt.map(() => g) } })).pink.map((p) => p.label + " " + p.target);
+  assert.deepStrictEqual(at("A"), ["Medium S"], "all A on a medium race: only distance goes on to S");
+  assert.deepStrictEqual(at("S"), [], "nothing left to raise");
+  assert.deepStrictEqual(at("B"), ["Turf A", "Medium S", "Pace A"], "below A: surface and style to A, distance to S");
+  const sprint = Object.assign({}, preset, { course: Object.assign({}, preset.course, { dist: "Sprint", distance: 1200 }) });
+  const sp = fam.lookFor(Object.assign({}, base, { race: { preset: sprint, style: "Senkou" }, ace: { cid: spe.cid, apt: spe.apt.map(() => "A") } }));
+  assert.deepStrictEqual(sp.pink.map((p) => p.label + " " + p.target), ["Turf S"], "a sprint: S on its surface, distance stays at A");
+});
+
+test("what to look for: blue fills her gaps, biggest first", () => {
+  const w = fam.lookFor(Object.assign({}, base, { gaps: [0, 400, 0, 120, 0] }));
+  assert.deepStrictEqual(w.blue.map((b) => b.label + " " + b.gap), ["Stamina 400", "Guts 120"]);
 });
 
 test("what to look for: skills the ace's deck already offers come later", () => {
@@ -114,4 +123,26 @@ test("family score: a spark for a skill the ace's deck offers (or she has) count
   assert.ok(Math.abs(sure.whiteL - p * hint) < 1e-12, "always offered: only the discount");
   assert.ok(Math.abs(innate.whiteL - p * hint) < 1e-12, "her own skill: only the discount");
   assert.strictEqual(sure.white[0].L, L, "the listed L stays the skill's own");
+});
+
+test("blue over the whole run: the start bonus plus both inspirations, grandparents firing half as often", () => {
+  const p = F.once(F.BLUE, 3, 0);
+  assert.strictEqual(p, 0.9);
+  assert.ok(Math.abs(F.blueStats(3, 0) - (21 + 2 * 0.9 * 14.5)) < 1e-9, "3★: +21 at the start, then 90% for ~14.5 at each inspiration");
+  assert.ok(Math.abs(F.blueStats(3, 0, F.GRAND) - (21 + 2 * 0.45 * 14.5)) < 1e-9, "a grandparent's start bonus is full, her inspirations half as likely");
+  const m = (cid, blue) => ({ cid, white: [], blue, pink: [0, 0], green: 0, wins: [] });
+  const s = fam.score({ p1: m(chars[0], [1, 3]), g11: m(chars[1], [1, 3]) }, Object.assign({}, base, { gaps: [0, 60, 0, 0, 0] }));
+  assert.ok(s.blueStats[1] > 80 && s.blueStats[1] < 90, "a parent's and a grandparent's 3★ Stamina: about 84 Stamina in expectation");
+  assert.strictEqual(s.blueFill, 60, "but only her 60 short counts");
+});
+
+test("pink: start stars lift an aptitude up to A, only sparks firing at an inspiration take it on to S", () => {
+  assert.strictEqual(F.pinkReach("B", "A", [{ stars: 1, aff: 0 }]), 1, "1★ in the family: B to A at the start");
+  assert.ok(Math.abs(F.pinkReach("C", "A", [{ stars: 2, aff: 0 }]) - (1 - 0.97 * 0.97)) < 1e-9, "2★: C to B at the start, then a 3% spark has to fire for A");
+  assert.ok(F.pinkReach("C", "A", [{ stars: 4, aff: 0 }]) === 1, "4★: two grades at the start");
+  const one = F.pinkReach("A", "S", [{ stars: 3, aff: 0 }]);
+  assert.ok(Math.abs(one - (1 - 0.95 * 0.95)) < 1e-9, "A to S: a 3★ spark's 5% at each of two inspirations");
+  const high = F.pinkReach("A", "S", [{ stars: 3, aff: 150 }, { stars: 3, aff: 150 }]);
+  assert.ok(high > 0.4 && high < 0.5, "two 3★ sparks at affinity 150: 12.5% each time, about 41% in all");
+  assert.strictEqual(F.pinkReach("A", "S", []), 0);
 });
