@@ -234,7 +234,11 @@
         const rentalMode = opts.parentMode !== "veterans", pick = (opts.picks || {})[t.id] || {};
         const selectedVet = pick.veteran != null ? pick.veteran : opts.veteran;
         const selectedRental = opts.rental || (opts.rentals || []).find(r => r.friend === pick.rental);
-        const pool = (vets || []).filter(v => +v.cid !== +t.cid && (!rentalMode || selectedVet == null || selectedVet === "" || String(v.id) === String(selectedVet)));
+        // Never the ace's own character: as the ace's grandparent she'd have no affinity with her
+        // (affinity.js counts a character with herself as 0; Prydwen's legacies guide agrees).
+        const eligible = (vets || []).filter(v => +v.cid !== +t.cid && +v.cid !== +ace);
+        const chosenVet = rentalMode && selectedVet != null && selectedVet !== "" ? String(selectedVet) : null;
+        const pool = eligible;
         const tx = trainingContext(x, t, offers);
         const total = (f, ps) => { const s = fam.score(familyOf(f), x); return { s, extra: freshExtra(x, t, s, offers, r, ps) }; };
         // Each veteran alone as her parent (sharing the G1s she can run), the best per character.
@@ -257,13 +261,21 @@
         };
         let best = null;
         if (rentalMode) {
-          [...solo.values()].forEach(a => {
+          // Every veteran (the best of each character) as her parent, ranked by what the pair
+          // gives the ace and her own career; yours if you picked one, else the top.
+          const ranked = [];
+          (chosenVet ? pool.filter(v => String(v.id) === chosenVet).map(v => ({ v })) : []).concat([...solo.values()]).forEach(a => {
+            if (ranked.some(y => y.v === a.v)) return;
             const rental = selectedRental && +selectedRental.parent.cid !== +t.cid && +selectedRental.parent.cid !== +a.v.cid ? selectedRental : null;
             // A saved rental that cannot join this pair is never silently substituted.
             if (selectedRental && !rental) return;
             const c = tryParents([a.v].concat(rental ? [asVeteran(rental)] : []));
-            if (c && (!best || c.selectionValue > best.selectionValue)) best = c;
+            if (c) ranked.push({ v: a.v, value: c.selectionValue, c });
           });
+          ranked.sort((a, b) => b.value - a.value);
+          const mine = chosenVet && ranked.find(y => String(y.v.id) === chosenVet);
+          best = mine ? mine.c : ranked[0] ? ranked[0].c : null;
+          if (best) best.vetOptions = ranked.map(y => ({ v: y.v, value: y.value, f: y.c.f, s: y.c.s }));
         } else {
           top.forEach((a, i) => top.slice(i + 1).forEach((b) => { const c = tryParents([a.v, b.v]); if (c && (!best || c.value > best.value)) best = c; }));
           if (!best && top.length === 1) best = tryParents([top[0].v]);

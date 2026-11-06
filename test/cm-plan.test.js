@@ -351,3 +351,16 @@ test("the ace's family affinity once you borrow: open slots take the best-affini
   const z = plan.outlook(x, full, [v]);
   assert.deepEqual(z.filled, []); assert.equal(z.total, z.known, "nothing assumed once every member is known");
 });
+
+test("the new parent's veteran: ranked best first, never the ace's own character", () => {
+  const x = x0(), t = uniq[2];
+  const own = vet(ace, top.map((id) => [id, 3]), { wins: open(t) });
+  const a = vet(uniq[3], [[top[0], 3]], { wins: open(t).slice(0, 2) }), b = vet(uniq[4], [], {});
+  const fresh = plan.rankFresh(x, [own, a, b], [t.id], {})[0];
+  assert.notEqual(fresh.parents[0].cid, ace.cid, "the ace's character would have 0 affinity as her grandparent");
+  assert.ok(fresh.vetOptions.every((o) => o.v.cid !== ace.cid && o.v.cid !== t.cid));
+  assert.deepEqual(fresh.vetOptions.map((o) => o.value), fresh.vetOptions.map((o) => o.value).slice().sort((p, q) => q - p), "best first");
+  assert.equal(fresh.parents[0], fresh.vetOptions[0].v, "the suggestion is the top one");
+  const picked = plan.rankFresh(x, [own, a, b], [t.id], {}, { picks: { [t.id]: { veteran: String(b.id) } } })[0];
+  assert.equal(picked.parents[0].id, b.id, "your pick wins"); assert.equal(picked.vetOptions.length, fresh.vetOptions.length, "and the list stays whole");
+});

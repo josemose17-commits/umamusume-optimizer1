@@ -182,6 +182,7 @@
         else if (selected.manual || selected.green || selected.blue[1] || selected.pink[1] || selected.white.length) chosenVet = CP.rankVets(x, [{ id: "manual", cid: selected.cid, tid: selected.tid, self: selected, parents: [family.g11, family.g12] }])[0] || chosenVet;
       }
       const useFresh = prefs.setup === "B" && !!chosenFresh;
+      if (useFresh && chosenFresh.vetOptions) chosenFresh.vetOptions.forEach((y) => { y.aff = CP.outlook(x, y.f, vetsAll); });
       let train = null;
       if (useFresh) {
         let f = chosenFresh;
@@ -192,6 +193,8 @@
         const ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, CP.trainingStart(x, f));
         chosenFresh = f = CP.atRaceCount(x, f, races, ss.n);
         f.aff = CP.outlook(x, f.f, vetsAll);
+        // The chosen veteran's line shows the same number as the headline: with her race plan at SS.
+        (f.vetOptions || []).forEach((y) => { if (y.v === f.parents[0]) y.aff = f.aff; });
         const at = fresh.findIndex((y) => y.t.id === f.t.id); if (at !== -1) fresh[at] = f;
         train = { f, races, deck: her, ss, agenda: CP.upTo(races, ss.n) };
       }
@@ -344,9 +347,14 @@
       if (!pick) return setup + `<p class="mini">${r.setup === "B" ? "No uma in My umas fits. Tick more in the Trainees tab." : "Import your veterans below."}</p>`;
       let out;
       if (r.useFresh) {
-        const vets = ctx.veterans().list.filter((x) => +x.cid !== +pick.t.cid), chosen = prefs.picks[pick.t.id] || {};
+        // Your veterans for her, best first (never her character or the ace's); the ones the
+        // ranking skipped (a weaker one of the same character) follow by name.
+        const chosen = prefs.picks[pick.t.id] || {}, ranked = pick.vetOptions || [], seen = new Set(ranked.map((o) => o.v.id));
+        const rest = ctx.veterans().list.filter((x) => !seen.has(x.id) && +x.cid !== +pick.t.cid && +x.cid !== +r.t.cid).sort((a, b) => vetName(a).localeCompare(vetName(b)));
+        const top = ranked[0];
         out = `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and a borrowed grandparent · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
-          <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her (${esc(vetName(pick.parents[0]))})</option>${vets.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</select></label>
+          <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her${top ? " (" + esc(vetName(top.v)) + ")" : ""}</option>${ranked.map((o, i) => `<option value="${o.v.id}"${String(chosen.veteran) === String(o.v.id) ? " selected" : ""}>${i + 1}. ${esc(vetName(o.v))} · score ${fmt(o.value)}${o.aff ? " · ~" + o.aff.total + " " + o.aff.symbol : ""} · ${sparks(o.v.self)}</option>`).join("")}${rest.length ? `<optgroup label="Not ranked (a stronger one of the same character is above)">${rest.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</optgroup>` : ""}</select></label>
+          <p class="mini">Ranked by what the pair gives the ace and the new parent's own career, best first. The ace's own character isn't offered: as the ace's grandparent she'd have 0 affinity with her.</p>
           ${searchHTML("Grandparent search", grandparentSearch(r, prefs.rental), "training", prefs.rental, `the grandparent you borrow for ${tName(pick.t)}`)}`;
       } else {
         out = `<p><b>${pick.v.id === "manual" ? "Your parent" : "Your veteran"} ${esc(vetName(pick.v))}</b>${pick.v.score ? ` · rating ${fmtN(pick.v.score)}` : ""} · ${sparks(pick.v.self)} · score <b>${fmt(pick.s.value)}</b> · affinity <b>${affText(pick)}</b>.</p>`;
