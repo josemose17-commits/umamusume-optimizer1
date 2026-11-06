@@ -344,7 +344,7 @@
       lists();
       deckSig = syncDeck(p);
       const nt = notes(p);
-      el.innerHTML = `<div class="parents">
+      el.innerHTML = `<div class="parents">${ctx.plannerBar ? ctx.plannerBar() : ""}
         <p class="mini pp-intro">Three steps: pick the ace, pick her parents (one of yours and a friend's rental), then train Parent 1: who she is, the G1s she'll run, the deck, and the skills to buy so she reaches SS.</p>
         ${fp ? `${section("ace", "1 · The ace", nt.ace, fp.aceHTML())}${section("family", "2 · Her parents", nt.family, fp.parentsHTML())}<h3 class="pp-step">3 · Train Parent 1</h3>` : ""}
         ${section("who", "① The parent", nt.who, whoBody(p))}

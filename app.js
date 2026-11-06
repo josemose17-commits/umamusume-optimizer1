@@ -741,6 +741,9 @@
       if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
       if (state.tab === "cmplan" && cmPlan() && cmPlan().click(e)) return;
+      if (e.target.closest("#cmpBack")) { backToPlanner(); return; }
+      if (e.target.closest("#cmpBringBack")) { bringBack(); return; }
+      if (e.target.closest("#cmpBarClose")) { if (state.cmp && state.cmp.from) state.cmp.from.hidden = true; save(); renderTab(); return; }
       const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
       const s = e.target.closest("[data-pick]"); if (s) { sel.value = s.dataset.pick; sel.dispatchEvent(new Event("change")); state.tab = "guide"; save(); renderTab(); }
       if (e.target.closest("[data-undo]")) undoTurn();
@@ -2606,7 +2609,7 @@
     const p = presetById(c.preset);
     loadSkillValues(p.id);
     euReady();
-    body.innerHTML = `<div class="cm">${cmHeader(p, c)}${cmOptimizer(p, c)}${cmSkills(p, c)}</div>`;
+    body.innerHTML = `<div class="cm">${plannerBar("cm")}${cmHeader(p, c)}${cmOptimizer(p, c)}${cmSkills(p, c)}</div>`;
   }
 
   function cmHeader(p, c) {
@@ -2872,14 +2875,28 @@
       deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
       deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
       // A new ace's deck settings start from CM & decks'.
-      deckDefaults: () => { const c = state.cm || {}; return { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1" }; },
+      deckDefaults: () => { const c = state.cm || {}; return { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", targets: Object.assign({}, c.targets || {}) }; },
+      buildTarget: (p) => E.BUILDS[p.build].target,
+      buildLabel: (p) => E.BUILDS[p.build].label,
+      coachTargets: () => (state.targets && E.STATS.some((x) => state.targets[x] > 0) ? state.targets : null),
+      // CM & decks' simulated search toward target stats, from these cards (a stepper: next(),
+      // progress(), result()), with the planner's settings (locked cards stay).
+      targetSearch: (p, style, tid, s, cards) => {
+        const x = planSetup(p, style, tid, null, s), c = state.cm || {};
+        const sim = { scenario: scenario(), build: p.build, trainee: tid, target: s.targets || null, caps: E.capsFor(state, scenario()),
+          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: s.must || [], independent: false };
+        return OPT.targetSearch(x.opts, sim, cards, x.pool, x.bp);
+      },
+      // Where the planner sent you last (CM & decks or the Parents tab), or null.
+      plannerFrom: () => (state.cmp && state.cmp.from) || null,
+      gotoParents: (section) => gotoParents(section),
       skillWeights: SKILL_W, compTypes: COMP_TYPES,
       // The race's skills for her style, most valuable first ({ id, L }), for must-haves.
       raceSkills: (p, style) => { const m = skillMap(p.id, style).map; return Object.keys(m).filter((id) => m[id] > 0 && D.DATA.skills[id] && released(id, p)).map((id) => ({ id, L: m[id] })).sort((a, b) => b.L - a.L); },
       // Her racing deck's predicted run (CM & decks' readout: 16 simulated careers).
-      simulateRace: (p, style, tid, cards, must) => {
+      simulateRace: (p, style, tid, cards, must, target) => {
         const c = state.cm || {}, sv = skillMap(p.id, style);
-        const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), runs: 16, skills: sv.map, costs: sv.costs,
+        const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, target: target || null, caps: E.capsFor(state, scenario()), runs: 16, skills: sv.map, costs: sv.costs,
           helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: must || [], independent: false, skillBudget: true }), cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         return { stats: est.stats, sp: est.sp, scenario: scenario().name };
       },
@@ -2887,12 +2904,13 @@
       // locked in, so its search starts from them.
       useInCM: (o) => {
         const c = state.cm || (state.cm = {});
-        Object.assign(c, { preset: o.cup, style: o.style, goal: "race", comp: Object.assign({}, o.comp || {}), borrow: o.borrow !== false, skillW: o.skillW, must: (o.must || []).slice(), locked: o.cards.filter((x) => !x.borrowed).map((x) => x.id) });
+        Object.assign(c, { preset: o.cup, style: o.style, goal: "race", comp: Object.assign({}, o.comp || {}), borrow: o.borrow !== false, skillW: o.skillW, must: (o.must || []).slice(), targets: Object.assign({}, o.targets || {}), locked: o.cards.filter((x) => !x.borrowed).map((x) => x.id) });
+        if (state.cmp) state.cmp.from = { kind: "deck", cup: o.cup, tid: +o.tid, style: o.style };
         state.tab = "cm";
         save();
         setTrainee(o.tid);
         renderTab();
-        flash("In CM & decks with your planner deck's cards locked in: press Find my best deck there to simulate it or set target stats.");
+        flash("In CM & decks with your planner deck's cards locked in: press Find my best deck, then Bring this deck back to the planner (top of the page).");
       },
       // A parent's run with this deck and n extra races, as ② predicts it (16 careers).
       simulate: (p, tid, cards, n) => {
@@ -2914,7 +2932,7 @@
         return g ? (teams[g] || []).filter((m) => m && m.id).map((m) => ({ tid: +m.id, style: m.style || null })) : [];
       },
       gotoCM: (p, style, tid) => { const c = state.cm || (state.cm = {}); c.preset = p.id; c.style = style; state.tab = "cm"; save(); setTrainee(tid); renderTab(); },
-      sendToParents: (o) => sendToParents(o),
+      sendToParents: (o, section) => sendToParents(o, section),
       rerender: () => { if (state.tab === "cmplan") renderTab(); },
     });
     return cmTab;
@@ -2922,9 +2940,10 @@
   // A fresh Parent 1 from the CM planner, set up in the Parents tab: the family (the ace, her,
   // and her two veterans as her parents), ① her (the coach's trainee too), ② her races, ③ the
   // ace's race as an Ace parent, ④ her target whites as spark ★.
-  function sendToParents(o) {
+  function sendToParents(o, section) {
     const pp = parents();
     if (!pp) return;
+    if (state.cmp) state.cmp.from = { kind: "parent", cup: o.cup, tid: +o.ace.tid, style: o.style, p1: +o.p1.tid };
     const c = state.cm || (state.cm = {});
     c.preset = o.cup; c.style = o.style;
     const ps = pp.st(), f = ps.family || (ps.family = {});
@@ -2939,6 +2958,66 @@
     state.tab = "parents";
     save();
     flash(`${D.trainee(o.p1.tid).n} is set up in the Parents tab: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
+    renderTab();
+    if (section) showSection(section);
+  }
+  // The Parents tab at one of its steps (family, who, races, deck, rating), opened.
+  function gotoParents(section) {
+    state.tab = "parents";
+    save();
+    renderTab();
+    if (section) showSection(section);
+  }
+  function showSection(section) {
+    setTimeout(() => {
+      const el = document.querySelector(`#tabBody details[data-pp-open="${section}"]`);
+      if (!el) return;
+      if (!el.open) el.open = true;
+      el.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 30);
+  }
+
+  // The bar on CM & decks and the Parents tab after the CM/LoH planner sent you there: what
+  // you're planning, the way back, and (CM & decks) bringing its deck back to the planner.
+  function plannerBar(where) {
+    const f = state.cmp && state.cmp.from;
+    if (!f || f.hidden || !P) return "";
+    const p = presetById(f.cup), t = D.trainee(f.tid);
+    if (!p || !t) return "";
+    const what = f.kind === "parent" && D.trainee(f.p1) ? `training <b>${esc(D.trainee(f.p1).n)}</b> as Parent 1 for <b>${esc(t.n)}</b> (${esc(p.name)})` : `<b>${esc(t.n)}</b>'s deck for <b>${esc(p.name)}</b>`;
+    let bring = "";
+    if (where === "cm") {
+      const r = deckHost() === "cm" ? optResult : hostStash.cm && hostStash.cm.optResult;
+      const fits = r && r.goal === "race" && r.preset === f.cup && +state.deck.trainee === +f.tid;
+      bring = fits ? `<button type="button" class="btn small" id="cmpBringBack">Bring this deck back to the planner</button>` : `<span class="mini">${r && r.goal === "race" ? "Its deck here is for another cup or ace." : "Press Find my best deck below, then bring its deck back."}</span>`;
+    }
+    return `<section class="panel cmp-bar"><div class="row-wrap"><span class="mini">From the <b>CM/LoH planner</b>: ${what}.</span><button type="button" class="btn ghost small" id="cmpBack">← Back to the planner</button>${bring}<button type="button" class="linkish" id="cmpBarClose" aria-label="Hide this bar">✕</button></div></section>`;
+  }
+  // CM & decks' deck into the planner, for the ace you came with: its cards (locked), her
+  // style there, and CM & decks' settings (makeup, friend card, skill weight, must-haves,
+  // target stats).
+  function bringBack() {
+    const f = state.cmp && state.cmp.from, r = deckHost() === "cm" ? optResult : hostStash.cm && hostStash.cm.optResult;
+    if (!f || !r || r.goal !== "race" || r.preset !== f.cup || +state.deck.trainee !== +f.tid) { flash("Find her deck in CM & decks first (same cup and ace)."); return; }
+    const c = state.cm || {}, cmp = state.cmp, k = f.cup + "|" + f.tid;
+    cmp.decks = cmp.decks || {}; cmp.byCup = cmp.byCup || {}; cmp.sel = cmp.sel || {};
+    const old = cmp.decks[k] || {};
+    cmp.decks[k] = { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", must: (c.must || []).map(String), exclude: old.exclude || [], targets: Object.assign({}, c.targets || {}),
+      cards: r.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: true })), searched: null };
+    const list = cmp.byCup[f.cup] || (cmp.byCup[f.cup] = []);
+    const ace = list.find((x) => +x.tid === +f.tid);
+    if (ace) ace.style = r.style; else if (list.length < 3) list.push({ tid: +f.tid, style: r.style });
+    cmp.cup = f.cup; cmp.sel[f.cup] = +f.tid;
+    state.tab = "cmplan";
+    save();
+    renderTab();
+    flash("Her CM & decks deck is in the planner (locked). Find her parents for it.");
+  }
+  function backToPlanner() {
+    const f = state.cmp && state.cmp.from;
+    if (f) { state.cmp.cup = f.cup; state.cmp.sel = state.cmp.sel || {}; state.cmp.sel[f.cup] = +f.tid; }
+    state.tab = "cmplan";
+    save();
     renderTab();
   }
 
@@ -3036,6 +3115,7 @@
         return pool.skills.filter((x) => x.target && x.spark).map((x) => x.id);
       },
       setTrainee: (id) => setTrainee(id),
+      plannerBar: () => plannerBar("parents"),
       // Your veterans' decks (umaextractor import): each card at least at the limit break you
       // trained with; never lowers one. Returns { added, raised, unknown }.
       raiseOwned: (cards) => raiseOwned(cards),
