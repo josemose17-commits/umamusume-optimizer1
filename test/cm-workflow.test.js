@@ -24,15 +24,17 @@ for (const tab of ["cm", "cmplan", "parents"]) test(`old ${tab} save opens CM/Lo
 
 test("ace changes use her own deck and family without replacing the parent being trained", () => {
   const s = { tab: "cmplan", cm: { preset: "cm1", must: ["200012"] }, parents: { selfTrainee: 100301 }, cmp: { cup: "cm1", byCup: { cm1: [{ tid: 100101 }, { tid: 100201 }] } } };
-  W.migrate(s, options); s.cm.cards = [{ id: 30001, lb: 2 }]; s.cm.family.p1 = { tid: 100301 };
+  W.migrate(s, options); s.cm.cards = [{ id: 30001, lb: 2 }]; s.cm.family.p1 = { tid: 100301 }; s.cm.fresh = { parentMode: "veterans", picks: { 100301: { veteran: "qa" } } };
   s.cmp.sel.cm1 = 100201; W.sync(s, options);
   assert.equal(s.cm.cards, null); assert.equal(s.parents.family.ace.tid, 100201);
+  assert.equal(s.cm.fresh, undefined, "a new ace does not inherit another ace’s training-parent picks");
   assert.deepEqual(s.cm.must, []); assert.deepEqual(s.cm.locked, []);
   assert.deepEqual(s.cm.rental.required, []);
   s.cm.must.push("200352");
   s.cmp.sel.cm1 = 100101; W.sync(s, options);
   assert.equal(s.cm.cards[0].id, 30001); assert.equal(s.parents.family.p1.tid, 100301);
   assert.deepEqual(s.cm.must, ["200012"]); assert.equal(s.parents.selfTrainee, 100301);
+  assert.equal(s.cm.fresh.parentMode, "veterans", "her own training picks remain saved");
 });
 
 test("legacy no-minimum and a parent's S choice remain one setting", () => {

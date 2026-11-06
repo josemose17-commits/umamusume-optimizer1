@@ -168,6 +168,7 @@
   //   the G1s a rental is likely to share), in order, each kept only if every race still gets
   //   its own turn. Every extra race in the agenda has its rank: its place in the order they
   //   were picked (shared ones first), so the first n of them make a plan of n extra races.
+  //   o.priorityWins: prefer these G1s among equally shared races (the borrowed parent).
   // Her career goals come first: fixed G1 goals are free, a "pick one" goal takes its shared
   // G1 if it has one, and every goal's turn is taken. Then the races shared with the most umas,
   // each kept only if every planned race still gets its own turn (a race held in two years
@@ -175,7 +176,7 @@
   // fit distinct turns form a matroid, where greedy by weight is optimal.
   function planRaces(o) {
     const links = (o.links || []).filter((l) => l.cid && l.cid !== o.self && (l.wins || []).length);
-    const won = new Set(o.won || []);
+    const won = new Set(o.won || []), priority = new Set(o.priorityWins || []);
     const goals = o.self ? careerGoals(o.self) : { fixed: [], choices: [] };
     const min = GRADE_OK[o.minGrade || "B"];
     const apt = o.apt || null;
@@ -198,7 +199,7 @@
     const open = [];
     goals.choices.forEach((opts) => {
       const best = opts.map((x) => ({ x, r: byName.get(x.name) })).filter((y) => y.r && y.r.points > 0 && !blocked.has(y.x.turn))
-        .sort((a, b) => b.r.points - a.r.points)[0];
+        .sort((a, b) => b.r.points - a.r.points || Number(priority.has(b.r.name)) - Number(priority.has(a.r.name)))[0];
       if (best) {
         blocked.add(best.x.turn);
         agenda.push(Object.assign({}, best.r, { turn: best.x.turn, free: true, goal: "choice", options: opts.map((x) => x.name) }));
@@ -207,7 +208,7 @@
     });
     const goalNames = new Set(agenda.map((r) => r.name));
     const candidates = all.filter((r) => r.points > 0);
-    const rest = candidates.filter((r) => !goalNames.has(r.name) && r.fits).sort((a, b) => b.points - a.points || a.turns.length - b.turns.length || a.name.localeCompare(b.name));
+    const rest = candidates.filter((r) => !goalNames.has(r.name) && r.fits).sort((a, b) => b.points - a.points || Number(priority.has(b.name)) - Number(priority.has(a.name)) || a.turns.length - b.turns.length || a.name.localeCompare(b.name));
     const picked = [], skipped = [];
     rest.forEach((r) => {
       if (got >= (o.need || 0)) return;

@@ -24,8 +24,8 @@
     const t = o.trainee(x.ace.tid);
     if (!x.deck) {
       const defaults = clone(s.cm || {});
-      delete defaults.family; delete defaults.parentSummary;
-      c.decks[x.key] = Object.assign(defaults, { cards: null, searched: null, exclude: [], must: [], locked: [], rental: { pink: "auto", quality: "recommended", required: [] } });
+      delete defaults.family; delete defaults.parentSummary; delete defaults.fresh;
+      c.decks[x.key] = Object.assign(defaults, { cards: null, searched: null, exclude: [], must: [], locked: [], rental: { pink: "none", blue: "auto", sort: "affinity", quality: "recommended", required: [], version: 2 } });
     }
     const d = c.decks[x.key];
     x.ace.style = x.ace.style || o.style(t);

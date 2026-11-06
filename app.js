@@ -2940,8 +2940,8 @@
         const f = parents().st().family, blank = () => ({ cid: null, tid: null, white: [], blue: [0, 0], pink: [0, 0], green: 0, wins: [] });
         ["p1", "g11", "g12"].forEach(k => { f[k] = p1.f[k] ? JSON.parse(JSON.stringify(p1.f[k])) : blank(); });
         f.p1.planned = !userChoice;
-        if (p1.kind === "vet") f.p1.vet = p1.v.id;
-        if (train) f.p1.wins = train.agenda.map(x => x.name);
+        if (p1.kind === "vet") f.p1.vet = p1.v.id; else f.p1.fresh = true;
+        if (train) f.p1.wins = train.f.f.p1.wins.slice();
       },
       useRental: (friend) => {
         const r = fp().rentalsList().find(x => x.friend === friend), f = parents().st().family;
@@ -2976,10 +2976,12 @@
           rating: rating(est), rank: rank || "", hit: est.finals.filter((x) => rating(x) >= goal.ss).length, of: est.finals.length, cards: cards.length };
       },
       // A parent's run with this deck and n extra races, as ② predicts it (16 careers).
-      simulate: (p, tid, cards, n) => {
+      simulate: (p, tid, cards, n, blueStart = []) => {
         const c = state.pcm || {};
-        const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, n / 60), runs: 16,
-          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false }), cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
+        const sim = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, n / 60), runs: 16,
+          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false });
+        sim.start = sim.start.map((v, i) => v + (blueStart[i] || 0));
+        const est = OPT.simulate(sim, cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         return { stats: est.stats, sp: est.sp, finals: est.finals };
       },
       // Rating per skill point for a parent buying her relevant skills on this race.
@@ -3000,7 +3002,7 @@
     return cmTab;
   }
   // A fresh Parent 1 from the CM planner, set up in the Parents tab: the family (the ace, her,
-  // and her two veterans as her parents), ① her (the coach's trainee too), ② her races, ③ the
+  // and her veteran/rental parents), ① her (the coach's trainee too), ② her races, ③ the
   // ace's race as an Ace parent, ④ her target whites as spark ★.
   function trainParent(o, section) {
     const pp = parents();
@@ -3010,12 +3012,13 @@
     c.preset = o.cup; c.style = o.style;
     const ps = pp.st(), f = ps.family || (ps.family = {});
     const blank = () => ({ cid: null, tid: null, white: [], blue: [0, 0], pink: [0, 0], green: 0, wins: [] });
-    const vet = (v) => (v ? { cid: v.cid, tid: v.tid, white: v.self.white.map((w) => w.slice()), blue: v.self.blue.slice(), pink: v.self.pink.slice(), green: v.self.green, wins: v.self.wins.slice(), vet: v.id } : blank());
+    const vet = (v) => (v ? { cid: v.cid, tid: v.tid, white: v.self.white.map((w) => w.slice()), blue: v.self.blue.slice(), pink: v.self.pink.slice(), green: v.self.green, wins: v.self.wins.slice(), ...(v.rental ? { rental: v.rental } : { vet: v.id }) } : blank());
     f.ace = { cid: o.ace.cid, tid: o.ace.tid };
     f.p1 = Object.assign(blank(), { cid: o.p1.cid, tid: o.p1.tid, wins: (o.wins || []).slice() });
     f.g11 = vet(o.parents[0]); f.g12 = vet(o.parents[1]);
     if (f.rental == null) f.rental = true;
     f.builderUndo = pp.toBuilder(o.p1.tid, o.must);
+    state.cmp.training.setup = o.setup;
     state.pcm = state.pcm || {};
     W.setParentRank(state, o.rank || "");
     cm("parents").cards = (o.cards || []).map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
@@ -3136,7 +3139,11 @@
       },
       setTrainee: (id) => {
         const x = W.current(state);
-        if (x.ace) state.cmp.training = { cup: x.cup, tid: x.ace.tid, parent: id };
+        if (x.ace) {
+          const prior = state.cmp.training;
+          const same = prior && prior.cup === x.cup && +prior.tid === +x.ace.tid && +prior.parent === +id;
+          state.cmp.training = Object.assign({}, same ? prior : {}, { cup: x.cup, tid: x.ace.tid, parent: id });
+        }
         setTrainee(id);
       },
       merged: true,
