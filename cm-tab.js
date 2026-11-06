@@ -209,7 +209,8 @@
         // The chosen veteran's line shows the same number as the headline: with her race plan at SS.
         (f.vetOptions || []).forEach((y) => { if (y.v === f.parents[0]) y.aff = f.aff; });
         const at = fresh.findIndex((y) => y.t.id === f.t.id); if (at !== -1) fresh[at] = f;
-        train = { f, races, deck: her, ss, agenda: CP.upTo(races, ss.n) };
+        await stage(`${who}: Training Focus for ${tName(f.t)}…`, 0.9);
+        train = { f, races, deck: her, ss, agenda: CP.upTo(races, ss.n), focus: await focusPick(p, style, f.t, her.cards, ss.n, ss.blueStart) };
       }
       const p1 = useFresh ? chosenFresh : chosenVet;
       if (p1 && !p1.aff) p1.aff = CP.outlook(x, p1.f, vetsAll);
@@ -264,6 +265,25 @@
       }
       await sim(cut.n);
       return Object.assign(cut, { rank, perRace, rows: [...memo.values()].sort((a, b) => a.n - b.n), simScen: sc, blueStart });
+    }
+
+    // Independent Training's Training Focus: her run (her deck, her extra G1s) simulated with each,
+    // 16 careers; the one with the most runs at SS, then the higher average rating (the simulation
+    // leaves out inheritance, so it often reaches SS in none: rating is the closest measure), then
+    // the most stats over 1,100 (the 3★ blue chance).
+    const FOCUS = [["balanced", "Balanced"], ["stamina", "Stamina"], ["sprint", "Sprint"]];
+    async function focusPick(p, style, t, cards, n, blueStart) {
+      const rate = ctx.spRate(p, style, t.apt), uniq = PR.uniqueBonus(t.r, t.r), minimum = PR.rankThreshold("SS");
+      const rating = (x) => PR.statsScore(x.stats) + Math.round((x.sp || 0) * rate) + uniq;
+      const rows = [];
+      for (const [k, label] of FOCUS) {
+        await tick();
+        const x = ctx.simulate(p, t.id, cards, n, blueStart, k), fin = x.finals || [];
+        const over = fin.length ? fin.reduce((m, y) => m + y.stats.filter((v) => v > 1100).length, 0) / fin.length : x.stats.filter((v) => v > 1100).length;
+        rows.push({ k, label, stats: x.stats, sp: x.sp, rating: rating(x), hit: fin.filter((y) => rating(y) >= minimum).length, of: fin.length, over });
+      }
+      const best = rows.slice().sort((a, b) => b.hit - a.hit || b.rating - a.rating || b.over - a.over)[0];
+      return { rows, best };
     }
 
     // The uma.moe search for the ace's Parent 2, with this Parent 1 (her G1s as the legacy).
@@ -511,7 +531,7 @@
         return `<tr${on ? "" : ' class="cmp-cut"'}><td>${x.turn}<div class="mini">${esc(ctx.turnText(x.turn))}</div></td><td>${esc(x.name)}</td><td class="mini">${why}${on ? "" : " · skip: keeps SS"}</td></tr>`;
       }).join("");
       const sims = ss.rows.map(x => `<tr><td>${x.n}</td>${x.stats.map(v => `<td>${v}</td>`).join("")}<td>${x.sp}</td><td>${fmtN(x.rating)}</td><td>${x.hit}/${x.of}</td></tr>`).join("");
-      return `${aimHTML(r)}<p><b>${esc(tName(f.t))} at SS</b> with <b>${plural(keep.length, "extra G1")}</b>: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). ${ssText(ss)}</p>
+      return `${itHTML(r)}${aimHTML(r)}<p><b>${esc(tName(f.t))} at SS</b> with <b>${plural(keep.length, "extra G1")}</b>: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). ${ssText(ss)}</p>
         <p class="mini"><b>Her Ace-parent deck:</b> ${tr.deck.cards.map((x) => esc(cardName(x.id)) + (x.borrowed ? " (borrow)" : "")).join(", ")}.</p>
 
         ${stepsHTML(r)}
@@ -521,6 +541,24 @@
           <p class="mini">16 careers each, with known blue start bonuses · about ${fmtN(ss.perRace)} rating per extra race.</p></details>
         ${sentThere(r) ? ctx.trainingHTML() : ""}`;
     }
+    // What to set in Independent Training: Training Focus, the 10 prioritized skills, the agenda.
+    function itHTML(r) {
+      const tr = r.train, f = tr.f, fo = tr.focus;
+      const cards = tr.deck.cards.map((x) => D.card(x.id)).filter(Boolean);
+      const from = (id) => cards.map((cd) => (cd.es || []).map(String).includes(id) ? cd.n + " (event)" : (cd.hs || []).map(String).includes(id) ? cd.n + " (hint)" : "").filter(Boolean);
+      const list = CP.itSkills(r.x, f.offers || tr.deck.offers, 10);
+      const skills = list.map((k) => {
+        const src = from(k.id).concat(k.gold && k.id !== k.white ? from(k.white) : []);
+        return `<li><b>${esc(ctx.skillName(k.id))}</b>${k.gold ? " (gold)" : ""} <span class="mini">${k.gamble ? "· no card of hers gives it: only if a random event offers it" : `· ${Math.round(k.p * 100)}% offered · ${esc([...new Set(src)].join(", ") || "her deck")}`}</span></li>`;
+      }).join("");
+      const races = tr.agenda.filter((x) => !x.free).map((x) => x.name);
+      const anySS = fo && fo.rows.some((y) => y.hit > 0);
+      const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${y.over.toFixed(1)} stats over 1,100`).join(" · ")} (16 careers each, before inheritance). Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
+      return `<div class="cmp-it"><h4>Independent Training settings</h4>${focus}
+        <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it targets their hints in event choices):</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
+        <p class="mini"><b>Agenda:</b> ${races.length ? races.map(esc).join(", ") : "her career goals only"}.</p></div>`;
+    }
+
     // The sparks to aim for on the parent you train. Blue's stat and pink's aptitude are picked at
     // random (blue: any stat; pink: one of her A/S aptitudes, equal chances), so only whites,
     // her unique and the stars can be steered (uma.guide, Prydwen, GameTora).
