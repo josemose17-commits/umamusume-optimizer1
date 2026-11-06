@@ -18,3 +18,8 @@ Small follow-ups inside an approved plan, and pure questions, don't need a new p
 
 Commit and push to the session's `claude/*` branch. `.github/workflows/auto-merge.yml` merges
 it into `main` when the tests pass, so run `node --test test/*.test.js` before every push.
+
+After every push, follow it through and tell the user when it is live: the auto-merge run
+must land in `main` (a red run, e.g. a `?v=` stamp conflict with the daily data update, means
+nothing shipped: merge `main` in and push again), then GitHub Pages must serve the new `?v=`
+stamp at https://josemose17-commits.github.io/umamusume-optimizer1/. Only then say it's live.
