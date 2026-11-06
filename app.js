@@ -49,6 +49,8 @@
       db: k.db || null,
       cm: k.cm || null,
       pcm: k.pcm || null,
+      cmp: k.cmp || null,
+      pull: k.pull || null,
       // The Parents tab's plan spans careers (lineage, G1 wins, rating check).
       parents: k.parents || null,
       turn: 1,
@@ -296,10 +298,8 @@
         <button type="button" role="tab" data-tab="log">Career log</button>
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
         <button type="button" role="tab" data-tab="all">All scenarios</button>
-        <button type="button" role="tab" data-tab="cm" id="tabCM">CM &amp; decks</button>
-        <button type="button" role="tab" data-tab="cmplan" id="tabCmPlan">CM/LoH planner</button>
+        <button type="button" role="tab" data-tab="cm" id="tabCM">CM/LoH</button>
         <button type="button" role="tab" data-tab="tiers" id="tabTiers">Tier list</button>
-        <button type="button" role="tab" data-tab="parents" id="tabParents">Parents</button>
         <button type="button" role="tab" data-tab="pulls" id="tabPulls">Pull planner</button>
         <button type="button" role="tab" data-tab="cards" id="tabCards">Support cards</button>
         <button type="button" role="tab" data-tab="trainees" id="tabTrainees">Trainees</button>
@@ -738,12 +738,17 @@
 
     document.querySelector(".tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); } });
     $("#tabBody").addEventListener("click", (e) => {
-      if (state.tab === "parents" && parents() && parents().click(e)) return;
+      if (state.tab === "cm" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
-      if (state.tab === "cmplan" && cmPlan() && cmPlan().click(e)) return;
-      if (e.target.closest("#cmpBack")) { backToPlanner(); return; }
-      if (e.target.closest("#cmpBringBack")) { bringBack(); return; }
-      if (e.target.closest("#cmpBarClose")) { if (state.cmp && state.cmp.from) state.cmp.from.hidden = true; save(); renderTab(); return; }
+      if (state.tab === "cm" && cmPlan() && cmPlan().click(e)) return;
+      const nav = e.target.closest("[data-goto-tab]");
+      if (nav) {
+        const dest = nav.dataset.gotoTab;
+        state.tab = ["cm", "cmplan", "parents"].includes(dest) ? "cm" : dest;
+        save(); renderTab();
+        if (["cm", "cmplan", "parents"].includes(dest)) showSection(dest === "parents" ? "training" : "deck");
+        return;
+      }
       const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
       const s = e.target.closest("[data-pick]"); if (s) { sel.value = s.dataset.pick; sel.dispatchEvent(new Event("change")); state.tab = "guide"; save(); renderTab(); }
       if (e.target.closest("[data-undo]")) undoTurn();
@@ -782,7 +787,7 @@
       if (euSum) euOpen = !euSum.parentElement.open;
       const ppSum = e.target.closest(".pp-skills > summary");
       if (ppSum) ppSkillsOpen = !ppSum.parentElement.open;
-      if (e.target.closest("#euReset")) { eu().over[euScen()] = { general: {}, tabs: {} }; save(); renderTab(); return; }
+      if (e.target.closest('#euReset, [data-cm-id="euReset"]')) { eu().over[euScen()] = { general: {}, tabs: {} }; save(); renderTab(); return; }
       const add = e.target.closest("[data-add-card]");
       if (add) { addToDeck(+add.dataset.addCard); return; }
       const use = e.target.closest("[data-use-trainee]");
@@ -794,7 +799,7 @@
         const id = +mg.dataset.markGlobal;
         toggleMarkedGlobal(id);
         flash(D.card(id).n + (markedGlobal[id] ? " counts as on Global now" : " no longer counts as on Global"));
-        Object.values(deckJobs).forEach((j) => { j.optResult = null; });
+        [...deckJobs.values()].forEach((j) => { j.optResult = null; });
         fillLists();
         renderDbList();
         return;
@@ -803,10 +808,10 @@
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
-    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
+    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "cm" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
-    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "cmplan" && cmPlan()) cmPlan().change(e); });
-    $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "parents" && parents()) parents().onToggle(e); }, true);
+    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "cm" && cmPlan()) cmPlan().change(e); });
+    $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "cm" && parents()) parents().onToggle(e); }, true);
     $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null || e.target.dataset.cmTarget != null) setTimeout(renderTab, 0); });
     $("#tabBody").addEventListener("input", (e) => {
       if (e.target.dataset.own != null) {
@@ -1647,7 +1652,7 @@
       const mine = myUmas();
       if (d.town) list = list.filter((t) => (d.town === "yes") === mine.has(t.id));
       list.sort((a, b) => a.n.localeCompare(b.n));
-      el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}. Tick <b>Own</b> on the umas you have (${mine.size} ticked): the Parents tab picks the ace and Parent 1 from them. Importing your veterans there ticks the versions you've trained.</p>
+      el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}. Tick <b>Own</b> on the umas you have (${mine.size} ticked): CM/LoH picks the ace and Parent 1 from them. Importing your veterans ticks the versions you've trained.</p>
         <div class="table-wrap"><table class="trainees"><thead><tr><th>Own</th><th>Trainee</th><th>Aptitudes (surface · distance · style)</th><th>Growth</th><th>Unique skill</th><th></th></tr></thead><tbody>
         ${list.map((t) => `<tr${state.deck.trainee === t.id ? ' class="cur"' : ""}><td><input type="checkbox" data-own-trainee="${t.id}" aria-label="I own ${esc(t.n)} [${esc(t.t)}]"${mine.has(t.id) ? " checked" : ""}></td><td><b>${esc(t.n)}</b><div class="jp">${esc(t.t)} · ${"★".repeat(t.r)}${t.en ? " · Global " + t.en : " · JP " + t.jp}</div></td><td>${aptChips(t)}</td><td>${growthText(t)}</td><td>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</td><td><button type="button" class="btn ghost small" data-use-trainee="${t.id}">Use</button></td></tr>`).join("")}
         </tbody></table></div>`;
@@ -2123,9 +2128,29 @@
   const savePasted = () => { try { localStorage.setItem(PASTE_KEY, JSON.stringify(pasted)); } catch (e) { /* ignore */ } };
   const svCache = {}; // preset id -> { style: [[id, median x100, mean x100]] }, or "loading" / "missing" / "error"
   // Each builder owns its result and async jobs. A section passes its host explicitly.
-  const deckJobs = { cm: {}, parents: {} };
-  const deckJob = (host) => deckJobs[host || "cm"];
-  const deckElement = (host, selector) => document.querySelector(`[data-deck-host="${host}"] ${selector}`);
+  const W = window.UmaCmWorkflow;
+  const deckJobs = new Map();
+  const deckJob = (host = "cm") => {
+    const key = host === "parents" ? "parents|" + deckTrainee(host) : "cm|" + (W.current(state).key || "default");
+    if (!deckJobs.has(key)) deckJobs.set(key, {});
+    return deckJobs.get(key);
+  };
+  const workflowOptions = () => ({ cups: P.list.map(p => p.id), defaultCup: defaultPreset().id, trainee: id => D.trainee(+id), style: bestTraineeStyle });
+  const syncWorkflow = () => W.sync(state, workflowOptions());
+  const deckTrainee = (host) => host === "parents" ? (state.parents || {}).selfTrainee || null : host === "tiers" ? state.deck.trainee : (W.current(state).ace || {}).tid || null;
+  function bestTraineeStyle(t) {
+    if (!t) return "Senkou";
+    const rank = g => "GFEDCBAS".indexOf(g);
+    return STYLES[[0, 2, 3].reduce((a, b) => rank(t.apt[6 + b]) > rank(t.apt[6 + a]) ? b : a, 1)][0];
+  }
+  const deckSelector = (host, selector) => host === "parents" ? selector.replace(/#([\w-]+)/g, "#parents-$1") : selector;
+  const deckElement = (host, selector) => document.querySelector(`[data-deck-host="${host}"] ${deckSelector(host, selector)}`);
+  function deckIds(html, host) {
+    if (host !== "parents") return html;
+    const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(x => x[1]));
+    return html.replace(/\bid="([^"]+)"/g, (_, id) => `id="parents-${id}" data-cm-id="${id}"`)
+      .replace(/\blist="([^"]+)"/g, (all, id) => ids.has(id) ? `list="parents-${id}"` : all);
+  }
   let skillLimit = 60;
 
   const presetById = (id) => (P ? P.list.find((p) => p.id === id) : null);
@@ -2149,9 +2174,10 @@
 
   // Two deck-builder setups with their own settings and result: CM & decks (racing)
   // and the Parents tab's ③ Deck (Ace parent). cm() is the one for the open tab.
-  const deckHost = (el) => (el && el.closest("[data-deck-host]") ? el.closest("[data-deck-host]").dataset.deckHost : state.tab === "parents" ? "parents" : "cm");
+  const deckHost = (el) => (el && el.closest("[data-deck-host]") ? el.closest("[data-deck-host]").dataset.deckHost : "cm");
   const PARENT_GOALS = ["ace"];
-  function cm(host = deckHost()) {
+  function cm(host = "cm") {
+    syncWorkflow();
     if (!state.cm) state.cm = {};
     // The debuffer goals are gone: a saved one becomes the plain goal for its tab.
     if (state.cm.goal === "debuffAce") state.cm.goal = "race";
@@ -2166,9 +2192,14 @@
     const c = host === "parents" ? state.pcm : state.cm;
     if (host === "parents" && PARENT_GOALS.indexOf(c.goal) === -1) c.goal = "ace";
     // An ace parent is built for the ace's race: CM & decks' race and style, set there only.
-    if (host === "parents") { if (state.cm.preset) c.preset = state.cm.preset; if (state.cm.style) c.style = state.cm.style; }
+    if (host === "parents") {
+      const from = state.cmp.training;
+      const ace = from && (state.cmp.byCup[from.cup] || []).find(a => +a.tid === +from.tid);
+      c.preset = from && presetById(from.cup) ? from.cup : state.cm.preset;
+      c.style = ace ? ace.style || bestTraineeStyle(D.trainee(ace.tid)) : state.cm.style;
+    }
     // Parents are trained in Independent Training here, so its race count always applies.
-    if (host === "parents") c.independent = true;
+    if (host === "parents") { c.independent = true; c.reachSS = state.cmp.parentRank; }
     if (host === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
     const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
@@ -2232,8 +2263,8 @@
     svCache[id] = "loading";
     fetch("data/skillvalues/" + id + ".json?v=" + ASSET_V)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { svCache[id] = j; if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); if (state.tab === "cmplan") renderTab(); })
-      .catch(() => { svCache[id] = "error"; if (state.tab === "cm" || state.tab === "parents") renderCM(); });
+      .then((j) => { svCache[id] = j; if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); })
+      .catch(() => { svCache[id] = "error"; if (state.tab === "cm") renderCM(); });
   }
 
   const skillInfo = (id) => (SV && SV.skills[id]) || [D.DATA.skills[id] || "#" + id, D.skillCost(id) || 0, 1, 1];
@@ -2292,7 +2323,7 @@
       euLoading = true;
       const sc = document.createElement("script");
       sc.src = "data/euophrys-cards.js?v=" + ASSET_V;
-      sc.onload = () => { if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); if (state.tab === "cmplan") renderTab(); };
+      sc.onload = () => { if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); };
       sc.onerror = () => { euLoading = false; flash("Couldn't load the tier list data. Check your connection."); };
       document.head.appendChild(sc);
     }
@@ -2304,19 +2335,19 @@
   }
   const euScen = () => eu().scen || T.FROM_COACH[state.scenario] || "GM";
   const euOver = () => eu().over[euScen()] || (eu().over[euScen()] = { general: {}, tabs: {} });
-  function euOpts(c, p) {
+  function euOpts(c, p, tid = deckTrainee(c.goal === "ace" ? "parents" : "cm")) {
     const sv = skillMap(p.id, c.style);
-    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +c.itManual, eventSuccessRate: +c.eventSuccessRate };
+    const o = { scenario: euScen(), overrides: euOver(), trainee: tid, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +c.itManual, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace") {
       o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(p) };
       if (c.globalSkills) o.must = o.must.filter((id) => released(id, p));
       // Reach SS / S: keep the deck whose careers reach the selected rating most often.
       if (c.reachSS && window.UmaRating) {
-        const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null, stars = t ? t.r : 3;
-        o.parent.reachSS = { ss: window.UmaRating.rankThreshold(c.reachSS === "S" ? "S" : "SS"), unique: window.UmaRating.uniqueBonus(stars, stars), spRating: parentSpRating(c, p) };
+        const t = tid ? D.trainee(tid) : null, stars = t ? t.r : 3;
+        o.parent.reachSS = { ss: window.UmaRating.rankThreshold(c.reachSS === "S" ? "S" : "SS"), unique: window.UmaRating.uniqueBonus(stars, stars), spRating: parentSpRating(c, p, tid) };
       }
     }
-    if (c.goal === "race" && c.rankGoal) o.rankGoal = raceRankGoal(p, c.style, state.deck.trainee, c.rankGoal);
+    if (c.goal === "race" && c.rankGoal) o.rankGoal = raceRankGoal(p, c.style, tid, c.rankGoal);
     return o;
   }
   // Out on Global for this cup (skill-release.js): Global's skills now, or for a cup Global hasn't
@@ -2333,9 +2364,9 @@
   }
   // Rating per skill point when the parent buys her relevant skills: the median of their rating
   // (at the trainee's aptitudes) ÷ full cost. Falls back to the planner's typical value.
-  function parentSpRating(c, p) {
+  function parentSpRating(c, p, tid = deckTrainee("parents")) {
     const PP = window.UmaParentPlanner, PR = window.UmaRating, SB = window.UmaSkillBudget;
-    const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const t = tid ? D.trainee(tid) : null;
     const ids = Object.keys(parentTargetsFor(c, p).targets);
     return PP.spRating(ids, t ? t.apt : null, PR, SB);
   }
@@ -2386,7 +2417,7 @@
     const ty = state.tab === "tiers" ? (tier().type || "speed") : "speed";
     const tab = T.TABS[ty][0];
     const bag = where === "tab" ? (o.tabs[tab] = o.tabs[tab] || {}) : o.general;
-    const base = T.weightsFor(euScen(), ty, Object.assign({}, o.general, o.tabs[tab]), null, itArg(cm()));
+    const base = T.weightsFor(euScen(), ty, Object.assign({}, o.general, o.tabs[tab]), null, itArg(cm(deckHost(el))));
     const v = el.type === "checkbox" ? el.checked : +el.value;
     if (field) { const arr = (bag[field] || base[field]).slice(); arr[+el.dataset.k] = v; bag[field] = arr; }
     else bag[el.dataset.k] = v;
@@ -2401,12 +2432,13 @@
 
   function optKey(host = deckHost()) {
     const c = cm(host);
-    return [c.goal, c.goal !== "race" && c.globalSkills, c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
     const j = deckJob(host);
-    const c = cm(host);
+    const saved = cm(host), c = JSON.parse(JSON.stringify(saved));
+    const tid = deckTrainee(host);
     const p = presetById(c.preset);
     if (!euReady()) { flash("Loading the tier list data…"); return; }
     const pool = optPool(c);
@@ -2417,7 +2449,7 @@
     const tg = cmTargets(c);
     // Independent Training parent runs race their agenda (see itShare).
     const raceShare = itShare(c);
-    const simulationMeta = { scenario: scenario().id, trainee: state.deck.trainee };
+    const simulationMeta = { scenario: scenario().id, trainee: tid };
     const done = (r, opts, fit) => {
       // The predicted stats: the target search's own careers, or a readout from the same
       // simulation for Euophrys' pick.
@@ -2425,7 +2457,7 @@
       if (!est) {
         try {
           const sv = skillMap(p.id, c.style);
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
+          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
@@ -2433,10 +2465,13 @@
       const result = Object.assign(r, { key, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
+      if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
+      if (deckTrainee(host) === tid) saved.forTrainee = tid;
+      save();
       j.wish = null;
-      if (state.tab === "cm" || state.tab === "parents") renderCM();
+      if (state.tab === "cm") renderCM();
     };
-    const fail = (err) => { flash(String(err.message || err)); j.optRun = null; if (state.tab === "cm" || state.tab === "parents") renderCM(); };
+    const fail = (err) => { flash(String(err.message || err)); j.optRun = null; if (state.tab === "cm") renderCM(); };
     let link = null;
     setTimeout(() => {
       try {
@@ -2445,14 +2480,14 @@
         link = itLink(c, pool, bp);
         if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
         if (link && link.borrow) bp = [link.borrow];
-        const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp) });
+        const opts = Object.assign(euOpts(c, p, tid), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp) });
         const r = T.buildDeck(opts, pool, bp);
         const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
         if (!tg && !ss && !(state.scenario === "grandlive" && c.goal === "race")) { done(r, opts, null); return; }
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
         if (ss && !tg) ss.ignoreFit = true;
-        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        const sim = { scenario: scenario(), build: p.build, trainee: tid, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
         const tick = () => {
           try {
@@ -2517,18 +2552,18 @@
     const candidates = comparisonDecks(r, c);
     if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
     const p = presetById(r.preset), sv = skillMap(p.id, c.style);
-    const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+    const sim = { scenario: scenario(), build: p.build, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
     const job = OPT.sensitivity(sim, candidates);
     j.sensitivityJob = job; renderCM();
     const tick = () => {
-      if (j.optResult !== r || r.key !== optKey(host)) { j.sensitivityJob = null; if (state.tab === "cm" || state.tab === "parents") renderCM(); return; }
+      if (j.optResult !== r || r.key !== optKey(host)) { j.sensitivityJob = null; if (state.tab === "cm") renderCM(); return; }
       try {
         const more = job.next();
         const progress = deckElement(host, "#sensitivityProgress"); if (progress) progress.textContent = Math.round(job.progress() * 100) + "%";
         if (more) { setTimeout(tick, 0); return; }
         r.sensitivity = job.result(); j.sensitivityJob = null;
-        if (state.tab === "cm" || state.tab === "parents") renderCM();
-      } catch (err) { j.sensitivityJob = null; flash(err.message || String(err)); if (state.tab === "cm" || state.tab === "parents") renderCM(); }
+        if (state.tab === "cm") renderCM();
+      } catch (err) { j.sensitivityJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
     };
     setTimeout(tick, 0);
   }
@@ -2562,12 +2597,12 @@
         });
       });
       const sv = skillMap(p.id, c.style);
-      const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+      const sim = { scenario: scenario(), build: p.build, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
       const token = {}; j.wishJob = token; j.wish = null; renderCM();
       const out = []; let at = 0;
       const tick = () => {
         if (j.wishJob !== token) return;
-        if (j.optResult !== r || r.key !== optKey(host)) { j.wishJob = null; if (state.tab === "cm" || state.tab === "parents") renderCM(); return; }
+        if (j.optResult !== r || r.key !== optKey(host)) { j.wishJob = null; if (state.tab === "cm") renderCM(); return; }
         try {
           if (at < jobs.length) {
             const job = jobs[at++];
@@ -2580,8 +2615,8 @@
           const seen = new Set();
           j.wish = out.sort((a, b) => b.gain - a.gain).filter((x) => !seen.has(x.id) && seen.add(x.id)).slice(0, 10);
           r.wishMeta = { runs: 8, seed: 857563, candidates: jobs.length }; j.wishJob = null;
-          if (state.tab === "cm" || state.tab === "parents") renderCM();
-        } catch (err) { j.wishJob = null; flash(err.message || String(err)); if (state.tab === "cm" || state.tab === "parents") renderCM(); }
+          if (state.tab === "cm") renderCM();
+        } catch (err) { j.wishJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
       };
       setTimeout(tick, 0); return;
     }
@@ -2598,43 +2633,15 @@
     renderCM();
   }
 
-  function renderCM() {
-    if (state.tab === "parents") { renderTab(); return; }
-    const body = $("#tabBody");
-    if (!P || !T) { body.innerHTML = `<div class="empty">The CM data didn't load. Refresh the page.</div>`; return; }
-    const c = cm();
-    const p = presetById(c.preset);
-    loadSkillValues(p.id);
-    euReady();
-    body.innerHTML = `<div class="cm">${plannerBar("cm")}${cmHeader(p, c)}${cmOptimizer(p, c)}${cmSkills(p, c)}</div>`;
-  }
+  function renderCM() { if (state.tab === "cm") renderTab(); }
 
-  function cmHeader(p, c) {
-    const groups = [
-      ["Now and next on Global", P.list.filter((x) => x.kind === "cm" && x.global.end >= TODAY && !x.global.est)],
-      ["Later Champions Meetings (Global dates estimated)", P.list.filter((x) => x.kind === "cm" && x.global.est)],
-      ["League of Heroes (JP so far, Global dates estimated)", P.list.filter((x) => x.kind === "loh")],
-      ["Past Global Champions Meetings", P.list.filter((x) => x.kind === "cm" && x.global.end < TODAY).reverse()]
-    ];
-    const opts = groups.filter((g) => g[1].length).map(([lab, xs]) => `<optgroup label="${esc(lab)}">${xs.map((x) => `<option value="${x.id}" ${x.id === p.id ? "selected" : ""}>${esc(presetLabel(x))}</option>`).join("")}</optgroup>`).join("");
+  function cmHeader(p) {
     const [stCls, stText] = presetStatus(p);
-    const s = p.stats;
     return `<section class="panel cm-head">
-      <label class="field grow"><span>Champions Meeting or League of Heroes</span><select data-cm="preset">${opts}</select></label>
-      <div class="cm-title"><h2>${esc(p.name)}</h2>
-        <span class="chip">${p.kind === "loh" ? "League of Heroes " + p.no : "Champions Meeting #" + p.no}</span>
-        <span class="chip cm-${stCls}">${stText}</span></div>
-      <div class="cm-facts">
-        <div class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + p.course.layout + ")" : ""} · ${p.course.dist}</div>
-        <div>${esc(p.conditions)}</div>
-        <div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div>
-        ${p.global.note ? `<div class="mini">${esc(p.global.note)}</div>` : p.global.est ? `<div class="mini">Global runs Champions Meetings in JP's order, so this date is an estimate: ${p.global.by === "GameTora forecast" ? `GameTora's forecast of Global's calendar, at Global's measured pace (about ${P.meta.forecast ? P.meta.forecast.jpDaysPerGlobalDay.toFixed(1) : "1.4"} JP days per Global day)` : "about 3 weeks after the cup before"}.</div>` : ""}
-      </div>
-      <div class="row-wrap">
-        <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
-        <button type="button" class="btn ghost small" data-cm-build="${p.build}" ${state.build === p.build ? "disabled" : ""}>${state.build === p.build ? "Turn coach build: " + esc(E.BUILDS[p.build].label) : "Set the turn coach to " + esc(E.BUILDS[p.build].label)}</button>
-      </div>
-      <p class="mini">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
+      <div class="cm-title"><h2>${esc(p.name)}</h2><span class="chip cm-${stCls}">${stText}</span></div>
+      <div class="cm-facts"><div class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight" : p.course.turn + "-handed"}${p.course.layout ? " · " + esc(p.course.layout) : ""} · ${p.course.dist}</div>
+        <div>${esc(p.conditions)}</div><div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div></div>
+      <button type="button" class="btn ghost small" data-cm-build="${p.build}"${state.build === p.build ? " disabled" : ""}>${state.build === p.build ? "Coach build: " : "Set coach build: "}${esc(E.BUILDS[p.build].label)}</button>
     </section>`;
   }
 
@@ -2650,12 +2657,11 @@
     const note = (html) => (host === "parents" ? (notes.push(html), "") : html);
     return `<section class="panel cm-opt" data-deck-host="${host}">
       <h3>Deck optimizer</h3>
-      ${host === "cm" ? '<p class="mini">Building a parent? Ace parents are in the <button type="button" class="linkish" data-goto-tab="parents">Parents</button> tab, with her G1 plan and rating check.</p>' : ""}
-      ${GOALS.filter(([k]) => (PARENT_GOALS.indexOf(k) !== -1) === (host === "parents")).length > 1 ? `<div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.filter(([k]) => (PARENT_GOALS.indexOf(k) !== -1) === (host === "parents")).map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>` : ""}
-      ${host === "parents" ? `<p class="mini">Picks the cards that give her the most white skills strong on this race, to pass down as sparks. Pick the race and style above, then press <b>Find my best deck</b>.</p>` : ""}
+
+      ${host === "parents" ? `<p class="mini">Finds relevant white skills for the ace, with the parent rating goal set above.</p>` : ""}
       ${goal === "ace" ? note(`<p class="mini"><b>Ace parent:</b> picks the cards that give your parent the most white skills relevant on this race: worth more than 0.1 L (median) for the running style and weighted by it, the greens whose condition fits the race, and for Mile and longer the recoveries that fit it (never debuffs), so she can learn them and pass them down as skill sparks. Gold hints count through their white: a spark is always the base white skill's, and learning the gold raises its chance to 40% (20% for a white). Every skill counts, not just the best 8, and stats only count as much as you choose.</p>`) : ""}
       ${goal !== "race" ? `<label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
-      ${goal === "ace" ? `<label class="field"><span>Reach SS / S</span><select data-cm="reachSS">${opt([["SS", "SS (17,500)"], ["S", "S (14,500)"], ["", "No minimum"]], c.reachSS)}</select></label>${c.reachSS ? `<p class="mini">Most careers at ${c.reachSS} first, then skills; rating uses stats, SP spent on relevant skills and her unique.</p>` : ""}` : ""}
+
       ${note(`<p class="mini">Builds the deck the way you'd use <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: it picks the best card, then the best card given that one, and so on, with Euophrys' own scoring for the scenario. On top, every skill a card can hint is scored by its median length gain on this race as a ${STYLE_LABEL[c.style]} runner. Then it rechecks each slot with the other five fixed.</p>`)}
       ${traineePickerHTML(p, "data-cm-style", host)}
       ${nSkills ? "" : `<p class="mini warn">No skill values for this race yet${svCache[p.id] === "loading" ? " (loading…)" : ""}, so skills won't count. Paste your own Umalator results below to add them.</p>`}
@@ -2668,7 +2674,7 @@
       ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${opt(IT_MANUAL_OPTS, c.itManual)}</select></label>` : ""}
       ${c.independent ? note(`<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for the ${c.itRaces} extra race${c.itRaces === 1 ? "" : "s"} from ② (on top of her career goals), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: ${host === "parents" ? "② Races sends the count of extra races here" : "the Parents tab plans the fewest G1s for affinity"}.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>`) : ""}
       ${compHTML(c)}
-      ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
+      ${state.scenario === "grandlive" ? `<details class="pred-help" data-cmp-open="${host}-events"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
       ${targetsHTML(p, c, host)}
       ${euSettingsHTML("speed", host)}
       <div class="row-wrap">
@@ -2688,6 +2694,10 @@
   }
 
   // Target stats: blank boxes show the race build's targets.
+  function concertSettingsHTML(c) {
+    return state.scenario === "grandlive" ? `<details class="pred-help" data-cmp-open="${c.goal === "ace" ? "parents" : "cm"}-concert"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : "";
+  }
+
   function targetsHTML(p, c, host = deckHost()) {
     const bt = E.BUILDS[p.build].target;
     const t = c.targets || {};
@@ -2700,7 +2710,7 @@
       ${host === "parents" ? "</details>" : ""}
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
       ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
-      ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : ""}
+      ${concertSettingsHTML(c)}
     </div>`;
   }
 
@@ -2708,7 +2718,7 @@
   // Lists every skill a Global card can give; ☆ in the skills table adds one too.
   function mustHTML(c) {
     const src = skillSources(c);
-    const trn = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const tid = deckTrainee(c.goal === "ace" ? "parents" : "cm"), trn = tid ? D.trainee(tid) : null;
     const known = new Set(trn ? trn.us.concat(trn.is, trn.as).map(String) : []);
     let sourceIds = [...new Set(D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).flatMap((x) => (x.hs || []).concat(x.es || [])))];
     if (c.goal !== "race") {
@@ -2734,10 +2744,10 @@
       <p class="mini">${c.goal === "race" ? "The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts." : "Parent must-haves prioritize cards with a direct hint/event source or a canonical gold prerequisite route. A gold route makes the white purchasable, without granting its hint discount."} Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
     </div>`;
   }
-  const skillIdByName = (name) => {
+  const skillIdByName = (name, c = cm("cm")) => {
     const n = name.trim().toLowerCase();
     if (!n) return null;
-    if (cm().goal !== "race") {
+    if (c.goal !== "race") {
       const id = Object.keys(SV.skills).find(id => debuffOrSkillName(id).toLowerCase() === n);
       if (id) return id;
     }
@@ -2748,7 +2758,6 @@
   // How much Friendship Bonus, Mood Effect and Training Effectiveness count in Independent
   // Training, against a manual career: unmeasured there, so it's your call (tiers.js IT_MANUAL).
   const IT_MANUAL_OPTS = [["1", "Fully (as in a manual career)"], ["0.5", "Half (default)"], ["0.25", "A quarter"], ["0", "Not at all"]];
-  const GOALS = [["race", "Racing this CM"], ["ace", "Ace parent"]];
   const SKILL_W = [["0", "Not at all (pure Euophrys)"], ["0.5", "A little"], ["1", "Normal"], ["2", "A lot"], ["3", "Skills first"]];
   const COMP_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]];
   function compHTML(c) {
@@ -2768,26 +2777,32 @@
     // The Parents tab's own result: live while it's open, else the one kept for it.
     const r = deckJob("parents").optResult;
     if (r && r.cards) return { label: "the deck built in ③", cards: r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })) };
+    const c = state.pcm || {};
+    if (c.forTrainee === deckTrainee("parents") && c.cards && c.cards.length) return { label: "the parent deck", cards: c.cards.map(x => ({ card: D.card(x.id), lb: x.lb })).filter(x => x.card) };
     const cards = (state.deck.slots || []).filter(Boolean).map((sl) => ({ card: D.card(sl.id), lb: sl.lb })).filter((x) => x.card);
     return cards.length ? { label: "your coach deck", cards } : null;
   }
   function predictKey(n) {
     const d = predictDeck();
     if (!d) return null;
-    return JSON.stringify([d.cards.map((x) => x.card.id + ":" + x.lb), n, state.deck.trainee, state.scenario, (state.pcm || {}).preset, state.caps || {}, state.sparks || {}]);
+    return JSON.stringify([d.cards.map((x) => x.card.id + ":" + x.lb), n, deckTrainee("parents"), state.scenario, (state.pcm || {}).preset, state.caps || {}, state.sparks || {}, (state.pcm || {}).helloProcRate, (state.pcm || {}).helloUnlockRate, (state.pcm || {}).eventSuccessRate, (state.pcm || {}).eventSongBoost]);
   }
   function predictNext() {
     predictTimer = null;
     const job = predictQueue.shift();
     if (!job) return;
+    if (job.k !== predictKey(job.n)) {
+      if (predictQueue.length) predictTimer = setTimeout(predictNext, 0);
+      return;
+    }
     try {
       const d = predictDeck(), c = state.pcm || {}, p = presetById(c.preset);
-      const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, job.n / 60), runs: 16,
+      const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: deckTrainee("parents"), caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, job.n / 60), runs: 16,
         helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false }), d.cards);
       predictCache.set(job.k, { stats: est.stats, sp: est.sp, races: est.races, finals: est.finals });
     } catch (err) { predictCache.set(job.k, null); }
     if (predictQueue.length) predictTimer = setTimeout(predictNext, 0);
-    if (predictDone && state.tab === "parents") predictDone();
+    if (predictDone && state.tab === "cm") predictDone();
   }
 
   // Resolves once every cup's skill values are loaded (the pull planner and the CM planner).
@@ -2824,7 +2839,7 @@
   function planSetup(p, style, tid, races, s) {
     const parent = races != null;
     const base = Object.assign({ statsW: "0.1", comp: {}, ownedOnly: true, borrow: true, skillW: "1", itManual: "0.5", eventSuccessRate: "0.5", globalSkills: true }, parent ? state.pcm || {} : state.cm || {});
-    const c = Object.assign({}, base, { goal: parent ? "ace" : "race", preset: p.id, style, independent: parent, itRaces: parent ? races : null, locked: [], must: [], reachSS: false, rankGoal: "", comp: Object.assign({}, base.comp || {}) });
+    const c = Object.assign({}, base, { goal: parent ? "ace" : "race", preset: p.id, style, independent: parent || !!base.independent, itRaces: parent ? races : null, locked: [], must: [], reachSS: false, rankGoal: "", comp: Object.assign({}, base.comp || {}) });
     if (s) Object.assign(c, { comp: Object.assign({}, s.comp || {}), borrow: s.borrow !== false, skillW: s.skillW != null ? s.skillW : c.skillW, must: (s.must || []).slice() });
     const out = new Set((s && s.exclude) || []);
     const pool = optPool(c).filter((x) => !out.has(x.id));
@@ -2834,7 +2849,7 @@
     if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
     if (link && link.borrow) bp = [link.borrow];
     if (s && s.friend && c.borrow) bp = [{ id: s.friend, lb: 4 }];
-    const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: c.comp, trainee: tid || null });
+    const opts = Object.assign(euOpts(c, p, tid), { borrow: c.borrow, locked, comp: c.comp, trainee: tid || null });
     if (opts.parent) delete opts.parent.reachSS;
     if (!parent && s && s.rankGoal) opts.rankGoal = raceRankGoal(p, style, tid, s.rankGoal);
     return { opts, pool, bp, link };
@@ -2843,6 +2858,36 @@
     const x = planSetup(p, style, tid, races, s);
     const r = T.buildDeck(x.opts, x.pool, x.bp);
     return { cards: r.cards, skills: r.skills, offers: T.deckOffers(x.opts, r.cards), link: x.link };
+  }
+
+  function setRaceResult(p, a, d, v, sim) {
+    const j = deckJob("cm"), c = cm("cm");
+    if (!sim) { j.optResult = null; j.wish = null; return; }
+    j.optResult = Object.assign({}, v.result, { key: optKey("cm"), cards: v.cards, goal: "race", preset: p.id, style: a.style || bestTraineeStyle(D.trainee(a.tid)), scen: euScen(),
+      est: sim.est, fit: sim.fit || null, simulationMeta: { scenario: scenario().id, trainee: a.tid }, independent: !!c.independent, link: v.setup.link, skillsUsed: Object.keys(skillMap(p.id, c.style).map).length });
+    if (sim.est.supportEvents) j.optResult.skills = sim.est.skills;
+    j.wish = null;
+  }
+  function racingLocksHTML(d) {
+    const outside = (d.locked || []).filter(id => D.card(id) && !(d.cards || []).some(x => x.id === id));
+    return `<div class="row-wrap"><label class="field grow"><span>Keep a card in the search</span><input id="cmLock" list="cardListAll" placeholder="Card name" autocomplete="off"></label><button type="button" class="btn ghost small" id="cmLockAdd">Add</button></div>
+      ${outside.map(id => `<span class="chip">${esc(D.card(id).n)} <button type="button" class="linkish" data-cm-unlock="${id}">Remove</button></span>`).join("")}`;
+  }
+  // Advanced tools read the same deck the planner edits, with no transfer step.
+  function raceToolsHTML(p, a, d) {
+    const c = cm("cm"), j = deckJob("cm"), r = j.optResult;
+    const concert = concertSettingsHTML(c);
+    return `<details class="pred-help cmp-more" data-cmp-open="deck-tools"><summary>More deck tools</summary><div class="cm" data-deck-host="cm">
+      ${cmSkills(p, c, "cm")}
+      ${euSettingsHTML("speed", "cm")}
+      <label class="chip-toggle"><input type="checkbox" data-cm="independent"${c.independent ? " checked" : ""}> Independent Training</label>
+      ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${IT_MANUAL_OPTS.map(([v, l]) => `<option value="${v}"${c.itManual === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
+      ${concert}
+      ${state.scenario === "grandlive" ? `<div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${["0.25", "0.5", "0.75"].map(v => `<option value="${v}"${c.eventSuccessRate === v ? " selected" : ""}>${+v * 100}%</option>`).join("")}</select></label><label class="field"><span>Chain-rate boost per song level</span><select data-cm="eventSongBoost">${["0", "0.05", "0.1"].map(v => `<option value="${v}"${c.eventSongBoost === v ? " selected" : ""}>${+v * 100}%</option>`).join("")}</select></label></div>` : ""}
+      ${r ? `<div class="row-wrap"><button type="button" class="btn ghost small" id="cmWish"${j.wishJob ? " disabled" : ""}>${j.wishJob ? "Comparing…" : "Which cards would improve it?"}</button><button type="button" class="btn ghost small" id="cmSensitivity"${j.sensitivityJob || comparisonDecks(r, c).length < 2 ? " disabled" : ""}>${j.sensitivityJob ? "Checking…" : "Check ranking sensitivity"}</button><button type="button" class="btn ghost small" data-use-opt>Use this deck in the coach</button></div>${sensitivityHTML(r)}
+        ${Array.isArray(j.wish) ? `<div class="wish"><h4>Cards worth getting</h4><ul>${j.wish.map(x => `<li>${esc(D.card(x.id).n)} LB4 · +${Math.round(x.gain)} · replacing ${esc(D.card(x.replaces).n)}</li>`).join("") || '<li>No shortlisted upgrade improved this deck.</li>'}</ul></div>` : ""}
+        <details class="pred-help"><summary>Simulation and skill details</summary>${predictedHTML(r, "cm")}${supportEventsHTML(r)}${r.est && r.est.skillBudget ? affordableSkillsHTML(r) : ""}${mustResultHTML(r, c)}${skillSourcesHTML(r.skills || [], !!(r.est && r.est.supportEvents))}</details>` : '<p class="mini">Search her deck for predictions and comparisons.</p>'}
+    </div></details>`;
   }
 
   // The CM/LoH planner tab (cm-tab.js): the cup and your aces, then for each her deck, Parent 1
@@ -2884,36 +2929,51 @@
         const x = planSetup(p, style, tid, null, s), c = state.cm || {};
         if (x.opts.rankGoal && !s.targets) x.opts.rankGoal.ignoreFit = true;
         const sim = { scenario: scenario(), build: p.build, trainee: tid, target: s.targets || null, caps: E.capsFor(state, scenario()),
-          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: s.must || [], independent: false };
+          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: s.must || [], independent: !!c.independent, raceShare: itShare(c) };
         return OPT.targetSearch(x.opts, sim, cards, x.pool, x.bp);
       },
-      // Where the planner sent you last (CM & decks or the Parents tab), or null.
-      plannerFrom: () => (state.cmp && state.cmp.from) || null,
-      gotoParents: (section) => gotoParents(section),
+      sync: () => syncWorkflow(),
+      cupFacts: (p) => cmHeader(p, cm("cm"), true),
+      familyHTML: () => parents().familyHTML(),
+      family: () => parents().st().family || {},
+      planFamily: (p1, train, userChoice) => {
+        const f = parents().st().family, blank = () => ({ cid: null, tid: null, white: [], blue: [0, 0], pink: [0, 0], green: 0, wins: [] });
+        ["p1", "g11", "g12"].forEach(k => { f[k] = p1.f[k] ? JSON.parse(JSON.stringify(p1.f[k])) : blank(); });
+        f.p1.planned = !userChoice;
+        if (p1.kind === "vet") f.p1.vet = p1.v.id;
+        if (train) f.p1.wins = train.agenda.map(x => x.name);
+      },
+      useRental: (friend) => {
+        const r = fp().rentalsList().find(x => x.friend === friend), f = parents().st().family;
+        if (!r) return;
+        ["p2", "g21", "g22"].forEach((k, i) => { f[k] = JSON.parse(JSON.stringify(i ? r.parents[i - 1] : r.parent)); });
+        f.p2.rental = r.friend;
+      },
+      trainingHTML: () => parents().trainingHTML(),
+      trainingStatus: () => {
+        const ps = parents().st(), t = ps.selfTrainee && D.trainee(ps.selfTrainee), n = parents().schedule();
+        return t ? `${t.n} · ${n ? n.extra.length : 0} extra · ${state.cmp.parentRank || "no minimum"}` : "Choose a parent";
+      },
+      setParentRank: (value) => W.setParentRank(state, value),
+      training: () => state.cmp.training || null,
+      gotoParents: (section) => showSection(section),
+      moreDeckTools: (p, a, d) => raceToolsHTML(p, a, d),
+      deckChanged: (p, a, d, v, sim) => setRaceResult(p, a, d, v, sim),
+      lockHTML: (d) => racingLocksHTML(d),
+      settingsKey: () => optKey("cm"),
+      mustSkills: (d) => Object.keys(skillSources(Object.assign({}, d, { goal: "race" }))).map(id => ({ id, name: skillInfo(id)[0] })).sort((a, b) => a.name.localeCompare(b.name)),
       skillWeights: SKILL_W, compTypes: COMP_TYPES,
       // The race's skills for her style, most valuable first ({ id, L }), for must-haves.
       raceSkills: (p, style) => { const m = skillMap(p.id, style).map; return Object.keys(m).filter((id) => m[id] > 0 && D.DATA.skills[id] && released(id, p)).map((id) => ({ id, L: m[id] })).sort((a, b) => b.L - a.L); },
       // Her racing deck's predicted run (CM & decks' readout: 16 simulated careers).
       simulateRace: (p, style, tid, cards, must, target, rank) => {
-        const c = state.cm || {}, sv = skillMap(p.id, style);
+        const c = cm("cm"), sv = skillMap(p.id, style);
         const sim = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, target: target || null, caps: E.capsFor(state, scenario()), runs: 16, skills: sv.map, costs: sv.costs,
-          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: must || [], independent: false, skillBudget: true });
+          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: must || [], independent: !!c.independent, raceShare: itShare(c), skillBudget: true });
         const est = OPT.simulate(sim, cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         const goal = raceRankGoal(p, style, tid, rank || "S"), rating = (x) => PR.statsScore(x.stats) + Math.round(x.sp * goal.spRating) + goal.unique;
-        return { stats: est.stats, sp: est.sp, scenario: scenario().name, target: sim.target, caps: sim.caps, short: OPT.targetFit(sim, est.stats, est.sp).short,
+        return { est, stats: est.stats, sp: est.sp, scenario: scenario().name, target: sim.target, caps: sim.caps, short: OPT.targetFit(sim, est.stats, est.sp).short,
           rating: rating(est), rank: rank || "", hit: est.finals.filter((x) => rating(x) >= goal.ss).length, of: est.finals.length, cards: cards.length };
-      },
-      // This deck into CM & decks: its cup, style and ace, the planner's settings, and its cards
-      // locked in, so its search starts from them.
-      useInCM: (o) => {
-        const c = state.cm || (state.cm = {});
-        Object.assign(c, { preset: o.cup, style: o.style, goal: "race", comp: Object.assign({}, o.comp || {}), borrow: o.borrow !== false, skillW: o.skillW, must: (o.must || []).slice(), targets: Object.assign({}, o.targets || {}), rankGoal: o.rankGoal || "", locked: o.cards.filter((x) => !x.borrowed).map((x) => x.id) });
-        if (state.cmp) state.cmp.from = { kind: "deck", cup: o.cup, tid: +o.tid, style: o.style };
-        state.tab = "cm";
-        save();
-        setTrainee(o.tid);
-        renderTab();
-        flash("In CM & decks with your planner deck's cards locked in: press Find my best deck, then Bring this deck back to the planner (top of the page).");
       },
       // A parent's run with this deck and n extra races, as ② predicts it (16 careers).
       simulate: (p, tid, cards, n) => {
@@ -2934,19 +2994,18 @@
         const g = window.UmaPullValues && window.UmaPullValues.groupOf(p), teams = (state.pull && state.pull.teams) || {};
         return g ? (teams[g] || []).filter((m) => m && m.id).map((m) => ({ tid: +m.id, style: m.style || null })) : [];
       },
-      gotoCM: (p, style, tid) => { const c = state.cm || (state.cm = {}); c.preset = p.id; c.style = style; state.tab = "cm"; save(); setTrainee(tid); renderTab(); },
-      sendToParents: (o, section) => sendToParents(o, section),
-      rerender: () => { if (state.tab === "cmplan") renderTab(); },
+      trainParent: (o, section) => trainParent(o, section),
+      rerender: () => { if (state.tab === "cm") renderTab(); },
     });
     return cmTab;
   }
   // A fresh Parent 1 from the CM planner, set up in the Parents tab: the family (the ace, her,
   // and her two veterans as her parents), ① her (the coach's trainee too), ② her races, ③ the
   // ace's race as an Ace parent, ④ her target whites as spark ★.
-  function sendToParents(o, section) {
+  function trainParent(o, section) {
     const pp = parents();
     if (!pp) return;
-    if (state.cmp) state.cmp.from = { kind: "parent", cup: o.cup, tid: +o.ace.tid, style: o.style, p1: +o.p1.tid };
+    state.cmp.training = { cup: o.cup, tid: +o.ace.tid, parent: +o.p1.tid };
     const c = state.cm || (state.cm = {});
     c.preset = o.cup; c.style = o.style;
     const ps = pp.st(), f = ps.family || (ps.family = {});
@@ -2958,72 +3017,28 @@
     if (f.rental == null) f.rental = true;
     f.builderUndo = pp.toBuilder(o.p1.tid, o.must);
     state.pcm = state.pcm || {};
-    state.pcm.reachSS = o.rank || "";
+    W.setParentRank(state, o.rank || "");
+    cm("parents").cards = (o.cards || []).map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
+    state.pcm.forTrainee = o.p1.tid;
     ps.races = o.races.slice();
-    state.tab = "parents";
+    state.tab = "cm";
+    state.cmp.open.training = true;
     save();
-    flash(`${D.trainee(o.p1.tid).n} is set up in the Parents tab: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
+    flash(`${D.trainee(o.p1.tid).n} is ready to train here: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
     renderTab();
     if (section) showSection(section);
   }
-  // The Parents tab at one of its steps (family, who, races, deck, rating), opened.
-  function gotoParents(section) {
-    state.tab = "parents";
-    save();
-    renderTab();
-    if (section) showSection(section);
-  }
+  // Open a workflow section and any folded sections containing it.
   function showSection(section) {
+    const id = { family: "cm-family", who: "pp-who", races: "pp-races", deck: "pp-deck", rating: "pp-rating" }[section] || "cm-" + section;
     setTimeout(() => {
-      const el = document.querySelector(`#tabBody details[data-pp-open="${section}"]`);
+      const el = document.getElementById(id);
       if (!el) return;
-      if (!el.open) el.open = true;
+      let p = el;
+      while (p && p.id !== "tabBody") { if (p.tagName === "DETAILS") p.open = true; p = p.parentElement; }
       el.scrollIntoView({ block: "start", behavior: "smooth" });
-    }, 30);
-  }
-
-  // The bar on CM & decks and the Parents tab after the CM/LoH planner sent you there: what
-  // you're planning, the way back, and (CM & decks) bringing its deck back to the planner.
-  function plannerBar(where) {
-    const f = state.cmp && state.cmp.from;
-    if (!f || f.hidden || !P) return "";
-    const p = presetById(f.cup), t = D.trainee(f.tid);
-    if (!p || !t) return "";
-    const what = f.kind === "parent" && D.trainee(f.p1) ? `training <b>${esc(D.trainee(f.p1).n)}</b> as Parent 1 for <b>${esc(t.n)}</b> (${esc(p.name)})` : `<b>${esc(t.n)}</b>'s deck for <b>${esc(p.name)}</b>`;
-    let bring = "";
-    if (where === "cm") {
-      const r = deckJob("cm").optResult;
-      const fits = r && r.goal === "race" && r.preset === f.cup && +state.deck.trainee === +f.tid;
-      bring = fits ? `<button type="button" class="btn small" id="cmpBringBack">Bring this deck back to the planner</button>` : `<span class="mini">${r && r.goal === "race" ? "Its deck here is for another cup or ace." : "Press Find my best deck below, then bring its deck back."}</span>`;
-    }
-    return `<section class="panel cmp-bar"><div class="row-wrap"><span class="mini">From the <b>CM/LoH planner</b>: ${what}.</span><button type="button" class="btn ghost small" id="cmpBack">← Back to the planner</button>${bring}<button type="button" class="linkish" id="cmpBarClose" aria-label="Hide this bar">✕</button></div></section>`;
-  }
-  // CM & decks' deck into the planner, for the ace you came with: its cards (locked), her
-  // style there, and CM & decks' settings (makeup, friend card, skill weight, must-haves,
-  // target stats).
-  function bringBack() {
-    const f = state.cmp && state.cmp.from, r = deckJob("cm").optResult;
-    if (!f || !r || r.goal !== "race" || r.preset !== f.cup || +state.deck.trainee !== +f.tid) { flash("Find her deck in CM & decks first (same cup and ace)."); return; }
-    const c = state.cm || {}, cmp = state.cmp, k = f.cup + "|" + f.tid;
-    cmp.decks = cmp.decks || {}; cmp.byCup = cmp.byCup || {}; cmp.sel = cmp.sel || {};
-    const old = cmp.decks[k] || {};
-    cmp.decks[k] = { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", must: (c.must || []).map(String), exclude: old.exclude || [], targets: Object.assign({}, c.targets || {}), rankGoal: c.rankGoal || "", rental: old.rental,
-      cards: r.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: true })), searched: null };
-    const list = cmp.byCup[f.cup] || (cmp.byCup[f.cup] = []);
-    const ace = list.find((x) => +x.tid === +f.tid);
-    if (ace) ace.style = r.style; else if (list.length < 3) list.push({ tid: +f.tid, style: r.style });
-    cmp.cup = f.cup; cmp.sel[f.cup] = +f.tid;
-    state.tab = "cmplan";
-    save();
-    renderTab();
-    flash("Her CM & decks deck is in the planner (locked). Find her parents for it.");
-  }
-  function backToPlanner() {
-    const f = state.cmp && state.cmp.from;
-    if (f) { state.cmp.cup = f.cup; state.cmp.sel = state.cmp.sel || {}; state.cmp.sel[f.cup] = +f.tid; }
-    state.tab = "cmplan";
-    save();
-    renderTab();
+      const focus = el.querySelector("summary, button, input, select"); if (focus) focus.focus({ preventScroll: true });
+    }, 0);
   }
 
   // The Parents tab (parent-planner.js): the parent, her races, her deck, and the SS check.
@@ -3034,7 +3049,7 @@
   let pullTab = null;
   function pulls() {
     if (pullTab || !window.UmaPullTab || !window.UmaBanners || !window.UmaPullValues || !window.UmaPullPlanner || !P || !T) return pullTab;
-    const c = () => state.cm || {};
+    const c = () => cm("cm");
     pullTab = window.UmaPullTab.create({
       D, B: window.UmaBanners, P, PV: window.UmaPullValues, PP: window.UmaPullPlanner, T, A: window.UmaAffinity,
       esc, fmtDate, flash, save, today: TODAY, state: () => state,
@@ -3059,7 +3074,7 @@
       },
       skillL: (p, style, id) => skillMap(p.id, style).map[id] || 0,
       settingsKey: () => JSON.stringify([euScen(), euOver(), c().comp || {}, c().borrow !== false, c().skillW]),
-      settingsText: () => "Euophrys' " + (T.SCENARIOS.find((x) => x[0] === euScen()) || [0, euScen()])[1] + " preset, with CM & decks' deck makeup, friend card and skill weight",
+      settingsText: () => "Euophrys' " + (T.SCENARIOS.find((x) => x[0] === euScen()) || [0, euScen()])[1] + " preset, with CM/LoH’s deck makeup, friend card and skill weight",
       rerender: () => { if (state.tab === "pulls") renderTab(); },
     });
     return pullTab;
@@ -3080,7 +3095,7 @@
       D, A: window.UmaAffinity, R: PR, SB, esc, flash, save,
       state: () => state,
       container: () => $("#tabBody"),
-      coachTrainee: () => (state.deck.trainee ? D.trainee(state.deck.trainee) : null),
+      coachTrainee: () => (deckTrainee("parents") ? D.trainee(deckTrainee("parents")) : null),
       turnText: (t) => E.turnInfo(t, scenario()).text,
       skillName: (id) => skillInfo(id)[0],
       skillNames: () => Array.from(new Set(Object.values(SV.skills).map((x) => x[0]).filter(Boolean))).sort(),
@@ -3107,8 +3122,8 @@
       unvalued: () => Object.keys(window.UmaSkillBudget.DATA.skills).filter((id) => window.UmaSkillBudget.DATA.skills[id][3] === 1 && /^20/.test(id) && !SV.skills[id]
         && !(window.UmaSkillKinds && window.UmaSkillKinds.skills[id]) && !(window.UmaDebuffs && window.UmaDebuffs[id]) && D.DATA.skills[id]),
       aceOffers: () => {
-        const r = deckJob("cm").optResult;
-        return r && r.goal === "race" && r.skills ? Object.fromEntries(r.skills.map((x) => [String(x.id), x.p])) : null;
+        const x = W.current(state), c = cm("cm");
+        return x.deck && x.deck.cards ? T.deckOffers(euOpts(c, presetById(c.preset), deckTrainee("cm")), x.deck.cards) : null;
       },
       build: (p) => E.BUILDS[p.build] || null,
       // The relevant white skills the deck built in ③ can give (its skill pool), or null.
@@ -3119,8 +3134,14 @@
           targets: r.parentConfig.targets, must: r.parentConfig.must, globalOnly: r.parentConfig.globalOnly, today: TODAY, skillsBy: r.parentConfig.skillsBy || null });
         return pool.skills.filter((x) => x.target && x.spark).map((x) => x.id);
       },
-      setTrainee: (id) => setTrainee(id),
-      plannerBar: () => plannerBar("parents"),
+      setTrainee: (id) => {
+        const x = W.current(state);
+        if (x.ace) state.cmp.training = { cup: x.cup, tid: x.ace.tid, parent: id };
+        setTrainee(id);
+      },
+      merged: true,
+      rankGoal: () => state.cmp.parentRank,
+      statusUpdated: () => cmTab && cmTab.refreshStatus(),
       // Your veterans' decks (umaextractor import): each card at least at the limit break you
       // trained with; never lowers one. Returns { added, raised, unknown }.
       raiseOwned: (cards) => raiseOwned(cards),
@@ -3131,8 +3152,8 @@
         loadSkillValues(p.id);
         euReady();
         // The race's skill table (must-have ☆, Global-only releases) in a closed box.
-        const race = `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-goto-tab="cm">change it in CM &amp; decks</button>).</p>`;
-        return `<div class="cm">${race}${cmOptimizer(p, c, "parents")}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), ${skillsBy(p) ? "skills out on Global by this cup" : "Global releases only"}</summary>${cmSkills(p, c)}</details></div>`;
+        const race = `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-cmp-jump="cup">change cup or ace</button>).</p>`;
+        return deckIds(`<div class="cm" data-deck-host="parents">${race}${cmOptimizer(p, c, "parents")}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), ${skillsBy(p) ? "skills out on Global by this cup" : "Global releases only"}</summary>${cmSkills(p, c, "parents")}</details></div>`, "parents");
       },
       // ② Races sets ③ Deck's Independent Training race count (no re-render: the page is drawing).
       setItRaces: (n) => { const c = cm("parents"); if (n == null) delete c.itRaces; else c.itRaces = n; },
@@ -3331,8 +3352,7 @@
     const rk = PR.rankOf(total);
     const label = selected === "S" ? "S" : "SS", minimum = PR.rankThreshold(label);
     const fin = r.est.finals || [], hit = fin.filter((f) => PR.statsScore(f.stats) + Math.round(f.sp * rate) + unique >= minimum).length;
-    const status = total >= PR.SS ? "SS: white sparks get the doubled 3★ chance" : total >= minimum ? `${label} goal reached` : `about ${(minimum - total).toLocaleString()} short of ${label} (${minimum.toLocaleString()})`;
-    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>, ${status}${fin.length ? `; <b>${label} in ${hit} of ${fin.length}</b> simulated careers` : ""}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent ${c ? "on her relevant skills " : ""}at ~${rate.toFixed(2)} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. ${state.tab === "parents" ? "Plan the exact buy in ④ After the run" : 'Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>'}; fewer races also help.</p>`;
+    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>${selected && fin.length ? ` · ${label} in ${hit} of ${fin.length}` : ""} · stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} + unique ${unique}. <button type="button" class="linkish" data-cmp-jump="rating">Plan the buy in ④</button>.</p>`;
   }
 
   // Predicted stats from the simulated careers, against your targets when you set them.
@@ -3382,13 +3402,13 @@
     }).join("")}</ul></div>`;
   }
 
-  function cmSkills(p, c) {
+  function cmSkills(p, c, host = "cm") {
     const status = svCache[p.id];
     const mine = pasted[p.id] && pasted[p.id][c.style];
     let rows = skillRows(p.id, c.style);
     const src = skillSources(c);
-    const deckIds = new Set(state.deck.slots.filter(Boolean).map((sl) => sl.id));
-    const trn = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const deckIds = new Set((c.cards || []).map((sl) => sl.id));
+    const trn = deckTrainee(host) ? D.trainee(deckTrainee(host)) : null;
     const known = new Set(trn ? trn.us.concat(trn.is, trn.as) : []);
     const q = (c.sq || "").trim().toLowerCase();
     const cut = skillsBy(p), REL = window.UmaSkillRelease;
@@ -3407,12 +3427,12 @@
       : status === "missing" && !mine ? "Skill values for this race haven't been simulated yet. Paste your own from the Umalator below."
       : status === "error" && !mine ? "Couldn't load the skill values. Check your connection and reopen this tab."
       : "No skills match.";
-    return `<section class="panel cm-skills">
+    return `<section class="panel cm-skills" data-deck-host="${host}">
       <h3>Skills for this race · ${STYLE_LABEL[c.style]}</h3>
       <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill. ${simNote(p)}`} SP totals include every required tier before hints. L per 100 SP uses that full price. The affordable-skill result applies the hints available in each simulated career.</p>
       <div class="db-controls">
         <label class="field grow"><span>Search</span><input data-cm="sq" value="${esc(c.sq || "")}" placeholder="Skill name" autocomplete="off"></label>
-        <label class="field"><span>Show</span><select data-cm="sfilter">${opt([["all", "All skills"], ["cards", c.ownedOnly && ownedIds().length ? "Skills my cards can give" : "Skills Global cards can give"], ["deck", "Skills my coach deck can give"]], c.sfilter)}</select></label>
+        <label class="field"><span>Show</span><select data-cm="sfilter">${opt([["all", "All skills"], ["cards", c.ownedOnly && ownedIds().length ? "Skills my cards can give" : "Skills Global cards can give"], ["deck", "Skills this deck can give"]], c.sfilter)}</select></label>
         <label class="chip-toggle" ${cut ? `title="Skills on Global now, plus the ones JP had by this cup's JP date (${fmtDate(p.jp.start)}): Global releases in JP's order."` : ""}><input type="checkbox" data-cm="globalSkills" ${c.globalSkills ? "checked" : ""}> ${cut ? "Out on Global by this cup" : "On Global only"}</label>
       </div>
       <div id="cmSkillTable">${shown.length ? `<div class="table-wrap"><table class="skills"><thead><tr><th>Skill</th><th class="num">Median</th>${mine ? "" : '<th class="num opt-col">Mean</th>'}<th class="num">SP total</th><th class="num">L / 100 SP</th><th class="opt-col">From cards</th></tr></thead><tbody>
@@ -3425,7 +3445,7 @@
           return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
-      <details class="paste">
+      <details class="paste" data-cmp-open="${host}-paste">
         <summary>Use your own Umalator results</summary>
         <p class="mini">In the Umalator's <b>Skill chart</b> tab, set up your own uma for this race and run it, then select the whole results table, copy it and paste it here. The coach reads each skill's median and uses it for this race and running style (${STYLE_LABEL[c.style]}). For purchase comparisons, use a chart with no purchased skills; the Umalator's learned-skill list is not imported.</p>
         <textarea id="cmPaste" rows="5" placeholder="Paste the Skill chart table here"></textarea>
@@ -3449,61 +3469,69 @@
     save();
     if (k === "sq") {
       skillLimit = 60;
-      const box = $("#cmSkillTable");
+      const box = deckElement(host, "#cmSkillTable");
       const tmp = document.createElement("div");
       tmp.innerHTML = cmSkills(presetById(c.preset), c);
       const fresh = tmp.querySelector("#cmSkillTable");
       if (box && fresh) box.innerHTML = fresh.innerHTML;
       return;
     }
-    if (k === "preset") skillLimit = 60;
+    if (k === "preset") { state.cmp.cup = c.preset; syncWorkflow(); skillLimit = 60; }
+    if (k === "reachSS") W.setParentRank(state, v);
     renderCM();
   }
 
   function cmClick(e) {
     const t = e.target, host = deckHost(t);
     const j = deckJob(host);
-    const c = state.tab === "cm" || state.tab === "parents" ? cm(host) : null;
+    const q = (selector) => deckElement(host, selector);
+    const hit = (selector) => t.closest(deckSelector(host, selector));
+    const c = state.tab === "cm" ? cm(host) : null;
     if (!c) return false;
-    const style = t.closest("[data-cm-style]");
+    const style = hit("[data-cm-style]");
     if (style) { c.style = style.dataset.cmStyle; skillLimit = 60; save(); renderCM(); return true; }
-    const build = t.closest("[data-cm-build]");
+    const build = hit("[data-cm-build]");
     if (build) { state.build = build.dataset.cmBuild; commit(true); flash("Turn coach build set to " + E.BUILDS[state.build].label); return true; }
-    const goalBtn = t.closest("[data-cm-goal]");
+    const goalBtn = hit("[data-cm-goal]");
     if (goalBtn) { c.goal = goalBtn.dataset.cmGoal; save(); renderCM(); return true; }
-    if (t.closest("#compClear")) { c.comp = {}; save(); renderCM(); return true; }
-    if (t.closest("#cmRun")) {
+    if (hit("#compClear")) { c.comp = {}; save(); renderCM(); return true; }
+    if (hit("#cmRun")) {
       const fixed = Object.values(c.comp).reduce((a, b) => a + b, 0);
       if (fixed > 6) { flash("The deck makeup adds up to " + fixed + " cards. A deck has 6."); return true; }
       runOptimizer(host);
       return true;
     }
-    if (t.closest("#cmWish")) { runWishlist(host); return true; }
-    if (t.closest("#cmSensitivity")) { runSensitivity(host); return true; }
-    if (t.closest("[data-goto-tab]")) { state.tab = t.closest("[data-goto-tab]").dataset.gotoTab; save(); renderTab(); return true; }
-    if (t.closest("#cmLockAdd")) {
-      const card = cardByLabel.get($("#cmLock").value.trim());
+    if (hit("#cmWish, #cmSensitivity")) {
+      const run = hit("#cmWish") ? runWishlist : runSensitivity;
+      if (host === "cm" && j.optResult && j.optResult.key !== optKey(host)) cmPlan().predictCurrent().then(() => run(host));
+      else run(host);
+      return true;
+    }
+
+    if (hit("#cmLockAdd")) {
+      const card = cardByLabel.get(q("#cmLock").value.trim());
       if (!card) { flash("Pick a card from the list first."); return true; }
       if (c.locked.indexOf(card.id) === -1) c.locked.push(card.id);
+      if (host === "cm") (c.cards || []).filter(x => x.id === card.id).forEach(x => { x.locked = true; });
       if (c.ownedOnly && owned[card.id] == null) flash(card.n + " isn't marked as owned, so it can only come in as the borrowed card.");
       save();
       renderCM();
       return true;
     }
-    if (t.closest("#cmTgCoach")) { c.targets = Object.assign({}, state.targets); save(); renderCM(); return true; }
-    if (t.closest("#cmTgClear")) { c.targets = {}; save(); renderCM(); return true; }
-    if (t.closest("#cmTgSpark")) { c.targets = { speed: 1100, stamina: 1100, power: 1100, guts: 1100, wit: 1100 }; save(); renderCM(); return true; }
-    if (t.closest("#cmMustAdd")) {
-      const id = skillIdByName($("#cmMust").value);
+    if (hit("#cmTgCoach")) { c.targets = Object.assign({}, state.targets); save(); renderCM(); return true; }
+    if (hit("#cmTgClear")) { c.targets = {}; save(); renderCM(); return true; }
+    if (hit("#cmTgSpark")) { c.targets = { speed: 1100, stamina: 1100, power: 1100, guts: 1100, wit: 1100 }; save(); renderCM(); return true; }
+    if (hit("#cmMustAdd")) {
+      const id = skillIdByName(q("#cmMust").value, c);
       if (!id) { flash("Pick a skill from the list first. It lists the skills support cards can give."); return true; }
       if (c.must.indexOf(id) === -1) c.must.push(id);
       save();
       renderCM();
       return true;
     }
-    const md = t.closest("[data-must-del]");
+    const md = hit("[data-must-del]");
     if (md) { c.must = c.must.filter((id) => id !== md.dataset.mustDel); save(); renderCM(); return true; }
-    const mt = t.closest("[data-must]");
+    const mt = hit("[data-must]");
     if (mt) {
       const id = String(mt.dataset.must);
       c.must = c.must.indexOf(id) === -1 ? c.must.concat([id]) : c.must.filter((x) => x !== id);
@@ -3511,18 +3539,19 @@
       renderCM();
       return true;
     }
-    const un = t.closest("[data-cm-unlock]");
-    if (un) { c.locked = c.locked.filter((id) => id !== +un.dataset.cmUnlock); save(); renderCM(); return true; }
-    if (t.closest("[data-use-opt]") && j.optResult) {
+    const un = hit("[data-cm-unlock]");
+    if (un) { c.locked = c.locked.filter((id) => id !== +un.dataset.cmUnlock); if (host === "cm") (c.cards || []).filter(x => x.id === +un.dataset.cmUnlock).forEach(x => { x.locked = false; }); save(); renderCM(); return true; }
+    if (hit("[data-use-opt]") && j.optResult) {
+      state.deck.trainee = deckTrainee(host);
       state.deck.slots = j.optResult.cards.map((x) => ({ id: x.id, lb: x.lb, bond: null }));
       state.facilities.forEach((f) => { f.members = []; f.hints = []; });
       commit(true);
       flash("Deck set in Trainee and deck" + (j.optResult.cards.some((x) => x.borrowed) ? ". Remember to borrow the marked card." : ""));
       return true;
     }
-    if (t.closest("[data-cm-more]")) { skillLimit += 60; renderCM(); return true; }
-    if (t.closest("#cmPasteBtn")) {
-      const r = parseUmalator($("#cmPaste").value);
+    if (hit("[data-cm-more]")) { skillLimit += 60; renderCM(); return true; }
+    if (hit("#cmPasteBtn")) {
+      const r = parseUmalator(q("#cmPaste").value);
       const n = Object.keys(r.values).length;
       if (!n) { flash("Couldn't find any skills with values like “1.23 L” in that text."); return true; }
       pasted[c.preset] = pasted[c.preset] || {};
@@ -3532,7 +3561,7 @@
       renderCM();
       return true;
     }
-    if (t.closest("#cmPasteReset")) {
+    if (hit("#cmPasteReset")) {
       if (pasted[c.preset]) delete pasted[c.preset][c.style];
       savePasted();
       renderCM();
@@ -3581,8 +3610,8 @@
     return STYLES.map(([k, l], i) => [k, l, tr.apt[6 + i]]).sort((a, b) => rank(b[2]) - rank(a[2]));
   }
 
-  function traineePickerHTML(p, styleAttr, host = "cm") {
-    const tr = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+  function traineePickerHTML(p, styleAttr, host = state.tab === "tiers" ? "tiers" : "cm") {
+    const tr = deckTrainee(host) ? D.trainee(deckTrainee(host)) : null;
     const label = tr ? traineeLabel(tr) : "";
     let info = '<span class="mini">No trainee: cards are ranked without growth bonuses.</span>';
     if (tr) {
@@ -3593,11 +3622,11 @@
       const weak = "GFEDCB".indexOf(surf) !== -1 || "GFEDCB".indexOf(dist) !== -1;
       info = `<span class="mini">Growth: <b>${growthText(tr)}</b> · ${esc(p.course.surface)} <b>${surf}</b> · ${esc(p.course.dist)} <b>${dist}</b> · best style ${esc(best[1])} <b>${best[2]}</b>. Her own character's cards are left out.</span>
         <span class="mini">Not counted from card hints (she already has them): ${esc(tr.us.concat(tr.is).map((id) => D.DATA.skills[id] || "#" + id).join(", "))}${tr.as.length ? "; awakening skills: " + esc(tr.as.map((id) => D.DATA.skills[id] || "#" + id).join(", ")) : ""}.</span>
-        ${cm(host).style !== best[0] ? `<button type="button" class="btn ghost small" ${styleAttr}="${best[0]}">Use her best style: ${esc(best[1])}</button>` : ""}
+        ${host !== "parents" && cm(host).style !== best[0] ? `<button type="button" class="btn ghost small" ${styleAttr}="${best[0]}">Use her best style: ${esc(best[1])}</button>` : ""}
         ${weak ? `<span class="mini warn">Her aptitude for this race is below A, so she'll race at a penalty.</span>` : ""}`;
     }
     // The Parents tab picks her once, in ① Who.
-    if (host === "parents" && state.tab === "parents") return `<div class="row-wrap tier-trainee"><span class="mini">Trainee: <b>${tr ? esc(label) : "none yet"}</b> (set in ① Who).</span>${info}</div>`;
+    if (host === "parents") return `<details class="pred-help"><summary>Trainee: ${tr ? esc(label) : "choose her in ①"} · growth and skills</summary>${info}</details>`;
     return `<div class="row-wrap tier-trainee">
       <label class="field grow"><span>Trainee (shared with the coach)</span><input data-pick-trainee="1" list="traineeList" value="${esc(label)}" placeholder="Type a trainee name" autocomplete="off"></label>
       ${info}
@@ -3652,7 +3681,7 @@
     let tiersHTML = '<div class="empty">Loading the tier list data…</div>';
     if (ready) {
       const cands = tierCandidates(t);
-      const opts = euOpts(c, p);
+      const opts = euOpts(c, p, tierTrainee());
       let res = [];
       types.forEach((ty) => { res = res.concat(T.rank(opts, ty, t.deck, cands.filter((x) => D.card(x.id).ty === ty))); });
       res.sort((a, b) => b.score - a.score);
@@ -3720,7 +3749,7 @@
     const c = cm();
     const k = el.dataset.tier;
     const v = el.type === "checkbox" ? el.checked : el.value;
-    if (k === "preset") c.preset = v;
+    if (k === "preset") { state.cmp.cup = v; syncWorkflow(); }
     else if (k === "skillW") c.skillW = v;
     else if (k === "independent") c.independent = v;
     else if (k === "itManual") c.itManual = v;
@@ -3746,7 +3775,7 @@
     const rm = el.closest("[data-tier-remove]");
     if (rm) { t.deck.splice(+rm.dataset.tierRemove, 1); save(); renderTiers(); return true; }
     const st = el.closest("[data-tier-style]");
-    if (st) { cm().style = st.dataset.tierStyle; save(); renderTiers(); return true; }
+    if (st) { const a = W.current(state).ace; if (a) a.style = st.dataset.tierStyle; cm().style = st.dataset.tierStyle; save(); renderTiers(); return true; }
     if (el.closest("#tierFromCoach")) { t.deck = state.deck.slots.filter(Boolean).map((sl) => ({ id: sl.id, lb: sl.lb })); save(); renderTiers(); return true; }
     if (el.closest("#tierClear")) { t.deck = []; save(); renderTiers(); return true; }
     if (el.closest("#tierToCoach")) {
@@ -3760,6 +3789,7 @@
   }
 
   function renderTab() {
+    if (HAS_DATA && P && W) W.migrate(state, workflowOptions());
     const sc = scenario();
     $$(".tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
     const body = $("#tabBody");
@@ -3767,20 +3797,13 @@
       renderTiers();
       return;
     }
-    if (state.tab === "cm" && HAS_DATA) {
-      renderCM();
-      return;
-    }
-    if (state.tab === "parents" && HAS_DATA && parents()) {
-      parents().render(body);
+    if (state.tab === "cm" && HAS_DATA && cmPlan()) {
+      syncWorkflow();
+      cmPlan().render(body);
       return;
     }
     if (state.tab === "pulls" && HAS_DATA && pulls()) {
       pulls().render(body);
-      return;
-    }
-    if (state.tab === "cmplan" && HAS_DATA && cmPlan()) {
-      cmPlan().render(body);
       return;
     }
     if ((state.tab === "cards" || state.tab === "trainees") && HAS_DATA) {
@@ -3861,6 +3884,7 @@
     renderTab();
   }
 
+  if (HAS_DATA && P && W) { W.migrate(state, workflowOptions()); save(); }
   shell();
   fillLists();
   render();

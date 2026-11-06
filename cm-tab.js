@@ -75,6 +75,8 @@
     function deckOf(c, a) {
       const k = keyOf(c, a);
       if (!c.decks[k]) { const d = ctx.deckDefaults(); c.decks[k] = { comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: [], exclude: [], targets: d.targets || {}, rankGoal: d.rankGoal || "", cards: null, searched: null }; }
+      const d = c.decks[k], defaults = ctx.deckDefaults();
+      Object.entries({ comp: {}, borrow: defaults.borrow, skillW: defaults.skillW, must: [], exclude: [], locked: [], cards: null }).forEach(([k, v]) => { if (d[k] == null) d[k] = v; });
       if (!c.decks[k].targets) c.decks[k].targets = {};
       if (!c.decks[k].rental) c.decks[k].rental = { pink: "auto", quality: "recommended", required: [] };
       return c.decks[k];
@@ -85,8 +87,8 @@
     // The stats you're aiming for ({ stat: value }, the ones you set), null for none.
     const targetsOf = (d) => { const t = {}; STATS.forEach((x) => { if (d.targets[x] > 0) t[x] = +d.targets[x]; }); return Object.keys(t).length ? t : null; };
     const settings = (d, keep) => ({ comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: d.must, exclude: d.exclude, targets: targetsOf(d), rankGoal: d.rankGoal || "",
-      locked: keep.filter((x) => !x.borrowed).map((x) => x.id), friend: (keep.find((x) => x.borrowed) || {}).id || null });
-    const inputsKey = (c) => JSON.stringify([c.parentRank, ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.rentals().length]);
+      locked: [...new Set((d.locked || []).concat(keep.filter((x) => !x.borrowed).map((x) => x.id)))], friend: (keep.find((x) => x.borrowed) || {}).id || null });
+    const inputsKey = (c) => JSON.stringify([c.parentRank, ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.rentals().length, ctx.family()]);
 
     async function ready(p) {
       for (let i = 0; !ctx.euReady(); i++) { if (i > 600) throw new Error("The card data didn't load. Check your connection."); await new Promise((r) => setTimeout(r, 100)); }
@@ -109,13 +111,13 @@
       const d = deckOf(c, a);
       if (!d.cards) return null;
       const p = cup(c), style = styleOf(a), cards = cardsNow(d);
-      const sig = JSON.stringify([p.id, a.tid, style, cards.map((x) => [x.id, x.lb, !!x.borrowed]), d.skillW, d.must, d.comp, d.borrow, d.exclude, d.targets, d.rankGoal, ctx.scenario().id, ctx.ownedCode()]);
+      const sig = JSON.stringify([p.id, a.tid, style, cards.map((x) => [x.id, x.lb, !!x.borrowed]), d.skillW, d.must, d.comp, d.borrow, d.exclude, d.targets, d.rankGoal, ctx.settingsKey(), ctx.scenario().id, ctx.ownedCode()]);
       const k = keyOf(c, a), had = views.get(k);
       if (had && had.sig === sig) { had.cards.forEach((x, i) => { x.locked = !!cards[i].locked; }); return had; }
       if (!ctx.euReady() || !ctx.aceSkills({ preset: p, style })) return null;
       const setup = ctx.deckSetup(p, style, a.tid, null, settings(d, cards));
       const desc = cards.length ? T.describeDeck(setup.opts, cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed })), setup.pool, setup.bp) : { cards: [], skills: [] };
-      const v = { sig, setup, cards: desc.cards.map((x, i) => Object.assign({}, x, { locked: !!cards[i].locked })), skills: desc.skills || [], offers: cards.length ? T.deckOffers(setup.opts, cards) : {}, total: desc.cards.reduce((n, x) => n + x.score, 0) };
+      const v = { sig, setup, result: desc, cards: desc.cards.map((x, i) => Object.assign({}, x, { locked: !!cards[i].locked })), skills: desc.skills || [], offers: cards.length ? T.deckOffers(setup.opts, cards) : {}, total: desc.cards.reduce((n, x) => n + x.score, 0) };
       views.set(k, v);
       return v;
     }
@@ -128,7 +130,7 @@
         const d = deckOf(c, a), now = cardsNow(d), keep = fill ? now : now.filter((x) => x.locked);
         await stage(fill ? "Filling the empty slot…" : "Searching her deck…", 0.05);
         const r = ctx.deck(p, styleOf(a), a.tid, null, settings(d, keep));
-        const lockedIds = new Set(now.filter((x) => x.locked).map((x) => x.id));
+        const lockedIds = new Set((d.locked || []).concat(now.filter((x) => x.locked).map((x) => x.id)));
         d.cards = r.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: lockedIds.has(x.id) }));
         let fit = null;
         if (!fill && (targetsOf(d) || d.rankGoal)) {
@@ -156,11 +158,12 @@
 
     async function predict(c, a, fit) {
       const d = deckOf(c, a), v = view(c, a), k = keyOf(c, a);
-      if (!v || !d.cards.length) { sims.delete(k); return; }
+      if (!v || !d.cards.length) { sims.delete(k); ctx.deckChanged(cup(c), a, d, v, null); return; }
       await tick();
       const r = ctx.simulateRace(cup(c), styleOf(a), a.tid, cardsNow(d), d.must, targetsOf(d), d.rankGoal);
-      if (fit) { r.before = { stats: fit.before.stats, short: fit.before.short }; r.swaps = fit.swaps; }
+      if (fit) { r.before = { stats: fit.before.stats, short: fit.before.short }; r.swaps = fit.swaps; r.fit = fit; }
       sims.set(k, Object.assign(r, { sig: v.sig }));
+      ctx.deckChanged(cup(c), a, d, v, r);
     }
 
     function refreshPrediction(c, a) {
@@ -189,6 +192,7 @@
       if (!cur) return;
       const owned = ctx.owned();
       d.cards[i] = { id, lb: cur.borrowed ? 4 : owned[id] != null ? +owned[id] : 4, borrowed: !!cur.borrowed, locked: true };
+      d.locked = [...new Set(d.locked.filter((x) => x !== cur.id).concat(id))];
       swap = null;
       ctx.save();
     }
@@ -216,6 +220,8 @@
     async function saveParents(c, p, a, v) {
       const r = await planParents(c, p, a, v);
       found.set(keyOf(c, a), Object.assign(r, { sig: v.sig, inputs: inputsKey(c) }));
+      deckOf(c, a).parentSummary = r.p1 ? { tid: r.useFresh ? r.p1.t.id : r.p1.v.tid, fresh: r.useFresh } : null;
+      ctx.save();
     }
     async function planParents(c, p, a, v) {
       const t = trainee(a.tid), who = tName(t), style = styleOf(a);
@@ -228,16 +234,31 @@
       await stage(`${who}: would a fresh Parent 1 do better?`, 0.82);
       const pdeck = ctx.deck(p, style, null, PLAN_RACES);
       const fresh = CP.rankFresh(x, vetsAll, umas, pdeck.offers);
-      const useFresh = CP.freshWins(vets[0], fresh[0]);
+      let useFresh = CP.freshWins(vets[0], fresh[0]), chosenVet = vets[0], chosenFresh = fresh[0];
+      const family = ctx.family(), selected = family.p1;
+      if (selected && selected.cid && !selected.planned) {
+        const actual = selected.manual || selected.green || selected.blue[1] || selected.pink[1] || selected.white.length;
+        if (selected.manual || actual && selected.vet == null) {
+          chosenVet = CP.rankVets(x, [{ id: "manual", cid: selected.cid, tid: selected.tid, self: selected, parents: [family.g11, family.g12] }])[0] || chosenVet;
+          useFresh = false;
+        } else if (selected.vet != null) {
+          chosenVet = vets.find(z => z.v.id === selected.vet) || chosenVet;
+          useFresh = false;
+        } else {
+          chosenFresh = fresh.find(z => z.t.id === selected.tid) || chosenFresh;
+          useFresh = !!chosenFresh;
+        }
+      }
       let train = null;
-      if (fresh[0]) {
-        const f = fresh[0], races = CP.racePlan(f, vetsAll);
+      if (chosenFresh) {
+        const f = chosenFresh, races = CP.racePlan(f, vetsAll);
         const her = ctx.deck(p, style, f.t.id, races.extraRaces);
         await stage(`${who}: planning ${tName(f.t)}'s races…`, 0.9);
         const ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, c.parentRank, vetsAll);
         train = { f, races, deck: her, ss, agenda: CP.upTo(races, ss.n) };
       }
-      const p1 = useFresh ? fresh[0] : vets[0] || null;
+      const p1 = useFresh ? chosenFresh : chosenVet || null;
+      if (p1 && !(p1.kind === "vet" && p1.v.id === "manual")) ctx.planFamily(p1, useFresh ? train : null, selected && selected.cid && !selected.planned);
       return { a, style, t, x, vets: vets.slice(0, 6), fresh: fresh.slice(0, 4), useFresh, train, p1, link: p1 ? linkFor(x, t, p1, useFresh ? train : null) : null };
     }
 
@@ -296,12 +317,56 @@
     // ---------- drawing ----------
     function render(body) {
       const c = st();
+      aces(c);
+      ctx.sync();
+      c.open = c.open || { cup: true, deck: true, parents: true };
+      const a = current(c), p = cup(c), d = a ? deckOf(c, a) : null;
+      const section = (key, label, note, html) => `<details class="panel cmp-section" id="cm-${key}" data-cmp-section="${key}"${c.open[key] ? " open" : ""}><summary><h2>${label}</h2><span class="mini">${esc(note)}</span></summary><div class="cmp-section-body">${html}</div></details>`;
+      const prog = job ? `<div class="row-wrap" role="status"><span class="progress"><i style="width:${Math.round(job.f * 100)}%"></i></span><span class="mini">${esc(job.stage)}</span></div>` : "";
       body.innerHTML = `<div class="cmp">
-        <section class="panel"><h2>CM/LoH planner</h2><p class="mini">Pick an ace, search her deck, and get her predicted stats and parents.</p></section>
-        ${importHTML()}${setupHTML(c)}${aceHTML(c)}${howHTML()}
+        <nav class="cmp-progress" id="cmpProgress" aria-label="CM/LoH progress">${progressHTML(c)}</nav>
+        ${section("cup", "Cup & aces", p.name + (a ? " · " + tName(trainee(a.tid)) : " · Pick an ace"), setupHTML(c) + importHTML())}
+        ${section("deck", "Her deck", d && d.cards ? `${d.cards.length}/6 cards${d.searched != null ? " · score " + fmtN(d.searched) : ""}` : "Search her racing deck", a ? `<div data-deck-host="cm">${deckHTML(c, a, p)}${ctx.moreDeckTools(p, a, d)}</div>` : '<p class="mini">Pick an ace above.</p>')}
+        ${section("parents", "Her parents", parentNote(c, a), a ? parentsHTML(c, a, p) + `<details class="cmp-family-tools" id="cm-family" data-cmp-open="family-tools"${opened["family-tools"] ? " open" : ""}><summary>Family tools · enter and compare a family</summary>${ctx.familyHTML()}</details>` : '<p class="mini">Pick an ace above.</p>')}
+        ${section("training", "Train her", ctx.trainingStatus(), parentRankHTML(c) + ctx.trainingHTML())}
+        ${prog}${howHTML()}
       </div>`;
       if (job) body.querySelectorAll("button, select, input, textarea").forEach((el) => { el.disabled = true; });
-      body.querySelectorAll("details[data-cmp-open]").forEach((el) => el.addEventListener("toggle", () => { opened[el.dataset.cmpOpen] = el.open; }));
+      body.querySelectorAll("details[data-cmp-open]").forEach((el) => {
+        if (opened[el.dataset.cmpOpen] != null) el.open = opened[el.dataset.cmpOpen];
+        el.addEventListener("toggle", () => { if (el.isConnected) opened[el.dataset.cmpOpen] = el.open; });
+      });
+      body.querySelectorAll("details[data-cmp-section]").forEach((el) => el.addEventListener("toggle", () => { if (el.isConnected) { c.open[el.dataset.cmpSection] = el.open; ctx.save(); } }));
+    }
+
+    function parentNote(c, a) {
+      const r = a && deckOf(c, a).parentSummary;
+      return r ? `${r.fresh ? "Train " : "Parent 1: "}${tName(trainee(r.tid))}` : "Find Parent 1 and a rental";
+    }
+    function parentRankHTML(c) {
+      return `<label class="field"><span>Her rating (parent you train)</span><select id="cmpParentRank">${[["SS", "SS (17,500)"], ["S", "S (14,500)"], ["", "No minimum"]].map(([v, l]) => `<option value="${v}"${c.parentRank === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>`;
+    }
+    function progressHTML(c) {
+      const a = current(c), p = cup(c), d = a ? deckOf(c, a) : null, f = d && d.family || {}, summary = d && d.parentSummary, v = a && view(c, a);
+      const name = (m) => m && m.tid && trainee(m.tid) ? trainee(m.tid).n : "Choose";
+      return [["cup", "Cup", p.name], ["cup", "Ace", a ? trainee(a.tid).n + " · " + STYLE_LABEL[styleOf(a)] : "Choose"],
+        ["deck", "Deck", d && d.cards ? `${d.cards.length === 6 ? "Done" : d.cards.length + "/6"}${v ? " · " + fmtN(v.total) : ""}` : "Search"],
+        ["p1", "Parent 1", f.p1 && f.p1.tid ? name(f.p1) : summary ? `${summary.fresh ? "Train " : ""}${name(summary)}` : "Find"],
+        ["p2", "Parent 2", f.p2 && f.p2.tid ? name(f.p2) : "Find a rental"], ["training", "Training", ctx.trainingStatus()]]
+        .map(([key, label, text]) => `<button type="button" class="cmp-progress-item" data-cmp-jump="${key}" title="${esc(text)}"><span>${label}</span><b>${esc(text)}</b></button>`).join("");
+    }
+    function refreshStatus() {
+      const el = document.getElementById("cmpProgress");
+      if (el) el.innerHTML = progressHTML(st());
+    }
+    function jump(key) {
+      if (["who", "races", "parent-deck", "rating"].includes(key)) { ctx.gotoParents(key === "parent-deck" ? "deck" : key); return; }
+      const id = key === "p1" || key === "p2" ? "cmp-" + key : "cm-" + key;
+      const el = document.getElementById(id) || document.getElementById("cm-parents");
+      if (!el) return;
+      let p = el;
+      while (p && p.id !== "tabBody") { if (p.tagName === "DETAILS") p.open = true; p = p.parentElement; }
+      el.scrollIntoView({ block: "start", behavior: "smooth" });
     }
 
     function importHTML() {
@@ -316,7 +381,8 @@
     function setupHTML(c) {
       const p = cup(c), list = aces(c), selected = current(c);
       const mine = [...ctx.myUmas()].map(trainee).filter(Boolean).sort((a, b) => a.n.localeCompare(b.n) || a.t.localeCompare(b.t));
-      const cupOpts = cups().map((x) => `<option value="${esc(x.id)}"${x.id === c.cup ? " selected" : ""}>${esc(ctx.cupLabel(x))}</option>`).join("");
+      const groups = [["Now and next on Global", P.list.filter(x => x.kind === "cm" && x.global.end >= ctx.today && !x.global.est)], ["Later Champions Meetings · estimated", P.list.filter(x => x.kind === "cm" && x.global.est)], ["League of Heroes · estimated", P.list.filter(x => x.kind === "loh")], ["Past Global cups", P.list.filter(x => x.kind === "cm" && x.global.end < ctx.today).reverse()]];
+      const cupOpts = groups.filter(([, xs]) => xs.length).map(([label, xs]) => `<optgroup label="${label}">${xs.map(x => `<option value="${x.id}"${x.id === c.cup ? " selected" : ""}>${esc(ctx.cupLabel(x))}</option>`).join("")}</optgroup>`).join("");
       const chips = list.map((a, i) => `<div class="chip cmp-ace-chip${selected && a.tid === selected.tid ? " active" : ""}">
         <button type="button" class="linkish cmp-ace-name" data-cmp-sel="${a.tid}" aria-pressed="${!!selected && a.tid === selected.tid}">${esc(tName(trainee(a.tid)))} · ${STYLE_LABEL[styleOf(a)]}</button>
         <button type="button" class="linkish" data-cmp-edit="${i}" aria-label="Edit ${esc(tName(trainee(a.tid)))}" aria-expanded="${editAce === i}">Edit</button>
@@ -330,25 +396,11 @@
       }
       const team = ctx.pullTeam(p).filter((m) => ctx.myUmas().has(+m.tid));
       return `<section class="panel"><div class="row-wrap">
-        <label class="field grow"><span>The cup</span><select id="cmpCup">${cupOpts}</select></label>
-        <label class="field"><span>Her rating (parent you train)</span><select id="cmpParentRank">${[["SS", "SS (17,500)"], ["S", "S (14,500)"], ["", "No minimum"]].map(([v, l]) => `<option value="${v}"${c.parentRank === v ? " selected" : ""}>${l}</option>`).join("")}</select></label></div>
-        <p class="mini">${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)}${p.global.est ? " · estimated date" : ""} · up to three aces from My umas.</p>
+        <label class="field grow"><span>The cup</span><select id="cmpCup">${cupOpts}</select></label></div>
+        ${ctx.cupFacts(p)}
         <div class="row-wrap cmp-chips" aria-label="Your aces">${chips}${list.length < MAX_ACES ? `<button type="button" class="btn ghost small" id="cmpAddAce"${mine.length ? "" : " disabled"}>+ Add an ace</button>` : ""}</div>${editor}
         ${!mine.length ? `<p class="mini">Import your export above, or tick My umas in the Trainees tab.</p>` : ""}
         ${team.length ? `<button type="button" class="linkish" id="cmpTeam">Use my Pull planner team</button>` : ""}
-      </section>`;
-    }
-
-    // The ace you're working on: ① her deck, ② her parents.
-    function aceHTML(c) {
-      const a = current(c);
-      if (!a) return "";
-      const t = trainee(a.tid), p = cup(c);
-      const prog = job ? `<div class="row-wrap"><span class="progress"><i style="width:${Math.round(job.f * 100)}%"></i></span><span class="mini">${esc(job.stage)}</span></div>` : "";
-      return `<section class="panel cmp-ace"><h3>${esc(tName(t))} · ${STYLE_LABEL[styleOf(a)]}</h3>
-        <h4>① Her deck</h4>${deckHTML(c, a, p)}
-        <h4>② Her parents</h4>${parentsHTML(c, a, p)}
-        ${prog}
       </section>`;
     }
 
@@ -357,15 +409,15 @@
       const opt = (pairs, val) => pairs.map(([x, l]) => `<option value="${x}"${String(val) === String(x) ? " selected" : ""}>${esc(l)}</option>`).join("");
       const comp = `<div class="comp"><span class="mini"><b>Deck makeup</b></span>
         <div class="comp-row">${ctx.compTypes.map(([ty, l]) => `<label class="field comp-f ty-${ty}"><span><i class="tydot"></i>${l}</span><select data-cmp-comp="${ty}"><option value="">Any</option>${[0, 1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}"${d.comp[ty] === n ? " selected" : ""}>${n}</option>`).join("")}</select></label>`).join("")}</div></div>`;
-      const skills = ctx.raceSkills(p, styleOf(a));
-      const must = `<div class="row-wrap"><label class="field grow"><span>Must-have skills</span><select data-cmp-must-add><option value="">Add a skill…</option>${skills.filter((x) => d.must.indexOf(String(x.id)) === -1).slice(0, 80).map((x) => `<option value="${x.id}">${esc(ctx.skillName(x.id))} · ${x.L.toFixed(2)} L</option>`).join("")}</select></label></div>
+      const skills = ctx.mustSkills(d);
+      const must = `<div class="row-wrap"><label class="field grow"><span>Must-have skills</span><select data-cmp-must-add><option value="">Add a skill…</option>${skills.filter((x) => d.must.indexOf(String(x.id)) === -1).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label></div>
         ${d.must.length ? `<div class="row-wrap">${d.must.map((id) => `<span class="chip">${esc(ctx.skillName(id))} <button type="button" class="linkish" data-cmp-must-del="${id}" aria-label="Remove">✕</button></span>`).join("")}</div>` : ""}`;
       const out = d.exclude.length ? `<p class="mini">Left out of her searches: ${d.exclude.map((id) => `<span class="chip">${esc(cardName(id))} <button type="button" class="linkish" data-cmp-unexclude="${id}" aria-label="Allow again">✕</button></span>`).join(" ")}</p>` : "";
       const opts = `<details class="cmp-deckset" data-cmp-open="set"${(opened.set != null ? opened.set : !d.cards) ? " open" : ""}><summary class="mini"><b>Deck settings</b> · ${Object.keys(d.comp).length ? Object.keys(d.comp).map((ty) => `${d.comp[ty]} ${TYPE_LABEL[ty]}`).join(", ") : "any makeup"} · ${d.borrow ? "a friend's card" : "no friend's card"}${d.must.length ? ` · ${plural(d.must.length, "must-have")}` : ""}</summary>
         ${comp}
-        <div class="row-wrap"><label class="chip-toggle"><input type="checkbox" data-cmp-borrow${d.borrow ? " checked" : ""}> Borrow 1 card from a friend</label>
+        <div class="row-wrap"><label class="chip-toggle"><input type="checkbox" data-cm="ownedOnly"${d.ownedOnly !== false ? " checked" : ""}> Only cards I own</label><label class="chip-toggle"><input type="checkbox" data-cmp-borrow${d.borrow ? " checked" : ""}> Borrow 1 card from a friend</label>
           <label class="field"><span>Skill hints count</span><select data-cmp-skillw>${opt(ctx.skillWeights, d.skillW)}</select></label></div>
-        ${must}</details>`;
+        ${must}${ctx.lockHTML(d)}</details>`;
       const run = `<div class="row-wrap"><button type="button" class="btn" id="cmpDeck"${job ? " disabled" : ""}>Search deck</button><span class="mini">${d.cards && d.cards.some((x) => x.locked) ? "Keeps your locked cards." : "From My cards at your limit breaks."}</span></div>`;
       const aim = targetsHTML(c, a, p, d);
       if (!d.cards) return opts + aim + run + out;
@@ -386,7 +438,6 @@
         <p class="mini"><b>Deck score ${fmtN(v.total)}</b>${diff}.${note ? ` <span class="warn">${esc(note)}</span>` : ""}</p>
         ${offers ? `<p class="mini">Best race skills: ${offers}.</p>` : ""}
         ${out}
-        <div class="row-wrap"><button type="button" class="btn ghost small" id="cmpUseCM"${v.cards.length ? "" : " disabled"}>Use this deck in CM &amp; decks</button></div>
         ${simOk ? predictedHTML(sim, p, d) : ""}`;
     }
 
@@ -428,8 +479,8 @@
       const stale = r && ((v && r.sig !== v.sig) || r.inputs !== inputsKey(c));
       const btn = `<div class="row-wrap"><button type="button" class="btn" id="cmpParents"${job || !has ? " disabled" : ""}>${r ? "Find them again" : "Find her parents"}</button><span class="mini">${has ? "For her deck as it is above." : "Search deck finds them too."}</span>${stale ? `<span class="mini warn">The plan changed; find them again.</span>` : ""}</div>`;
       if (!r) return btn;
-      return btn + `<h4 class="cmp-sub">Parent 1</h4>${p1HTML(r)}
-        <h4 class="cmp-sub">Parent 2: a friend's rental</h4>${p2HTML(r, c, a)}
+      return btn + `<div id="cmp-p1"><h4 class="cmp-sub">Parent 1</h4>${p1HTML(r)}</div>
+        <div id="cmp-p2"><h4 class="cmp-sub">Parent 2: a friend's rental</h4>${p2HTML(r, c, a)}</div>
         ${r.train ? `<details class="cmp-train" data-cmp-open="train"${(opened.train != null ? opened.train : r.useFresh) ? " open" : ""}><summary><b>${r.useFresh ? "Train her: " : "A fresh Parent 1, if you train one anyway: "}${esc(tName(r.train.f.t))}</b> · ${plural(r.train.ss.n, "extra race")}${r.train.ss.none ? ` (short of ${r.train.ss.rank})` : ""}</summary>${trainHTML(r, p)}</details>` : ""}`;
     }
 
@@ -444,12 +495,12 @@
       let out;
       if (!pick) out = `<p class="mini">Import more veterans to find Parent 1.</p>`;
       else if (r.useFresh) out = `<p><b>Train ${esc(tName(pick.t))}</b> · parents ${pick.parents.map((v) => esc(vetName(v))).join(" + ")} · expected ${famLine(Object.assign({}, pick.s, { value: pick.value }))}.</p>`;
-      else out = `<p><b>Your veteran ${esc(vetName(pick.v))}</b> · rating ${fmtN(pick.v.score || 0)} · ${sparks(pick.v.self)} · ${famLine(pick.s)}.</p>`;
+      else out = `<p><b>${pick.v.id === "manual" ? "Your parent" : "Your veteran"} ${esc(vetName(pick.v))}</b>${pick.v.score ? ` · rating ${fmtN(pick.v.score)}` : ""} · ${sparks(pick.v.self)} · ${famLine(pick.s)}.</p>`;
       const other = r.vets.concat(r.fresh).filter((x) => x !== pick).sort((a, b) => b.value - a.value);
-      if (other.length) out += `<details><summary class="mini">Other options (${other.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th class="num">Family</th><th class="num">Affinity</th></tr></thead><tbody>${other.map((x) => {
+      if (other.length) out += `<details><summary class="mini">Other options (${other.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th class="num">Family</th><th class="num">Affinity</th><th></th></tr></thead><tbody>${other.map((x) => {
         const fresh = x.kind === "fresh";
         const ps = fresh ? x.parents.map(vetName) : x.v.parents.filter(Boolean).map((m) => ctx.charName(m.cid));
-        return `<tr><td>${fresh ? "Train " : "Veteran: "}<b>${esc(fresh ? tName(x.t) : vetName(x.v))}</b>${ps.length ? `<div class="mini">Parents: ${ps.map(esc).join(" + ")}</div>` : ""}</td><td class="num">${fresh ? "~" : ""}${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td></tr>`;
+        return `<tr><td>${fresh ? "Train " : "Veteran: "}<b>${esc(fresh ? tName(x.t) : vetName(x.v))}</b>${ps.length ? `<div class="mini">Parents: ${ps.map(esc).join(" + ")}</div>` : ""}</td><td class="num">${fresh ? "~" : ""}${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td><td><button type="button" class="linkish" data-cmp-p1="${fresh ? "fresh|" + x.t.id : "vet|" + x.v.id}">Use</button></td></tr>`;
       }).join("")}</tbody></table></div></details>`;
       return out;
     }
@@ -467,7 +518,7 @@
           <p class="mini">Paste whole uma.moe parent cards to rank them with Parent 1.</p>
           <textarea class="fp-vets" data-cmp-rent-text rows="3" placeholder="Paste uma.moe parent cards here"></textarea>
           <div class="row-wrap"><button type="button" class="btn small" data-cmp-rent-add>Add</button>${ctx.rentals().length ? `<button type="button" class="btn ghost small" data-cmp-rent-clear>Remove all</button>` : ""}</div>
-          ${rents.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Rental (and her parents)</th><th>Friend</th><th class="num">Family</th><th class="num">Affinity</th></tr></thead><tbody>${rents.slice(0, 10).map((x) => `<tr><td>${esc(x.r.names[0])} <span class="mini">+ ${esc(x.r.names[1] || "")} + ${esc(x.r.names[2] || "")}</span><div class="mini">${sparks(x.r.parent)}${topSkills(x.s, ["p2", "g21", "g22"]) ? ` · best sparks: ${topSkills(x.s, ["p2", "g21", "g22"])}` : ""}</div></td><td>${esc(x.r.trainer)}<div class="mini">${esc(x.r.friend.replace(/(\d{3})(?=\d)/g, "$1 "))}</div></td><td class="num">${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td></tr>`).join("")}</tbody></table></div>` : ""}
+          ${rents.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Rental (and her parents)</th><th>Friend</th><th class="num">Family</th><th class="num">Affinity</th><th></th></tr></thead><tbody>${rents.slice(0, 10).map((x) => `<tr><td>${esc(x.r.names[0])} <span class="mini">+ ${esc(x.r.names[1] || "")} + ${esc(x.r.names[2] || "")}</span><div class="mini">${sparks(x.r.parent)}${topSkills(x.s, ["p2", "g21", "g22"]) ? ` · best sparks: ${topSkills(x.s, ["p2", "g21", "g22"])}` : ""}</div></td><td>${esc(x.r.trainer)}<div class="mini">${esc(x.r.friend.replace(/(\d{3})(?=\d)/g, "$1 "))}</div></td><td class="num">${fmt(x.value)}</td><td class="num">${x.s.total} ${x.s.symbol}</td><td><button type="button" class="linkish" data-cmp-rent-use="${esc(x.r.friend)}">Use</button></td></tr>`).join("")}</tbody></table></div>` : ""}
           ${rents.hidden && rents.hidden.length ? `<p class="mini">Not shown (the game wouldn't allow them here): ${rents.hidden.map((h) => `${esc(h.r.trainer)}'s ${esc(h.r.names[0])} (${esc(h.why)})`).join("; ")}.</p>` : ""}
         </details>`;
     }
@@ -535,65 +586,67 @@
       const row = ss.rows.find((x) => x.n === ss.n);
       return `Simulation: ${ss.rank} in ${row.hit} of ${row.of} with ${ss.n} extra races (${pct}% needed)${ss.none ? "; short even with no extras" : ""}.`;
     }
-    function trainHTML(r, p) {
-      const tr = r.train, f = tr.f, ss = tr.ss;
-      const shared = (x) => `Shared +${3 * x.with.length}`;
-      const why = (x) => x.free ? `Goal${x.with && x.with.length ? " · " + shared(x) : ""}` : !x.extra ? shared(x) : `Rental overlap (${x.pop})`;
-      const all = tr.races.agenda.concat(tr.races.goals || []).sort((a, b) => a.turn - b.turn);
-      const rows = all.map((x) => { const keep = x.free || x.rank < ss.n; return `<tr${keep ? "" : ' class="cmp-cut"'}><td class="num">${x.turn}<div class="mini">${esc(ctx.turnText(x.turn))}</div></td><td><b>${esc(x.name)}</b>${x.d ? `<div class="mini">${x.d}m ${x.s === 2 ? "dirt" : "turf"}${x.aptGrades ? " · aptitude " + x.aptGrades.join("/") : ""}</div>` : ""}</td><td class="mini">${why(x)}${keep ? "" : ` · <b>skip: below ${ss.rank}</b>`}</td></tr>`; }).join("");
-      const ssRows = ss.rows.map((x) => `<tr${x.n === ss.n ? ' class="cur"' : ""}><td class="num">${x.n}${x.n === ss.n ? " ←" : ""}</td>${x.stats.map((v) => `<td class="num">${v}</td>`).join("")}<td class="num">${x.sp}</td><td class="num">${x.rating.toLocaleString("en-US")}</td><td class="num">${x.hit}/${x.of}</td></tr>`).join("");
-      const w = f.extra.whites.list.slice(0, 6).map((y) => esc(ctx.skillName(y.id))).join(", ");
-      return `<p class="mini"><b>Deck:</b> ${tr.deck.cards.map((x) => esc(cardName(x.id)) + ` LB${x.lb}${x.borrowed ? " (friend)" : ""}`).join(", ")}.</p>
-        ${w ? `<p class="mini"><b>Learn first:</b> ${w}.</p>` : ""}
-        <p class="mini">${ssText(ss)}</p>
-        <div class="table-wrap"><table class="plan cmp-races"><thead><tr><th class="num">Turn</th><th>Race</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
-        ${tr.races.skipped.some((x) => x.points > 0) ? `<p class="mini">No free turn for ${tr.races.skipped.filter((x) => x.points > 0).map((x) => esc(x.name)).join(", ")}, which her parents won: it's held on a turn her career already takes.</p>` : ""}
-        <details><summary class="mini">What the races cost: about ${Math.round(ss.perRace)} rating each, simulated</summary>
-          <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th class="num">Extra races</th>${F.STAT_LABELS.map((l) => `<th class="num">${l.slice(0, 3)}</th>`).join("")}<th class="num">SP</th><th class="num">Rating</th><th class="num">${ss.rank || "No minimum"}</th></tr></thead><tbody>${ssRows}</tbody></table></div>
-          <p class="mini">16 careers each in ${esc(ss.simScen.name)}, before inheritance.</p></details>
-        ${stepsHTML(r)}`;
+    function trainHTML(r) {
+      const tr = r.train, ss = tr.ss;
+      const rows = tr.races.agenda.concat(tr.races.goals || []).sort((a, b) => a.turn - b.turn).map(x => {
+        const keep = x.free || x.rank < ss.n;
+        const why = x.free ? "Goal" : x.with && x.with.length ? `Shared +${3 * x.with.length}` : `Rental overlap (${x.pop || 0})`;
+        return `<tr${keep ? "" : ' class="cmp-cut"'}><td>${x.turn}<div class="mini">${esc(ctx.turnText(x.turn))}</div></td><td>${esc(x.name)}</td><td class="mini">${why}${keep ? "" : ` · skip: ${ss.rank}`}</td></tr>`;
+      }).join("");
+      const sims = ss.rows.map(x => `<tr><td>${x.n}</td>${x.stats.map(v => `<td>${v}</td>`).join("")}<td>${x.sp}</td><td>${fmtN(x.rating)}</td><td>${x.hit}/${x.of}</td></tr>`).join("");
+      return `<p class="mini">${ssText(ss)}</p>${stepsHTML(r)}<details><summary class="mini">Race plan and reference predictions</summary>
+        <div class="table-wrap"><table class="plan cmp-races"><thead><tr><th>Turn</th><th>Race</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th>Extra</th>${F.STAT_LABELS.map(l => `<th>${l.slice(0, 3)}</th>`).join("")}<th>SP</th><th>Rating</th><th>${ss.rank || "No minimum"}</th></tr></thead><tbody>${sims}</tbody></table></div>
+        <p class="mini">16 careers each, before inheritance · about ${fmtN(ss.perRace)} rating per extra race.</p></details>`;
     }
 
     // Is she already set up in the Parents tab (sent from here for this ace and cup)?
     function sentThere(r) {
-      const f = ctx.plannerFrom(), c = st();
-      return !!(f && f.kind === "parent" && f.cup === c.cup && +f.tid === +r.t.id && +f.p1 === +r.train.f.t.id);
+      const f = ctx.training(), c = st();
+      return !!(f && f.cup === c.cup && +f.tid === +r.t.id && +f.parent === +r.train.f.t.id);
     }
     // The Parents tab's steps for her, one click each (the first one sets her up there).
     function stepsHTML(r) {
       const ready = sentThere(r);
       const step = (key, label) => `<button type="button" class="btn ${key === "family" ? "small" : "ghost small"}" data-cmp-send="${key}">${label}</button>`;
-      return `<div class="cmp-steps"><p class="mini"><b>Continue in the Parents tab</b>${ready ? ": she's set up there." : ": the first click sets her up."}</p>
+      return `<div class="cmp-steps"><p class="mini">${ready ? "She's ready below." : "Set her up below to train."}</p>
         <div class="row-wrap">${step("family", "Her family")}${step("races", "② Races")}${step("deck", "③ Deck")}${step("rating", "④ Skills to buy")}${ready ? `<button type="button" class="linkish" data-cmp-resend>Set her up again</button>` : ""}</div></div>`;
     }
 
     function howHTML() {
       return `<section class="panel"><details><summary><b>How the planner decides</b></summary><ul class="mini">
-        <li><b>Import:</b> umaextractor replaces your veterans and adds your trained umas and cards. A card's limit break never goes down; the friend's card is left out. The Parents tab shares these lists.</li>
-        <li><b>Search deck:</b> starts with CM &amp; decks' quick build from My cards, using Euophrys' scoring and her race skills. Makeup includes the friend's card; Any lets the search decide. Locks stay and left-out cards stay out. A card's score is its value with the other five fixed; the deck score adds them up.</li>
+        <li><b>Cup:</b> later Global dates are estimates from JP’s order and Global’s pace. Skills marked JP version use that cup’s JP balance changes; By then marks expected releases.</li>
+        <li><b>Independent Training:</b> initial stats and SP count more, Specialty counts for nothing, and late-chain hints count less. The weights and Grand Concert event rates are estimates.</li>
+        <li><b>Import:</b> umaextractor replaces your veterans and adds your trained umas and cards. A card's limit break never goes down; the friend's card is left out. Family tools share these lists.</li>
+        <li><b>Search deck:</b> starts with a quick build from My cards, using Euophrys' scoring and her race skills. Makeup includes the friend's card; Any lets the search decide. Locks stay and left-out cards stay out. A card's score is its value with the other five fixed; the deck score adds them up.</li>
         <li><b>Targets and rank:</b> if either is set, the search simulates swaps and checks all tested decks with 16 careers. The most careers at your chosen rank wins, then rating shortfall, stats and skills count. S starts at 14,500; S+ at 15,900; SS at 17,500. Rating estimates stats + SP spent on relevant skills + unique. Blank stats use the build targets. Predictions use the coach's scenario and leave out inheritance.</li>
         <li><b>Card edits:</b> Change locks your choice. Leave out predicts with the empty slot; Fill keeps the other cards. Predictions refresh automatically; Find them again updates her parents for the edited deck.</li>
         <li><b>Parent 1:</b> the family score counts spark chances over two inspirations, affinity, blue start bonuses and needed pinks. A white her deck offers, or she has innately, counts only for its hint discount (about ${F.HINT_L} L).</li>
         <li><b>A fresh parent:</b> any of My umas with her best two veterans as parents, suggested only when she beats your best veteran by ${Math.round(root.UmaCmPlan.MARGIN * 100)}%. Expected whites use your veterans' learned skills and spark rates. Until 10 veterans with skills, defaults are 12 relevant skills, 30% sparks, and 1★/2★/3★ at 32/60/8%. Her unique counts at 2★; pink and blue land on a random aptitude and stat.</li>
         <li><b>Parent races:</b> career goals first, then shared G1s (+3 affinity per parent), then likely rental overlap, at B aptitude or better. Her rating keeps ${Math.round(root.UmaCmPlan.SS_SHARE * 100)}% of runs at S or SS; No minimum keeps every race. Ratings come from at least ${root.UmaCmPlan.BASE_MIN} veterans with at most ${root.UmaCmPlan.BASE_EXTRA} extra race in the coach's scenario, or the last one you used. Simulation estimates the cost per race; with too few veterans it supplies the ratings too.</li>
         <li><b>Parent 2:</b> Full uma.moe settings shows each field and why it is set or left open. More stars asks for a 3★ key blue on her, 9 total blue stars and a focused pink; More choices relaxes stars. Required whites are AND conditions, while preferred whites use P0, then P1 and P2 before affinity. Green focus links require the selected inherited unique on the rental. Her rank is unrestricted: compare the sparks she already has. SS comes before extra affinity races when training your own parent.</li>
-        <li><b>Train her:</b> learn relevant skills for whites and raise key stats for blue. The Parents tab buttons set her family, races, deck goal and target whites once, then open each step. Use the bar there to return; Set her up again starts over.</li>
+        <li><b>Train her:</b> learn relevant skills for whites and raise key stats for blue. The buttons set her family, races, parent deck and target whites, then open ① to ④ here. Set her up again resets that setup.</li>
       </ul></details></section>`;
     }
 
     // ---------- events ----------
     function click(e) {
       const t = e.target, c = st(), a = current(c);
+      const jumpTo = t.closest("[data-cmp-jump]");
+      if (jumpTo) { jump(jumpTo.dataset.cmpJump); return true; }
       if (t.closest("#cmpDeck")) { searchDeck(false); return true; }
       if (t.closest("[data-cmp-fill]")) { searchDeck(true); return true; }
       if (t.closest("#cmpParents")) { findParents(); return true; }
-      if (a && t.closest("#cmpTgCoach")) { const d = deckOf(c, a), ct = ctx.coachTargets() || {}; d.targets = {}; STATS.forEach((x) => { if (ct[x] > 0) d.targets[x] = +ct[x]; }); ctx.save(); ctx.rerender(); return true; }
-      if (a && t.closest("#cmpTgClear")) { deckOf(c, a).targets = {}; ctx.save(); ctx.rerender(); return true; }
-      if (t.closest("#cmpUseCM") && a) {
-        const d = deckOf(c, a);
-        ctx.useInCM({ cup: c.cup, style: styleOf(a), tid: a.tid, comp: d.comp, borrow: d.borrow, skillW: d.skillW, must: d.must, targets: d.targets, rankGoal: d.rankGoal, cards: cardsNow(d) });
+      const choose = t.closest("[data-cmp-p1]");
+      if (choose && a) {
+        const r = found.get(keyOf(c, a)), [kind, id] = choose.dataset.cmpP1.split("|");
+        if (r) { const p1 = kind === "fresh" ? r.fresh.find(x => +x.t.id === +id) : r.vets.find(x => String(x.v.id) === id); if (p1) { ctx.planFamily(p1, null, true); findParents(); } }
         return true;
       }
+      const useRental = t.closest("[data-cmp-rent-use]");
+      if (useRental) { ctx.useRental(useRental.dataset.cmpRentUse); ctx.save(); ctx.rerender(); return true; }
+      if (a && t.closest("#cmpTgCoach")) { const d = deckOf(c, a), ct = ctx.coachTargets() || {}; d.targets = {}; STATS.forEach((x) => { if (ct[x] > 0) d.targets[x] = +ct[x]; }); ctx.save(); ctx.rerender(); return true; }
+      if (a && t.closest("#cmpTgClear")) { deckOf(c, a).targets = {}; ctx.save(); ctx.rerender(); return true; }
       if (t.closest("#cmpImport")) {
         const ta = document.getElementById("cmpVetsText");
         if (!ta || !ta.value.trim()) { ctx.flash("Paste the JSON first."); return true; }
@@ -608,11 +661,11 @@
       if ((el = t.closest("[data-cmp-edit]"))) { editAce = editAce === +el.dataset.cmpEdit ? null : +el.dataset.cmpEdit; ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-ace-remove]"))) { aces(c).splice(+el.dataset.cmpAceRemove, 1); editAce = null; swap = null; ctx.save(); ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-sel]"))) { c.sel[c.cup] = +el.dataset.cmpSel; swap = null; ctx.save(); ctx.rerender(); return true; }
-      if (a && (el = t.closest("[data-cmp-lock]"))) { const x = deckOf(c, a).cards[+el.dataset.cmpLock]; if (x) x.locked = !x.locked; ctx.save(); ctx.rerender(); return true; }
+      if (a && (el = t.closest("[data-cmp-lock]"))) { const d = deckOf(c, a), x = d.cards[+el.dataset.cmpLock]; if (x) { x.locked = !x.locked; d.locked = d.locked.filter(id => id !== x.id); if (x.locked) d.locked.push(x.id); } ctx.save(); ctx.rerender(); return true; }
       if (a && (el = t.closest("[data-cmp-swap]"))) { const i = +el.dataset.cmpSwap, k = keyOf(c, a); swap = swap && swap.k === k && swap.i === i ? null : { k, i }; ctx.rerender(); return true; }
       if (a && (el = t.closest("[data-cmp-remove]"))) {
         const d = deckOf(c, a), i = +el.dataset.cmpRemove, x = d.cards[i];
-        if (x) { d.cards.splice(i, 1); if (d.exclude.indexOf(x.id) === -1) d.exclude.push(x.id); }
+        if (x) { d.cards.splice(i, 1); d.locked = d.locked.filter(id => id !== x.id); if (d.exclude.indexOf(x.id) === -1) d.exclude.push(x.id); }
         swap = null; ctx.save(); refreshPrediction(c, a);
         return true;
       }
@@ -634,7 +687,7 @@
         if (!r || !r.train) return true;
         const f = r.train.f, section = send ? send.dataset.cmpSend : "family";
         if (send && sentThere(r)) { ctx.gotoParents(section); return true; }
-        ctx.sendToParents({ cup: c.cup, style: r.style, rank: c.parentRank, ace: { cid: r.t.cid, tid: r.t.id }, p1: { cid: f.t.cid, tid: f.t.id }, parents: f.parents, races: r.train.agenda.filter((x) => !x.free).map((x) => x.name), wins: [...new Set(r.train.agenda.map((x) => x.name))], must: f.extra.whites.list.slice(0, 5).map((x) => x.id) }, section);
+        ctx.trainParent({ cup: c.cup, style: r.style, rank: c.parentRank, ace: { cid: r.t.cid, tid: r.t.id }, p1: { cid: f.t.cid, tid: f.t.id }, parents: f.parents, cards: r.train.deck.cards, races: r.train.agenda.filter((x) => !x.free).map((x) => x.name), wins: [...new Set(r.train.agenda.map((x) => x.name))], must: f.extra.whites.list.slice(0, 5).map((x) => x.id) }, section);
         return true;
       }
       return false;
@@ -642,7 +695,7 @@
     function change(e) {
       const t = e.target, c = st(), ds = t.dataset, a = current(c);
       if (t.id === "cmpCup") { c.cup = t.value; swap = null; editAce = null; ctx.save(); ctx.rerender(); return true; }
-      if (t.id === "cmpParentRank") { c.parentRank = t.value; ctx.save(); ctx.rerender(); return true; }
+      if (t.id === "cmpParentRank") { ctx.setParentRank(t.value); ctx.save(); ctx.rerender(); return true; }
       if (t.id === "cmpVetsFile") {
         const file = t.files && t.files[0];
         if (file) { const fr = new root.FileReader(); fr.onload = () => { ctx.importVeterans(String(fr.result)); ctx.rerender(); }; fr.readAsText(file); }
@@ -675,7 +728,7 @@
       return false;
     }
 
-    return { render, click, change, st };
+    return { render, click, change, st, refreshStatus, predictCurrent: () => { const c = st(), a = current(c); return a ? refreshPrediction(c, a) : Promise.resolve(); } };
   }
 
   const api = { create, PLAN_RACES };
