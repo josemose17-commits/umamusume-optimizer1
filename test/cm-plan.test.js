@@ -152,6 +152,16 @@ test("how many extra races keep her at SS: your veterans' ratings, less what eac
   assert.equal(plan.baseline(vets.slice(0, 5), "grandlive"), null, "too few to tell");
   const low = plan.baseline(scores.map((s) => vet(t, [], { score: s - 3000, races: n0 })), "grandlive");
   assert.equal(plan.ssLimit(low, 100, 5).none, true);
+  const S = require('../rating.js').rankThreshold('S');
+  const atS = plan.baseline(vets, 'grandlive', S);
+  assert.equal(atS.ss, 10, 'S uses 14,500, not S+ or SS');
+  assert.deepEqual(atS.more, { n: 1, ss: 1 }, 'the higher-race sample uses S too');
+  const sLimit = plan.ssLimit(atS, 300, 20, S);
+  assert.equal(sLimit.n, Math.floor((eighth - S) / 300));
+  assert.ok(sLimit.n > lim.n, 'S leaves room for more shared G1s');
+  assert.ok(sLimit.ss >= 8, 'at least 75%, rounded up');
+  assert.ok(atS.scores.filter(s => s - (sLimit.n + 1) * 300 >= S).length < 8, 'one more race fails');
+  assert.equal(plan.ssLimit(atS, 300, 20, 0).n, 20, 'no minimum keeps every available race');
 });
 
 test("the uma.moe search: its own filters in the link", () => {

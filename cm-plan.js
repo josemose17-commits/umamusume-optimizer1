@@ -11,7 +11,7 @@
 //    inherited unique at 2★; her pink and blue on a random aptitude and stat;
 //  - her race plan: her career goals, then the G1s her parents won (each +3 affinity per parent
 //    who won it), then the G1s your veterans and their parents won most (a rental likely shares
-//    them), as many as keep her at SS: your veterans in the scenario that ran no extra races
+//    them), as many as keep her at the selected rank: your veterans in the scenario that ran no extra races
 //    give the ratings you reach, and the simulation (cm-tab.js) what each race costs;
 //  - Parent 2: the uma.moe search (its database filters, in a link): the ace as the affinity
 //    target, Parent 1's character and G1 wins as the legacy, a 3★ key-stat blue on the rental,
@@ -27,7 +27,7 @@
   // Races and SS: your veterans in the scenario with BASE_EXTRA extra races or fewer (BASE_MIN
   // of them at least) give the ratings you reach; the simulation gives what each race costs.
   const BASE_EXTRA = 1, BASE_MIN = 10;
-  // SS is a must: a race count keeps her at SS when this share of the simulated careers reach it.
+  // A race count keeps her at the selected rank when this share of careers reach it.
   const SS_SHARE = 0.75;
   const UMA_MOE = "https://uma.moe/database";
   // uma.moe's factor ids (the game's factor id without its star digit): blue by stat, pink by
@@ -233,22 +233,23 @@
     // The agenda for n extra races (career goals always).
     const upTo = (pl, n) => pl.agenda.filter((r) => r.free || r.rank < n);
 
-    // ---- how many races keep her at SS ----
+    // ---- how many races keep her at the selected rank ----
     // A veteran's extra races: those she ran before the finale beyond her career goals.
     const goalCount = (cid) => { const g = A.careerGoals(cid); return g.fixed.length + g.choices.length; };
     const extraOf = (v) => (v.races == null ? null : v.races - goalCount(v.cid));
     // Your veterans in this scenario that ran next to no extra races (BASE_EXTRA or fewer): the
     // ratings you really reach there. null when there are fewer than BASE_MIN of them.
-    function baseline(vets, scenario) {
+    function baseline(vets, scenario, minimum = o.SS) {
       const xs = (vets || []).filter((v) => v.scenario === scenario && v.score > 0 && extraOf(v) != null && extraOf(v) <= BASE_EXTRA);
       if (xs.length < BASE_MIN) return null;
       const more = (vets || []).filter((v) => v.scenario === scenario && v.score > 0 && extraOf(v) > BASE_EXTRA);
-      return { scores: xs.map((v) => v.score), ss: xs.filter((v) => v.score >= o.SS).length, n: xs.length, more: { n: more.length, ss: more.filter((v) => v.score >= o.SS).length } };
+      return { scores: xs.map((v) => v.score), ss: xs.filter((v) => v.score >= minimum).length, n: xs.length, more: { n: more.length, ss: more.filter((v) => v.score >= minimum).length } };
     }
-    // The most extra races that keep SS_SHARE of those runs at SS, each race costing perRace
+    // The most extra races that keep SS_SHARE of those runs at minimum (SS by default), each costing perRace
     // rating (the simulation's slope), up to max. { n, ss, of } at that count.
-    function ssLimit(base, perRace, max) {
-      const at = (n) => base.scores.filter((s) => s - perRace * n >= o.SS).length;
+    function ssLimit(base, perRace, max, minimum = o.SS) {
+      if (minimum <= 0) return { n: max, ss: base.n, of: base.n };
+      const at = (n) => base.scores.filter((s) => s - perRace * n >= minimum).length;
       let n = 0;
       if (at(0) < SS_SHARE * base.n) return { n: 0, ss: at(0), of: base.n, none: true };
       while (n < max && at(n + 1) >= SS_SHARE * base.n) n++;
