@@ -215,6 +215,24 @@ test("target stats: locked cards, deck makeup and must-have skills hold", () => 
   assert.ok(r.cards.some((c) => (D.card(c.id).hs || []).concat(D.card(c.id).es || []).map(String).includes(must)), "must-have still covered");
 });
 
+test("racing rank goals: S / SS count careers and preserve the best success rate", () => {
+  const R = require('../rating.js');
+  const pool = pool4(), base = { scenario: 'GL' };
+  const start = Tiers.buildDeck(base, pool, []).cards;
+  for (const label of ['S', 'SS']) {
+    const rankGoal = { ss: R.rankThreshold(label), spRating: 2.5, unique: R.uniqueBonus(3, 3), ignoreFit: true };
+    const opts = { ...base, rankGoal, locked: start.slice(0, 4).map(c => c.id) };
+    const r = runSearch(opts, { scenario: gl, build: 'medium' }, start, pool);
+    const hits = r.after.finals.filter(f => R.statsScore(f.stats) + Math.round(f.sp * rankGoal.spRating) + rankGoal.unique >= rankGoal.ss).length;
+    assert.equal(r.after.finals.length, 16);
+    assert.equal(r.after.ssShare, hits / 16, label + ' uses its own threshold');
+    assert.ok(r.after.ssShare >= r.before.ssShare, 'no lower success rate, including final validation');
+    assert.equal(r.after.rating, R.statsScore(r.after.stats) + Math.round(r.after.sp * rankGoal.spRating) + rankGoal.unique);
+    assert.ok(opts.locked.every(id => r.cards.some(c => c.id === id)), 'locked cards stay');
+    assert.equal(new Set(r.cards.map(c => D.card(c.id).cid)).size, 6, 'legal racing deck');
+  }
+});
+
 test("simulated careers start with the cards' initial stats and skill points", () => {
   const fuku = pick((c) => c.n === "Matikanefukukitaru" && c.r === 3 && c.ty === "speed" && D.onGlobal(c, TODAY));
   const lv = D.levelFor(fuku, 4);

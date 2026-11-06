@@ -719,8 +719,7 @@ table.pred .over { color: var(--accent); }
 .cmp-ace-pick select { max-width: 100%; }
 .cmp-deck { margin: 4px 0; padding-left: 22px; }
 .cmp-deck li { margin: 2px 0; }
-.cmp-filters { margin: 4px 0 8px; padding-left: 18px; }
-.cmp-filters li { margin: 2px 0; }
+.cmp-filters { margin: 4px 0 8px; overflow-wrap: anywhere; }
 .cmp-train { margin-top: 12px; border-left: 3px solid var(--accent); padding-left: 10px; }
 .cmp-races tr.cmp-cut td { opacity: .55; }
 .cmp-rent, .cmp-import { margin-top: 6px; }
@@ -728,7 +727,10 @@ table.pred .over { color: var(--accent); }
 .cmp select, .cmp textarea { max-width: 100%; }
 #cmpCup { width: 100%; }
 .cmp-chips { margin-bottom: 8px; }
-.cmp-chips .chip[aria-selected="true"] { background: var(--accent); color: var(--on-accent, #fff); border-color: var(--accent); }
+.cmp-ace-chip { display: flex; align-items: center; gap: 8px; max-width: 100%; white-space: normal; padding: 5px 9px; }
+.cmp-ace-chip.active { background: var(--surface-2); border-color: var(--accent); }
+.cmp-ace-name { flex: 1; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.cmp-chips .linkish { color: inherit; }
 .cmp-deck { list-style: decimal; display: grid; gap: 8px; }
 .cmp-slot { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
 .cmp-slot.locked { border-color: var(--accent); }
@@ -736,6 +738,7 @@ table.pred .over { color: var(--accent); }
 .cmp-slot-main { min-width: 0; overflow-wrap: anywhere; }
 .cmp-slot-acts { margin-top: 4px; gap: 6px; }
 .cmp-swap { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.cmp-swap .chip, .cmp .chip { white-space: normal; overflow-wrap: anywhere; }
 .cmp-swap .chip { text-align: left; }
 .cmp-swap select { width: 100%; }
 .cmp-sub { margin: 10px 0 4px; font-size: .95rem; }
@@ -745,5 +748,19 @@ table.pred .over { color: var(--accent); }
 .cmp-bar .row-wrap { align-items: center; }
 .cmp-targets { margin: 10px 0 6px; display: grid; gap: 6px; }
 .cmp-targets .tg-row input { width: 100%; }
+.cmp-targets .tg-row { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.cmp-targets .tg-row select { width: 100%; }
 .cmp-pred { margin-top: 6px; }
 .cmp-steps { margin-top: 10px; }
+@media (max-width: 520px) {
+  .cmp-targets .tg-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cmp-ace-chip { width: 100%; }
+  .cmp-pred { font-size: .8rem; }
+  .cmp-pred th, .cmp-pred td { padding: 6px 4px; }
+  .cmp-pred th { font-size: .64rem; letter-spacing: .03em; }
+  .cmp-pred td.num, .cmp-races td.num { white-space: normal; }
+  .cmp-races { table-layout: fixed; }
+  .cmp-races th:first-child { width: 24%; }
+  .cmp-races th:last-child { width: 26%; }
+  .cmp-races td { overflow-wrap: anywhere; padding: 6px 4px; }
+}

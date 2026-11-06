@@ -2183,8 +2183,10 @@
     // Parents are trained in Independent Training here, so its race count always applies.
     if (deckHost() === "parents") c.independent = true;
     if (deckHost() === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: true, helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
+    if (c.reachSS === true) c.reachSS = "SS";
+    if (c.reachSS === false) c.reachSS = "";
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
   }
@@ -2321,12 +2323,13 @@
     if (c.goal === "ace") {
       o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(p) };
       if (c.globalSkills) o.must = o.must.filter((id) => released(id, p));
-      // Reach SS: the search keeps a deck whose predicted rating reaches SS, then the most skills.
+      // Reach SS / S: keep the deck whose careers reach the selected rating most often.
       if (c.reachSS && window.UmaRating) {
         const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null, stars = t ? t.r : 3;
-        o.parent.reachSS = { ss: window.UmaRating.SS, unique: window.UmaRating.uniqueBonus(stars, stars), spRating: parentSpRating(c, p) };
+        o.parent.reachSS = { ss: window.UmaRating.rankThreshold(c.reachSS === "S" ? "S" : "SS"), unique: window.UmaRating.uniqueBonus(stars, stars), spRating: parentSpRating(c, p) };
       }
     }
+    if (c.goal === "race" && c.rankGoal) o.rankGoal = raceRankGoal(p, c.style, state.deck.trainee, c.rankGoal);
     return o;
   }
   // Out on Global for this cup (skill-release.js): Global's skills now, or for a cup Global hasn't
@@ -2348,6 +2351,13 @@
     const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
     const ids = Object.keys(parentTargetsFor(c, p).targets);
     return PP.spRating(ids, t ? t.apt : null, PR, SB);
+  }
+
+  function raceRankGoal(p, style, tid, rank) {
+    if (rank !== "S" && rank !== "SS") return null;
+    const PR = window.UmaRating, t = tid ? D.trainee(tid) : null, stars = t ? t.r : 3;
+    const ids = Object.keys(parentTargetsFor({ style, globalSkills: (state.cm || {}).globalSkills !== false }, p).targets);
+    return { ss: PR.rankThreshold(rank), unique: PR.uniqueBonus(stars, stars), spRating: window.UmaParentPlanner.spRating(ids, t ? t.apt : null, PR, window.UmaSkillBudget) };
   }
 
   // Euophrys' scenario preset and weights, editable like on its site.
@@ -2404,7 +2414,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.goal !== "race" && c.globalSkills, c.statsW, c.goal !== "race" && c.reachSS, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, cm().itRaces, cm().itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.goal !== "race" && c.globalSkills, c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, cm().itRaces, cm().itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -2452,7 +2462,7 @@
         if (link && link.borrow) bp = [link.borrow];
         const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp) });
         const r = T.buildDeck(opts, pool, bp);
-        const ss = opts.parent && opts.parent.reachSS;
+        const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
         if (!tg && !ss && !(state.scenario === "grandlive" && c.goal === "race")) { done(r, opts, null); return; }
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
@@ -2657,7 +2667,7 @@
       ${deckHost() === "parents" ? `<p class="mini">Picks the cards that give her the most white skills strong on this race, to pass down as sparks. Pick the race and style above, then press <b>Find my best deck</b>.</p>` : ""}
       ${goal === "ace" ? note(`<p class="mini"><b>Ace parent:</b> picks the cards that give your parent the most white skills relevant on this race: worth more than 0.1 L (median) for the running style and weighted by it, the greens whose condition fits the race, and for Mile and longer the recoveries that fit it (never debuffs), so she can learn them and pass them down as skill sparks. Gold hints count through their white: a spark is always the base white skill's, and learning the gold raises its chance to 40% (20% for a white). Every skill counts, not just the best 8, and stats only count as much as you choose.</p>`) : ""}
       ${goal !== "race" ? `<label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
-      ${goal === "ace" ? `<label class="chip-toggle" title="Keeps a deck whose predicted rating reaches SS (17,500), then the one with the most skills"><input type="checkbox" data-cm="reachSS" ${c.reachSS ? "checked" : ""}> Reach SS</label>${c.reachSS ? `<p class="mini"><b>Reach SS:</b> a deck whose predicted rating reaches SS beats any that doesn't; among those, the most skills win. If none reaches it, the closest does. Predicted rating: the stats' score, the skill points spent on her relevant skills (about ${parentSpRating(c, p).toFixed(2)} rating each at her aptitudes) and her unique. Inheritance adds stats on top, so this errs safe.</p>` : ""}` : ""}
+      ${goal === "ace" ? `<label class="field"><span>Reach SS / S</span><select data-cm="reachSS">${opt([["SS", "SS (17,500)"], ["S", "S (14,500)"], ["", "No minimum"]], c.reachSS)}</select></label>${c.reachSS ? `<p class="mini">Most careers at ${c.reachSS} first, then skills; rating uses stats, SP spent on relevant skills and her unique.</p>` : ""}` : ""}
       ${note(`<p class="mini">Builds the deck the way you'd use <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: it picks the best card, then the best card given that one, and so on, with Euophrys' own scoring for the scenario. On top, every skill a card can hint is scored by its median length gain on this race as a ${STYLE_LABEL[c.style]} runner. Then it rechecks each slot with the other five fixed.</p>`)}
       ${traineePickerHTML(p, "data-cm-style")}
       ${nSkills ? "" : `<p class="mini warn">No skill values for this race yet${svCache[p.id] === "loading" ? " (loading…)" : ""}, so skills won't count. Paste your own Umalator results below to add them.</p>`}
@@ -2826,7 +2836,7 @@
   function planSetup(p, style, tid, races, s) {
     const parent = races != null;
     const base = Object.assign({ statsW: "0.1", comp: {}, ownedOnly: true, borrow: true, skillW: "1", itManual: "0.5", eventSuccessRate: "0.5", globalSkills: true }, parent ? state.pcm || {} : state.cm || {});
-    const c = Object.assign({}, base, { goal: parent ? "ace" : "race", preset: p.id, style, independent: parent, itRaces: parent ? races : null, locked: [], must: [], reachSS: false, comp: Object.assign({}, base.comp || {}) });
+    const c = Object.assign({}, base, { goal: parent ? "ace" : "race", preset: p.id, style, independent: parent, itRaces: parent ? races : null, locked: [], must: [], reachSS: false, rankGoal: "", comp: Object.assign({}, base.comp || {}) });
     if (s) Object.assign(c, { comp: Object.assign({}, s.comp || {}), borrow: s.borrow !== false, skillW: s.skillW != null ? s.skillW : c.skillW, must: (s.must || []).slice() });
     const out = new Set((s && s.exclude) || []);
     const pool = optPool(c).filter((x) => !out.has(x.id));
@@ -2838,6 +2848,7 @@
     if (s && s.friend && c.borrow) bp = [{ id: s.friend, lb: 4 }];
     const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: c.comp, trainee: tid || null });
     if (opts.parent) delete opts.parent.reachSS;
+    if (!parent && s && s.rankGoal) opts.rankGoal = raceRankGoal(p, style, tid, s.rankGoal);
     return { opts, pool, bp, link };
   }
   function planDeck(p, style, tid, races, s) {
@@ -2875,7 +2886,7 @@
       deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
       deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
       // A new ace's deck settings start from CM & decks'.
-      deckDefaults: () => { const c = state.cm || {}; return { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", targets: Object.assign({}, c.targets || {}) }; },
+      deckDefaults: () => { const c = state.cm || {}; return { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", targets: Object.assign({}, c.targets || {}), rankGoal: c.rankGoal || "" }; },
       buildTarget: (p) => E.BUILDS[p.build].target,
       buildLabel: (p) => E.BUILDS[p.build].label,
       coachTargets: () => (state.targets && E.STATS.some((x) => state.targets[x] > 0) ? state.targets : null),
@@ -2883,6 +2894,7 @@
       // progress(), result()), with the planner's settings (locked cards stay).
       targetSearch: (p, style, tid, s, cards) => {
         const x = planSetup(p, style, tid, null, s), c = state.cm || {};
+        if (x.opts.rankGoal && !s.targets) x.opts.rankGoal.ignoreFit = true;
         const sim = { scenario: scenario(), build: p.build, trainee: tid, target: s.targets || null, caps: E.capsFor(state, scenario()),
           helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: s.must || [], independent: false };
         return OPT.targetSearch(x.opts, sim, cards, x.pool, x.bp);
@@ -2894,17 +2906,20 @@
       // The race's skills for her style, most valuable first ({ id, L }), for must-haves.
       raceSkills: (p, style) => { const m = skillMap(p.id, style).map; return Object.keys(m).filter((id) => m[id] > 0 && D.DATA.skills[id] && released(id, p)).map((id) => ({ id, L: m[id] })).sort((a, b) => b.L - a.L); },
       // Her racing deck's predicted run (CM & decks' readout: 16 simulated careers).
-      simulateRace: (p, style, tid, cards, must, target) => {
+      simulateRace: (p, style, tid, cards, must, target, rank) => {
         const c = state.cm || {}, sv = skillMap(p.id, style);
-        const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, target: target || null, caps: E.capsFor(state, scenario()), runs: 16, skills: sv.map, costs: sv.costs,
-          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: must || [], independent: false, skillBudget: true }), cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
-        return { stats: est.stats, sp: est.sp, scenario: scenario().name };
+        const sim = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, target: target || null, caps: E.capsFor(state, scenario()), runs: 16, skills: sv.map, costs: sv.costs,
+          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: must || [], independent: false, skillBudget: true });
+        const est = OPT.simulate(sim, cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
+        const goal = raceRankGoal(p, style, tid, rank || "S"), rating = (x) => PR.statsScore(x.stats) + Math.round(x.sp * goal.spRating) + goal.unique;
+        return { stats: est.stats, sp: est.sp, scenario: scenario().name, target: sim.target, caps: sim.caps, short: OPT.targetFit(sim, est.stats, est.sp).short,
+          rating: rating(est), rank: rank || "", hit: est.finals.filter((x) => rating(x) >= goal.ss).length, of: est.finals.length, cards: cards.length };
       },
       // This deck into CM & decks: its cup, style and ace, the planner's settings, and its cards
       // locked in, so its search starts from them.
       useInCM: (o) => {
         const c = state.cm || (state.cm = {});
-        Object.assign(c, { preset: o.cup, style: o.style, goal: "race", comp: Object.assign({}, o.comp || {}), borrow: o.borrow !== false, skillW: o.skillW, must: (o.must || []).slice(), targets: Object.assign({}, o.targets || {}), locked: o.cards.filter((x) => !x.borrowed).map((x) => x.id) });
+        Object.assign(c, { preset: o.cup, style: o.style, goal: "race", comp: Object.assign({}, o.comp || {}), borrow: o.borrow !== false, skillW: o.skillW, must: (o.must || []).slice(), targets: Object.assign({}, o.targets || {}), rankGoal: o.rankGoal || "", locked: o.cards.filter((x) => !x.borrowed).map((x) => x.id) });
         if (state.cmp) state.cmp.from = { kind: "deck", cup: o.cup, tid: +o.tid, style: o.style };
         state.tab = "cm";
         save();
@@ -2954,6 +2969,8 @@
     f.g11 = vet(o.parents[0]); f.g12 = vet(o.parents[1]);
     if (f.rental == null) f.rental = true;
     f.builderUndo = pp.toBuilder(o.p1.tid, o.must);
+    state.pcm = state.pcm || {};
+    state.pcm.reachSS = o.rank || "";
     ps.races = o.races.slice();
     state.tab = "parents";
     save();
@@ -3002,7 +3019,7 @@
     const c = state.cm || {}, cmp = state.cmp, k = f.cup + "|" + f.tid;
     cmp.decks = cmp.decks || {}; cmp.byCup = cmp.byCup || {}; cmp.sel = cmp.sel || {};
     const old = cmp.decks[k] || {};
-    cmp.decks[k] = { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", must: (c.must || []).map(String), exclude: old.exclude || [], targets: Object.assign({}, c.targets || {}),
+    cmp.decks[k] = { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", must: (c.must || []).map(String), exclude: old.exclude || [], targets: Object.assign({}, c.targets || {}), rankGoal: c.rankGoal || "",
       cards: r.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: true })), searched: null };
     const list = cmp.byCup[f.cup] || (cmp.byCup[f.cup] = []);
     const ace = list.find((x) => +x.tid === +f.tid);
@@ -3317,12 +3334,16 @@
     if (!PR || !PP || !window.UmaParentData) return "";
     const t = r.simulationMeta && r.simulationMeta.trainee ? D.trainee(r.simulationMeta.trainee) : null;
     const stars = t ? t.r : 3;
-    const c = deckHost() === "parents" ? cm() : null, rate = c && presetById(r.preset) ? parentSpRating(Object.assign({}, c, { goal: r.goal, style: r.style }), presetById(r.preset)) : PP.SP_RATING;
+    const c = deckHost() === "parents" ? cm() : null, selected = c ? c.reachSS : (state.cm || {}).rankGoal;
+    const raceGoal = !c && selected && presetById(r.preset) ? raceRankGoal(presetById(r.preset), r.style, t && t.id, selected) : null;
+    const rate = c && presetById(r.preset) ? parentSpRating(Object.assign({}, c, { goal: r.goal, style: r.style }), presetById(r.preset)) : raceGoal ? raceGoal.spRating : PP.SP_RATING;
     const stats = PR.statsScore(r.est.stats), skills = Math.round((r.est.sp || 0) * rate), unique = PR.uniqueBonus(stars, stars);
     const total = stats + skills + unique;
     const rk = PR.rankOf(total);
-    const fin = r.est.finals || [], hit = fin.filter((f) => PR.statsScore(f.stats) + Math.round(f.sp * rate) + unique >= PR.SS).length;
-    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>${total >= PR.SS ? ", SS: white sparks get the doubled 3★ chance" : `, about ${(PR.SS - total).toLocaleString()} short of SS (${PR.SS.toLocaleString()})`}${fin.length ? `; <b>SS in ${hit} of ${fin.length}</b> simulated careers` : ""}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent ${c ? "on her relevant skills " : ""}at ~${rate.toFixed(2)} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. ${state.tab === "parents" ? "Plan the exact buy in ④ After the run" : 'Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>'}; fewer races also help.</p>`;
+    const label = selected === "S" ? "S" : "SS", minimum = PR.rankThreshold(label);
+    const fin = r.est.finals || [], hit = fin.filter((f) => PR.statsScore(f.stats) + Math.round(f.sp * rate) + unique >= minimum).length;
+    const status = total >= PR.SS ? "SS: white sparks get the doubled 3★ chance" : total >= minimum ? `${label} goal reached` : `about ${(minimum - total).toLocaleString()} short of ${label} (${minimum.toLocaleString()})`;
+    return `<p class="mini"><b>Predicted rating: about ${total.toLocaleString()} (${rk.label})</b>, ${status}${fin.length ? `; <b>${label} in ${hit} of ${fin.length}</b> simulated careers` : ""}. Stats ${stats.toLocaleString()} + skills ~${skills.toLocaleString()} (all ${r.est.sp} SP spent ${c ? "on her relevant skills " : ""}at ~${rate.toFixed(2)} rating each) + unique ~${unique}${t ? "" : " (3★ assumed: set your trainee for her own)"}. Inheritance adds stats on top. ${state.tab === "parents" ? "Plan the exact buy in ④ After the run" : 'Plan the exact buy in the <button type="button" class="linkish" data-goto-tab="parents">Parents tab</button>'}; fewer races also help.</p>`;
   }
 
   // Predicted stats from the simulated careers, against your targets when you set them.

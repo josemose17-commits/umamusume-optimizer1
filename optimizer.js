@@ -800,11 +800,9 @@
     // 40%); within that, the closest stats win. skillWeight is the racing slider.
     const sw = opts.parent ? 1 : opts.skillWeight != null ? opts.skillWeight : 1;
     const giveUp = opts.parent ? Math.min(0.4, 0.4 * (opts.parent.statsWeight || 0)) : null;
-    // Reach SS (parent decks): each simulated career's rating (stats' score, skill points at
-    // spRating each, unique). The deck where the most careers reach SS wins; then an average
-    // short of SS loses 10 per point missing, so the closest comes next; skills decide among
-    // the rest. The skill floor above doesn't apply: SS comes first.
-    const ss = opts.parent && opts.parent.reachSS;
+    // Rank goal: parent reachSS and racing rankGoal use the same rating estimate. The share
+    // reaching the goal comes first, even when stats or skills would favor a different deck.
+    const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
     const Ra = ss ? root.UmaRating || (typeof require !== "undefined" ? require("./rating.js") : null) : null;
     let floor = -Infinity;
     const cache = new Map();
@@ -823,6 +821,7 @@
       }
       return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating, ssShare });
     };
+    const better = (a, b) => ss && a.ssShare !== b.ssShare ? a.ssShare > b.ssShare : a.value > b.value + 1e-6;
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
       if (!cache.has(k)) {
@@ -856,7 +855,7 @@
           const cand = deck.slice();
           cand[i] = { id: r.id, lb: r.lb, borrowed: c.borrowed };
           const v = score(cand);
-          if (v.value > (best ? best.v.value : cur.value) + 1e-6) best = { cand, v, in: r };
+          if (better(v, best ? best.v : cur)) best = { cand, v, in: r };
         });
       });
       if (best) { swaps.push({ out: c.id, in: best.in.id, inLb: best.in.lb }); deck = best.cand; cur = best.v; changed = true; }
@@ -876,7 +875,7 @@
       let after = before;
       finalists.forEach(candidate => {
         const r = evaluate(candidate, full);
-        if (r.value > after.value + 1e-6) {
+        if (better(r, after)) {
           winner = candidate.map(x => Object.assign({}, x));
           after = r;
         }

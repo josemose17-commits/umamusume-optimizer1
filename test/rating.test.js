@@ -20,6 +20,13 @@ test('unique bonus: 120 per level for 1-2 stars, 170 for 3+', () => {
 });
 
 test('ranks from the game table: SS at 17,500, SS+ at 19,200', () => {
+  assert.equal(R.rankThreshold('S'), 14500);
+  assert.equal(R.rankThreshold('S+'), 15900);
+  assert.equal(R.rankThreshold('SS'), 17500);
+  assert.equal(R.rankOf(14499).label, 'A+');
+  assert.equal(R.rankOf(14500).label, 'S');
+  assert.equal(R.rankOf(15900).label, 'S+');
+  assert.equal(R.rankThreshold('unknown'), null);
   assert.equal(R.rankOf(17499).label, 'S+');
   assert.equal(R.rankOf(17500).label, 'SS');
   assert.equal(R.rankOf(19200).label, 'SS+');

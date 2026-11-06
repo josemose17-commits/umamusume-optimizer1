@@ -89,6 +89,11 @@
     return { index: i, label, next: ranks[i + 1] != null ? ranks[i + 1] : null, nextLabel: i + 1 < RANK_LABELS.length ? RANK_LABELS[i + 1] : "UG+" };
   }
 
+  const rankThreshold = (label) => {
+    const i = RANK_LABELS.indexOf(label), P = data();
+    return i >= 0 && P && P.ranks[i] != null ? P.ranks[i] : null;
+  };
+
   // The whole rating: { stats, skills, unique, total, rank }.
   function rating(o) {
     const stats = statsScore(o.stats || []);
@@ -118,7 +123,7 @@
     return add;
   }
 
-  const api = { STAT_AT_50, RANK_LABELS, SS, statScore, statsScore, uniqueBonus, skillScore, rankOf, rating, statsFor, bucket };
+  const api = { STAT_AT_50, RANK_LABELS, SS, rankThreshold, statScore, statsScore, uniqueBonus, skillScore, rankOf, rating, statsFor, bucket };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaRating = api;
 })(typeof window !== "undefined" ? window : globalThis);
