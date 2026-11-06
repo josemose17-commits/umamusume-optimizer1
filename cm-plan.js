@@ -23,6 +23,7 @@
   // A fresh parent's white sparks, until your veterans tell (MIN_VETS with their skills): a
   // spark for SPARK_P of the skills she learns, 1★/2★/3★ at STARS, and LEARN_MAX relevant skills
   // learned (else LEARN_SHARE of what your veterans learned, the median).
+  const SS_STARS = [0.2, 0.7, 0.1], LINEAGE_WHITE = 0.025;
   const SPARK_P = 0.3, STARS = [0.32, 0.6, 0.08], LEARN_MAX = 12, LEARN_SHARE = 0.75, MIN_VETS = 10, SPARK_RANGE = [0.15, 0.45];
   // Races and SS: your veterans in the scenario with BASE_EXTRA extra races or fewer (BASE_MIN
   // of them at least) give the ratings you reach; the simulation gives what each race costs.
@@ -125,12 +126,17 @@
       // A learned skill leaves a spark 20% (○) to 40% (gold) of the time (GameTora): a measured
       // rate far outside that is your data, not the game.
       const spark = enough ? Math.max(SPARK_RANGE[0], Math.min(SPARK_RANGE[1], whites / learned)) : SPARK_P;
-      return { spark, stars: enough && n ? st.map((k) => k / n) : STARS.slice(), learn: enough ? Math.round(counts[counts.length >> 1] * LEARN_SHARE) : LEARN_MAX, vets: enough ? with_.length : 0 };
+      // You always train a parent to SS, where white and green sparks come out 1★/2★/3★ 20/70/10%
+      // (uma.guide), whatever ranks your veterans reached.
+      return { spark, stars: SS_STARS.slice(), learn: enough ? Math.round(counts[counts.length >> 1] * LEARN_SHARE) : LEARN_MAX, vets: enough ? with_.length : 0 };
     }
     // Her white sparks in expectation: she learns the relevant whites her parent deck offers
     // (offers: { id: chance }), the most valuable first, up to r.learn of them; each becomes a
     // spark r.spark of the time, at r.stars, firing at her affinity aff.
-    function freshWhites(x, offers, aff, r) {
+    // copies: { family: how many of her parents and grandparents carry that white spark }; each
+    // copy adds LINEAGE_WHITE to the chance a learned skill leaves its spark (uma.guide: 20% →
+    // 22.5% → 25%…; the parenting guide has ×1.1 per copy instead, about the same for 1–3).
+    function freshWhites(x, offers, aff, r, copies) {
       const fams = fam.families(x.rel), eff = fam.worthOf(x);
       const fire = r.stars.reduce((n, d, k) => n + d * F.twice(F.WHITE, k + 1, aff), 0);
       const got = Object.keys(fams).map((f) => ({ f, p: Math.min(1, Math.max(0, ...fams[f].ids.map((id) => (offers && offers[id]) || 0))) }))
@@ -141,18 +147,35 @@
         const p = Math.min(a.p, room);
         if (p <= 0) return;
         room -= p;
-        value += p * r.spark * fire * eff[a.f];
-        list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: p * r.spark, L: eff[a.f] });
+        const chance = Math.min(1, r.spark + LINEAGE_WHITE * ((copies && copies[a.f]) || 0));
+        value += p * chance * fire * eff[a.f];
+        list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: p * chance, L: eff[a.f], copies: (copies && copies[a.f]) || 0 });
       });
       return { value, list, fire };
     }
-    // Her blue spark's stat is random (1 in 5 each): the key stats' start bonus, at 2★.
-    const blueExpected = (x) => (want(x).blue.length / 5) * F.START_BLUE[FRESH_STARS - 1] / F.STAT_PER_L;
-    // Her pink spark lands on one of her A-or-better aptitudes: the share that's one the ace needs.
-    function pinkExpected(x, t, aff) {
+    // Her blue spark's stat is random (1 in 5 each), its stars 20/70/10% (her stats at SS are 1100+):
+    // what it adds over the run where the ace is short (her gaps), else on the key stats.
+    function blueExpected(x, aff) {
+      const w = want(x), per = SS_STARS.reduce((n, d, k) => n + d * F.blueStats(k + 1, aff), 0);
+      return w.blue.reduce((n, b) => n + (w.gaps ? Math.min(per, b.gap) : per), 0) / 5 / F.STAT_PER_L;
+    }
+    // Her pink spark lands on one of her A-or-better aptitudes at random, 20/70/10% by stars: the
+    // share that's one the ace needs, as the chance it fires and takes that aptitude a grade on.
+    function pinkExpected(x, t, aff, s) {
       const good = (t.apt || []).filter((g) => g === "S" || g === "A").length;
-      const hit = want(x).pink.filter((p) => ["S", "A"].indexOf((t.apt || [])[p.i]) !== -1).length;
-      return good && hit ? (hit / good) * F.twice(F.PINK, FRESH_STARS, aff) * F.APT_L : 0;
+      if (!good) return 0;
+      const fire = SS_STARS.reduce((n, d, k) => n + d * F.twice(F.PINK, k + 1, aff), 0);
+      return want(x).pink.filter((p) => ["S", "A"].indexOf((t.apt || [])[p.i]) !== -1)
+        .reduce((n, p) => { const now = s && s.pink ? (s.pink.find((q) => q.i === p.i) || { p: 0 }).p : 0; return n + (1 - now) * fire / good * F.APT_L; }, 0);
+    }
+    // How many of her parents and grandparents carry each relevant white spark.
+    function lineageCopies(x, parents) {
+      const out = {};
+      (parents || []).forEach((v) => [v.self].concat(v.parents || []).forEach((m) => {
+        if (!m) return;
+        new Set((m.white || []).map((w) => fam.family(w[0]))).forEach((f) => { if (f) out[f] = (out[f] || 0) + 1; });
+      }));
+      return out;
     }
     // What a parent built for this race carries for sure: her inherited unique (2★); her whites,
     // pink and blue are added in expectation, her wins come from her race plan.
@@ -161,9 +184,9 @@
       return { cid: t.cid, tid: t.id, white: [], blue: [0, 0], pink: [0, 0], green: u ? FRESH_STARS : 0, wins: [], unique: u };
     }
     // The family score's parts for her that it can't count itself, at her own affinity there.
-    function freshExtra(x, t, s, offers, r) {
-      const aff = s.own.p1 || 0, w = freshWhites(x, offers, aff, r);
-      const blue = blueExpected(x), pink = pinkExpected(x, t, aff);
+    function freshExtra(x, t, s, offers, r, parents) {
+      const aff = s.own.p1 || 0, w = freshWhites(x, offers, aff, r, lineageCopies(x, parents));
+      const blue = blueExpected(x, aff), pink = pinkExpected(x, t, aff, s);
       return { value: w.value + blue + pink, whites: w, blue, pink };
     }
     // Her G1 plan with these parents (veterans or a rental) (extra: more G1s after the shared ones).
@@ -182,17 +205,18 @@
     // A slot's spark value at its affinity in the complete family. Training counts white
     // hints and key-blue start stats; an ace also benefits from uniques and needed pinks.
     function contribution(f, s, x, slots, training) {
-      const whites = s.white.filter(w => slots.includes(w.slot));
-      const white = whites.reduce((n, w) => n + w.p * w.worth, 0), key = new Set(want(x).blue.map(b => b.i));
-      const start = [0, 0, 0, 0, 0], miss = {};
+      const whites = s.white.filter(w => slots.includes(w.slot)), w = want(x);
+      const white = whites.reduce((n, q) => n + q.p * q.worth, 0), key = new Set(w.blue.map(b => b.i));
+      const stats = [0, 0, 0, 0, 0], start = [0, 0, 0, 0, 0], pinks = {};
       slots.forEach(k => { const m = f[k]; if (!m) return;
-        if (m.blue && m.blue[1]) start[m.blue[0]] += F.START_BLUE[m.blue[1] - 1];
-        if (m.pink && m.pink[1] && want(x).pink.some(p => p.i === m.pink[0])) miss[m.pink[0]] = (miss[m.pink[0]] == null ? 1 : miss[m.pink[0]]) * (1 - F.twice(F.PINK, m.pink[1], s.own[k]));
+        if (m.blue && m.blue[1]) { stats[m.blue[0]] += F.blueStats(m.blue[1], s.own[k], F.slotScale(k)); start[m.blue[0]] += F.START_BLUE[m.blue[1] - 1]; }
+        if (m.pink && m.pink[1]) (pinks[m.pink[0]] = pinks[m.pink[0]] || []).push({ stars: m.pink[1], aff: s.own[k], scale: F.slotScale(k) });
       });
-      const blue = start.reduce((n, v, i) => n + (training || key.has(i) ? v : 0), 0) / F.STAT_PER_L;
-      const green = training ? 0 : s.green.filter(w => slots.includes(w.slot)).reduce((n, w) => n + w.p * w.L, 0);
-      const pink = training ? 0 : Object.values(miss).reduce((n, p) => n + (1 - p) * F.APT_L, 0);
-      return { value: white + blue + green + pink, white, blue, green, pink, start, hints: whites.reduce((n, w) => n + w.p, 0) };
+      // Training a parent: every stat she gains counts. The ace: what fills her gaps (else key stats).
+      const blue = stats.reduce((n, v, i) => n + (training ? v : w.gaps ? Math.min(v, w.gaps[i] || 0) : key.has(i) ? v : 0), 0) / F.STAT_PER_L;
+      const green = training ? 0 : s.green.filter(q => slots.includes(q.slot)).reduce((n, q) => n + q.p * q.L, 0);
+      const pink = training ? 0 : w.pink.reduce((n, p) => n + F.pinkReach(p.grade, p.target, pinks[p.i] || []) * F.APT_L, 0);
+      return { value: white + blue + green + pink, white, blue, green, pink, start, stats, hints: whites.reduce((n, q) => n + q.p, 0) };
     }
     // Every version in umas (trainee ids) that could be Parent 1 for the ace, trained with a
     // parent deck that offers offers: one veteran plus a rental, or two veterans, sharing
@@ -209,12 +233,12 @@
         const selectedRental = opts.rental || (opts.rentals || []).find(r => r.friend === pick.rental);
         const pool = (vets || []).filter(v => +v.cid !== +t.cid && (!rentalMode || selectedVet == null || selectedVet === "" || String(v.id) === String(selectedVet)));
         const tx = trainingContext(x, t, offers);
-        const total = (f) => { const s = fam.score(familyOf(f), x); return { s, extra: freshExtra(x, t, s, offers, r) }; };
+        const total = (f, ps) => { const s = fam.score(familyOf(f), x); return { s, extra: freshExtra(x, t, s, offers, r, ps) }; };
         // Each veteran alone as her parent (sharing the G1s she can run), the best per character.
         const solo = new Map();
         pool.forEach((v) => {
           const f = { p1: Object.assign({}, base, { wins: (v.self.wins || []).filter((n) => fit.has(n)) }), g11: member(v.self, v.tid), p2 };
-          const y = total(f), tf = trainingFamily([v]), ts = fam.score(familyOf(tf), tx);
+          const y = total(f, [v]), tf = trainingFamily([v]), ts = fam.score(familyOf(tf), tx);
           const value = y.s.value + y.extra.value + (rentalMode ? contribution(tf, ts, tx, F.SLOTS, true).value : 0), cur = solo.get(v.cid);
           if (!cur || value > cur.value) solo.set(v.cid, { v, value });
         });
@@ -222,7 +246,7 @@
         const tryParents = (ps) => {
           const pl = plan(t, ps, [], selectedRental ? selectedRental.parent.wins : []);
           const f = { p1: Object.assign({}, base, { wins: pl.agenda.map((z) => z.name) }), g11: member(ps[0].self, ps[0].tid), g12: ps[1] ? member(ps[1].self, ps[1].tid) : null, p2 };
-          const y = total(f);
+          const y = total(f, ps);
           const tf = trainingFamily(ps), ts = fam.score(familyOf(tf), tx);
           const training = contribution(tf, ts, tx, F.SLOTS, true);
           return y.s.problems.length || ts.problems.length ? null : { kind: "fresh", t, parents: ps, f, s: y.s, extra: y.extra, value: y.s.value + y.extra.value,
@@ -389,7 +413,7 @@
     function atRaceCount(x, fresh, races, n) {
       const out = Object.assign({}, fresh, { f: Object.assign({}, fresh.f, { p1: Object.assign({}, fresh.f.p1, { wins: raceWins(races, n) }) }) });
       out.s = fam.score(familyOf(out.f), x);
-      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates);
+      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates, out.parents);
       out.value = out.s.value + out.extra.value;
       return out;
     }
@@ -402,7 +426,7 @@
       const races = racePlan(out, vets || []), wins = raceWins(races, maxRaces);
       out.f = Object.assign({}, fresh.f, { p1: Object.assign({}, fresh.f.p1, { wins }), g11: member(parents[0].self, parents[0].tid), g12: member(rental.parent) });
       out.s = fam.score(familyOf(out.f), x);
-      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates);
+      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates, out.parents);
       out.value = out.s.value + out.extra.value;
       return out;
     }
@@ -432,7 +456,7 @@
         const f = Object.assign({}, p1.f, { p2: member(r.parent), g21: member(r.parents[0]), g22: member(r.parents[1]) });
         const s = fam.score(familyOf(f), x);
         // A fresh Parent 1's expected sparks are scored at her affinity with this rental.
-        const extra = p1.kind === "fresh" ? freshExtra(x, p1.t, s, p1.offers, p1.rates).value : 0;
+        const extra = p1.kind === "fresh" ? freshExtra(x, p1.t, s, p1.offers, p1.rates, p1.parents).value : 0;
         if (s.problems.length) hidden.push({ r, why: s.problems[0] }); else rows.push({ r, f, s, value: s.value + extra });
       });
       rows.sort((a, b) => b.value - a.value || b.s.total - a.s.total);

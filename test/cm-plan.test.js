@@ -95,12 +95,12 @@ test("a fresh Parent 1: one of your umas, two veterans as her parents, the G1s s
   assert.equal(f.rates.spark, CP.SPARK_P);
 });
 
-test("a fresh Parent 1's whites: your veterans' own spark rate and stars", () => {
+test("a fresh Parent 1's whites: your veterans' own spark rate, SS stars, and copies in her lineage", () => {
   const vets = uniq.slice(10, 22).map((t) => vet(t, [[top[0], 1], [top[1], 2], [top[2], 2], [top[3], 3]], { learned: 20 }));
   const q = plan.rates(vets);
   assert.equal(q.vets, 12);
   assert.ok(Math.abs(q.spark - 48 / 240) < 1e-12, "48 white sparks over 240 skills learned");
-  assert.deepEqual(q.stars, [0.25, 0.5, 0.25]);
+  assert.deepEqual(q.stars, [0.2, 0.7, 0.1], "a parent you train is always SS: her white sparks come out 20/70/10%");
   assert.equal(q.learn, Math.round(20 * 0.75), "learns as many relevant skills as 3/4 of what your veterans learn");
   const none = plan.rates(uniq.slice(10, 22).map((t) => vet(t, [], { learned: 20 })));
   assert.equal(none.spark, 0.15, "a rate the game can't give is held to 15%..45%");
@@ -110,6 +110,8 @@ test("a fresh Parent 1's whites: your veterans' own spark rate and stars", () =>
   const eff = plan.fam.worthOf(x);
   const firstFam = SB.DATA.skills[w.list[0].id][0];
   assert.equal(eff[firstFam], Math.max(...Object.values(eff)), "the most valuable first");
+  const copies = { [firstFam]: 2 }, boosted = plan.freshWhites(x, all, 0, q, copies);
+  assert.ok(Math.abs(boosted.list[0].spark - w.list[0].learn * (q.spark + 0.05)) < 1e-12, "two copies in her parents and grandparents: +2.5% each");
 });
 
 test("is your best veteran good enough? a fresh one only when she beats it by the margin", () => {
@@ -283,6 +285,7 @@ test("rental ranking adds her own sparks for the ace and her lineage for X; grea
     assert.equal(row.f.g12.tid, rental.parent.tid);
     assert.deepEqual(row.trainingPart.start, [63, 0, 0, 0, 0], "all three blues help X's key-stat / SS targets");
     assert.deepEqual(row.acePart.start, [21, 0, 0, 0, 0], "only R's own blue helps the ace");
+    assert.ok(row.trainingPart.stats[0] > row.trainingPart.start[0], "over the run, blues add more at the inspirations");
     assert.deepEqual(row.trainingScore.own, A.individual({ trainee: t.cid, p1: v.cid, p2: rental.parent.cid, g11: v.parents[0].cid, g12: v.parents[1].cid, g21: rental.parents[0].cid, g22: rental.parents[1].cid }, { p1: v.self.wins, p2: rental.parent.wins, g11: [], g12: [], g21: [], g22: [] }));
   }
   const invalid = { ...rental, parent: m(t) };
