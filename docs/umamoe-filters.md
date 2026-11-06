@@ -14,10 +14,10 @@ Checked against uma.moe's published frontend on 2026-11-06: <https://uma.moe/dat
 | `b` | Same stat, lineage 7–9★ | Absent: only her own sparks reach the ace |
 | `p` | The ace's pink by the rule, lineage 3–9★ | Absent |
 | `mp` | Absent | The ace's pink by the rule, on her, 2–3★ (Wider 1–3★) |
-| `w` | Up to two checked white families, 1–9★ each, AND | Absent |
-| `mw` | Absent | Up to two checked white families on her, 1–3★ each, AND |
-| `ow` | Absent with Affinity first; P0/P1/P2 with Whites first | Absent |
-| `omw` | Absent with Affinity first; non-required P0 whites preferred on the rental herself with Whites first | Absent with Affinity first; P0/P1/P2 on her with Whites first |
+| `w` | Every ticked white family (any number), 1–9★ each, AND | Absent |
+| `mw` | Absent | Every ticked white family on her (any number), 1–3★ each, AND |
+| `ow` | Default: the listed whites, P0/P1/P2; absent with "affinity only" | Absent |
+| `omw` | Default: the P0 whites on the rental herself; absent with "affinity only" | Default: the listed whites on her, P0/P1/P2; absent with "affinity only" |
 | `mg` | Only a unique-focus link requires a specific own unique, 1–3★ | Same |
 
 **One blue stat.** Auto picks the ace's highest-weight key stat, usually Speed; all five stats are selectable. Wider changes `mb` to 2–3★ and `b` to 6–9★, keeping the same stat. There is no `bss` total-any-stat requirement: a Speed/Wit/Guts branch cannot meet the default Speed lineage filter.
