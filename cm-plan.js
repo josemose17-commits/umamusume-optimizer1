@@ -159,20 +159,22 @@
     // deck can offer, most valuable as a spark for the ace first (worth × chance the deck offers
     // it). The gold version when her deck offers it (a learned gold doubles the spark chance).
     // Slots left over go to the best whites no card of hers gives, in case a random event does.
+    // anyway: skill ids one of her deck's events gives on every choice (most gold-skill events do):
+    // they come whatever the AI picks, so they take no slot (listed apart, with .anyway).
     let famMembers = null;
-    function itSkills(x, offers, n = 10) {
+    function itSkills(x, offers, n = 10, anyway = new Set()) {
       if (!famMembers) { famMembers = {}; Object.keys(meta).forEach((id) => { (famMembers[meta[id][0]] = famMembers[meta[id][0]] || []).push(id); }); }
       const fams = fam.families(x.rel), eff = fam.worthOf(x), o2 = offers || {}, rows = [];
       Object.keys(fams).forEach((f) => {
         if (!(eff[f] > 0)) return;
         const all = famMembers[f] || fams[f].ids, p = Math.min(1, Math.max(0, ...all.map((id) => o2[id] || 0)));
         const gold = all.filter((id) => meta[id] && meta[id][2] && o2[id] > 0).sort((a, b) => o2[b] - o2[a])[0];
-        const white = fam.baseWhite(fams[f].ids[0]);
-        rows.push({ family: f, id: String(gold || white), white: String(white), gold: !!gold, p, L: eff[f], score: eff[f] * p, gamble: !(p > 0) });
+        const white = fam.baseWhite(fams[f].ids[0]), id = String(gold || white);
+        rows.push({ family: f, id, white: String(white), gold: !!gold, p, L: eff[f], score: eff[f] * p, gamble: !(p > 0), anyway: anyway.has(id) || (gold && anyway.has(String(gold))) || false });
       });
-      const offered = rows.filter((r) => !r.gamble).sort((a, b) => b.score - a.score || b.L - a.L);
+      const offered = rows.filter((r) => !r.gamble && !r.anyway).sort((a, b) => b.score - a.score || b.L - a.L);
       const rest = rows.filter((r) => r.gamble).sort((a, b) => b.L - a.L);
-      return offered.concat(rest).slice(0, n);
+      return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L) });
     }
     // Her blue spark's stat is random (1 in 5 each), its stars 20/70/10% (her stats at SS are 1100+):
     // what it adds over the run where the ace is short (her gaps), else on the key stats.

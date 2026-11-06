@@ -558,12 +558,29 @@
         ${stepsHTML(r)}
         ${sentThere(r) ? ctx.trainingHTML() : ""}`;
     }
+    // The skills her deck's events give on every choice (umamusu.wiki's event data): they come
+    // whatever is picked, in Independent Training too, so they need no priority slot.
+    function eventsAnyway(cards) {
+      const E = root.UmaCardEvents, out = new Set();
+      if (!E) return out;
+      const ids = (o, acc = new Set()) => { if (Array.isArray(o)) o.forEach((y) => ids(y, acc)); else if (o && typeof o === "object") { ["h", "k"].forEach((k) => (Array.isArray(o[k]) ? o[k] : []).forEach((h) => acc.add(String(Array.isArray(h) ? h[0] : h)))); Object.values(o).forEach((v) => { if (v && typeof v === "object") ids(v, acc); }); } return acc; };
+      cards.forEach((x) => {
+        const c = E.cards[x.id] || {};
+        (c.chain || []).concat(c.other || []).forEach((eid) => {
+          const ev = E.events[eid];
+          if (!ev || !ev.c || !ev.c.length) return;
+          const per = ev.c.map((ch) => ids(ch));
+          per[0].forEach((id) => { if (per.every((set) => set.has(id))) out.add(id); });
+        });
+      });
+      return out;
+    }
     // What to set in Independent Training: Training Focus, the 10 prioritized skills, the agenda.
     function itHTML(r) {
       const tr = r.train, f = tr.f, fo = tr.focus;
       const cards = tr.deck.cards.map((x) => D.card(x.id)).filter(Boolean);
       const from = (id) => cards.map((cd) => (cd.es || []).map(String).includes(id) ? cd.n + " (event)" : (cd.hs || []).map(String).includes(id) ? cd.n + " (hint)" : "").filter(Boolean);
-      const list = CP.itSkills(r.x, f.offers || tr.deck.offers, 10);
+      const list = CP.itSkills(r.x, f.offers || tr.deck.offers, 10, eventsAnyway(tr.deck.cards));
       const skills = list.map((k) => {
         const src = from(k.id).concat(k.gold && k.id !== k.white ? from(k.white) : []);
         return `<li><b>${esc(ctx.skillName(k.id))}</b>${k.gold ? " (gold)" : ""} <span class="mini">${k.gamble ? "· no card of hers gives it: only if a random event offers it" : `· ${Math.round(k.p * 100)}% offered · ${esc([...new Set(src)].join(", ") || "her deck")}`}</span></li>`;
@@ -572,7 +589,8 @@
       const anySS = fo && fo.rows.some((y) => y.hit > 0);
       const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${y.over.toFixed(1)} stats over 1,100`).join(" · ")} (16 careers each, before inheritance). Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
       return `<div class="cmp-it"><h4>Independent Training settings</h4><p class="mini">For this deck and these ${plural(races.length, "extra G1")}.</p>${focus}
-        <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it targets their hints in event choices):</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
+        <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it picks the event choice that gives them):</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
+        ${list.anyway.length ? `<p class="mini"><b>Come anyway, no slot needed</b> (every choice of the event gives them, when it happens): ${list.anyway.map((k) => esc(ctx.skillName(k.id)) + (k.gold ? " (gold)" : "")).join(", ")}.</p>` : ""}
         <p class="mini"><b>Agenda:</b> ${races.length ? races.map(esc).join(", ") : "her career goals only"}.</p></div>`;
     }
 
