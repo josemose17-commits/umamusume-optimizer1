@@ -175,9 +175,48 @@ test("the uma.moe search: its own filters in the link", () => {
   assert.deepEqual(back.p2w, [10, 11], "with her G1 saddles");
   assert.deepEqual(back.mb, [[10, 3, 3], [30, 3, 3, 1]], "Speed 3★ or Power 3★ on the rental herself");
   assert.deepEqual(back.ow, top.slice(0, 2).map((id) => SB.DATA.skills[id][0] * 10), "preferred whites by factor id");
+  assert.deepEqual(back.emp, [ace.cid, uniq[0].cid], "exclude every version of the ace and Parent 1 as the rental");
   // uma.moe's factor id is the game's without its star digit: Nimble Navigator 2★ (2004902) → 200490.
   const nn = Object.keys(SB.DATA.skills).find((id) => String(SB.DATA.skills[id][0]) === "20049");
   assert.deepEqual(plan.umaMoe({ ace: ace.id, whites: [nn] }).filters.ow, [200490]);
+});
+
+test("uma.moe advanced settings: family stars, own sparks and P0/P1/P2 use the site's codec", () => {
+  const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
+  p1.f.p1.pink = [4, 3];
+  const q = plan.rentalSearch(x, p1);
+  assert.equal(q.filters.t[0], ace.id, "keeps the target's version");
+  assert.equal(q.pink.i, 4, "Medium race: distance pink when no aptitude is missing");
+  assert.equal(q.pink.known, 3, "count Parent 1's existing pink before asking the rental");
+  assert.deepEqual(q.filters.p, [[330, 3, 9]], "family pink uses the 1–9★ range");
+  assert.deepEqual(q.filters.mp, [[330, 3, 3]], "direct parent pink uses the 1–3★ range");
+  assert.equal(q.filters.bss, 9);
+  assert.ok(q.filters.ow.some(w => !Array.isArray(w)), "P0 is the first priority group");
+  assert.ok(q.filters.ow.some(w => Array.isArray(w) && w[1] === 1), "P1 follows P0");
+  assert.ok(q.filters.ow.some(w => Array.isArray(w) && w[1] === 2), "P2 follows P1");
+  assert.deepEqual(q.filters.omw, q.whites.filter(w => w.priority === 0).map(w => +SB.DATA.skills[w.id][0] * 10));
+  for (const k of ['pr', 'sid', 'sc', 'lb', 'mwc', 'mwh', 'rs', 'gss', 'wss']) assert.ok(!(k in q.filters), k + ' stays unrestricted');
+  q.focused.forEach(g => {
+    assert.ok(g.search.filters.mg.every(w => w[1] === 1 && w[2] === 3), "unique focus is on the rental herself");
+    assert.deepEqual(g.search.filters.mg.map(w => w[0]), g.skill.owners.map(t => t.id * 10));
+    assert.ok(g.skill.owners.every(t => t.cid !== ace.cid && t.cid !== p1.f.p1.cid), "unique focus never conflicts with main-parent exclusions");
+  });
+});
+
+test("uma.moe wider search preserves required white families and can leave pink unrestricted", () => {
+  const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
+  const same = Object.keys(SB.DATA.skills).find(id => id !== top[0] && SB.DATA.skills[id][0] === SB.DATA.skills[top[0]][0]);
+  const q = plan.rentalSearch(x, p1, { quality: 'broad', pink: 'none', required: [top[0], same || top[0]] });
+  assert.equal(q.filters.bss, 6);
+  assert.ok(!q.filters.p && !q.filters.mp, "no hidden pink requirement");
+  const factor = +SB.DATA.skills[top[0]][0] * 10;
+  assert.deepEqual(q.filters.w, [[factor, 1, 9]], "same family's gold/white requirements deduplicate; each family is AND");
+  assert.ok(!q.filters.ow.some(w => (Array.isArray(w) ? w[0] : w) === factor), "required is not counted again as optional");
+  assert.deepEqual(q.filters.mb.map(w => w.slice(1, 3)), [[3, 3], [3, 3]], "own key-stat blue stays 3★");
+  const focus = plan.rentalSearch(x, p1, { quality: 'broad', pink: '7' });
+  assert.deepEqual(focus.filters.p, [[220, 1, 9]]);
+  assert.ok(!focus.filters.mp, "grandparents can supply the focused pink in the wider search");
+  assert.equal(focus.pink.label, 'Pace Chaser');
 });
 
 test("rentals you paste, ranked as Parent 2 with your Parent 1", () => {
@@ -187,4 +226,7 @@ test("rentals you paste, ranked as Parent 2 with your Parent 1", () => {
   const out = plan.rankRentals(x0(), p1, list);
   assert.deepEqual(out.map((y) => y.r.friend), [String(uniq[2].id), String(uniq[1].id)]);
   assert.deepEqual(out.hidden.map((h) => h.why), ["same character as the ace", "same character as Parent 1"]);
+  list[0].score = 22000;
+  list[1].score = 14500;
+  assert.deepEqual(plan.rankRentals(x0(), p1, list).map(y => y.r.friend), out.map(y => y.r.friend), "an existing rental's rank adds no value or SS requirement to her actual sparks");
 });
