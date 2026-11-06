@@ -4,19 +4,20 @@ Checked against uma.moe's published frontend on 2026-11-06: <https://uma.moe/dat
 
 `cm-plan.js` builds both searches. `cm-tab.js` shows every active filter in a plain summary and keeps separate settings for each search. The `filters` parameter is URI-encoded base64 JSON. Opening it restores Advanced mode and replaces saved filters.
 
-| Field | Ace's Parent 2 | Borrowed parent for X |
+| Field | Ace's Parent 2 | Grandparent (borrowed parent for X) |
 | --- | --- | --- |
 | `t[0]` | Ace's trainee version | X's trainee version |
 | `p2c` | Parent 1's version | Selected veteran V's version |
 | `p2w` | Parent 1's actual or rank-capped planned G1 saddles | V's G1 saddles |
 | `emp` | Ace and Parent 1 character IDs | X and V character IDs |
 | `mb` | Chosen stat, own 3★ | Same |
-| `b` | Same stat, lineage 7–9★ | Same |
-| `p` | Absent by default; optional one aptitude, lineage 3–9★ | Same |
-| `mp` | Absent | Absent |
-| `w` | Up to two checked white families, 1–9★ each, AND | Same |
-| `ow` | Absent with Affinity first; P0/P1/P2 with Whites first | Same |
-| `omw` | Absent with Affinity first; non-required P0 whites preferred on the rental herself with Whites first | Same |
+| `b` | Same stat, lineage 7–9★ | Absent: only her own sparks reach the ace |
+| `p` | The ace's pink by the rule, lineage 3–9★ | Absent |
+| `mp` | Absent | The ace's pink by the rule, on her, 2–3★ (Wider 1–3★) |
+| `w` | Up to two checked white families, 1–9★ each, AND | Absent |
+| `mw` | Absent | Up to two checked white families on her, 1–3★ each, AND |
+| `ow` | Absent with Affinity first; P0/P1/P2 with Whites first | Absent |
+| `omw` | Absent with Affinity first; non-required P0 whites preferred on the rental herself with Whites first | Absent with Affinity first; P0/P1/P2 on her with Whites first |
 | `mg` | Only a unique-focus link requires a specific own unique, 1–3★ | Same |
 
 **One blue stat.** Auto picks the ace's highest-weight key stat, usually Speed; all five stats are selectable. Wider changes `mb` to 2–3★ and `b` to 6–9★, keeping the same stat. There is no `bss` total-any-stat requirement: a Speed/Wit/Guts branch cannot meet the default Speed lineage filter.

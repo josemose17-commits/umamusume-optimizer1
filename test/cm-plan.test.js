@@ -251,7 +251,7 @@ function freshFixture() {
   return { x, t, v, fresh, rental };
 }
 
-for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`borrowed parent for X search: ${quality}, ${sort}`, () => {
+for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`grandparent search asks for her own sparks only: ${quality}, ${sort}`, () => {
   const { x, t, v, fresh } = freshFixture();
   assert.equal(fresh.parentMode, "rental"); assert.equal(fresh.parents.length, 1, "one veteran plus an unfilled rental");
   const q = plan.trainingRentalSearch(x, fresh, { quality, sort, blue: 0, pink: "none" });
@@ -259,19 +259,21 @@ for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", 
   assert.deepEqual(f.t, [t.id, null, null, null, null, null, null]);
   assert.equal(f.p2c, v.tid); assert.deepEqual(f.p2w, [...new Set(v.saddles.concat(v.self.wins.map(n => saddles[n]).filter(Boolean)))]);
   assert.deepEqual(f.emp, [t.cid, v.cid]);
-  assert.deepEqual(f.mb, [[10, broad ? 2 : 3, 3]]); assert.deepEqual(f.b, [[10, broad ? 6 : 7, 9]]);
+  assert.deepEqual(f.mb, [[10, broad ? 2 : 3, 3]], "blue on her"); assert.ok(!f.b, "no lineage blue: her parents never reach the ace");
   assert.ok(!f.p && !f.mp && !f.w && !f.pr && !f.bss);
-  const expected = ["t", "p2c", "p2w", "emp", "mb", "b"];
+  const expected = ["t", "p2c", "p2w", "emp", "mb"];
   if (sort === "affinity") assert.ok(!f.ow && !f.omw);
   else {
-    assert.deepEqual(f.ow, q.whites.map(w => w.priority ? [+SB.DATA.skills[w.id][0] * 10, w.priority] : +SB.DATA.skills[w.id][0] * 10));
-    assert.deepEqual(f.omw, q.whites.filter(w => !w.priority).map(w => +SB.DATA.skills[w.id][0] * 10));
-    expected.push("ow", "omw");
+    assert.ok(!f.ow, "no lineage whites");
+    assert.deepEqual(f.omw, q.whites.map(w => w.priority ? [+SB.DATA.skills[w.id][0] * 10, w.priority] : +SB.DATA.skills[w.id][0] * 10), "all preferred whites are hers, by priority");
+    expected.push("omw");
   }
   assert.deepEqual(Object.keys(f).sort(), expected.sort());
-  const chosen = decode(plan.trainingRentalSearch(x, fresh, { required: [top[0]], pink: "7" }));
-  assert.deepEqual(chosen.w, [[+SB.DATA.skills[top[0]][0] * 10, 1, 9]]);
-  assert.deepEqual(chosen.p, [[220, 3, 9]]); assert.ok(!chosen.mp && !chosen.ow);
+  const chosen = decode(plan.trainingRentalSearch(x, fresh, { required: [top[0]], pink: "7", quality }));
+  assert.deepEqual(chosen.mw, [[+SB.DATA.skills[top[0]][0] * 10, 1, 3]], "a required white on her");
+  assert.deepEqual(chosen.mp, [[220, broad ? 1 : 2, 3]], "pink on her: 2–3★, wider 1–3★"); assert.ok(!chosen.p && !chosen.w && !chosen.ow && !chosen.b);
+  const text = plan.searchSummary(plan.trainingRentalSearch(x, fresh, { required: [top[0]], pink: "7" }), id => "Skill " + id).join(" · ");
+  ["on the rental herself (her own sparks only", "2–3★ on the rental herself", "on the rental herself, 1–3★ each"].forEach(part => assert.ok(text.includes(part), part));
   q.focused.forEach(g => { const gf = decode(g.search); const base = { ...gf }; delete base.mg; assert.deepEqual(base, f); assert.ok(gf.mg.every(w => !f.emp.includes(Math.floor(w[0] / 1000)))); });
   assert.ok(plan.searchSummary(q).join(" · ").includes(t.n));
 });
@@ -330,10 +332,10 @@ test("the ace's gaps pick the blue for both searches; the grandparent search use
   assert.deepEqual(gf.t, [t.id, null, null, null, null, null, null], "the new parent is the affinity target");
   assert.equal(gf.p2c, v.tid, "your veteran is the other parent");
   assert.deepEqual(gf.emp, [t.cid, v.cid], "neither can be the grandparent");
-  assert.deepEqual(gf.mb, [[CP.BLUE_IDS[1], 3, 3]]); assert.deepEqual(gf.b, [[CP.BLUE_IDS[1], 7, 9]], "blue in the ace's biggest gap");
+  assert.deepEqual(gf.mb, [[CP.BLUE_IDS[1], 3, 3]], "blue in the ace's biggest gap, on her"); assert.ok(!gf.b);
   const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
   assert.ok(need && need.target === "S", "Special Week takes Medium to S");
-  assert.deepEqual(gf.p, [[CP.PINK_IDS[need.i], 3, 9]], "pink by the ace's rule"); assert.ok(!gf.mp && !gf.ow && !gf.w);
+  assert.deepEqual(gf.mp, [[CP.PINK_IDS[need.i], 2, 3]], "pink by the ace's rule, on her"); assert.ok(!gf.p && !gf.ow && !gf.w);
   assert.deepEqual(gq.whites.map(w => w.id), plan.missingWhites(x, fresh.s).slice(0, 12).map(w => w.id), "the ace's missing whites, listed");
   const text = plan.searchSummary(gq).join(" · ");
   ["Affinity target: " + t.n, "Other parent (legacy): " + uniq[3].n, "Blue: Stamina", "to take the ace to S", "Exclude:", "Sort: affinity first"].forEach(s => assert.ok(text.includes(s), s));

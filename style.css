@@ -739,6 +739,9 @@ table.pred .over { color: var(--accent); }
 .cmp tr.cmp-cut td { opacity: .55; }
 .cmp-search { border-top: 1px solid var(--line); padding-top: 4px; }
 .cmp-filters li { margin: 1px 0; }
+.cmp-aim { border-left: 3px solid var(--accent); padding-left: 10px; }
+.cmp-aim h4 { margin: 0 0 4px; }
+.cmp-aim li { margin: 2px 0; }
 .cmp-import { margin-top: 6px; }
 .cmp .field { max-width: 100%; min-width: 0; }
 .cmp select, .cmp textarea { max-width: 100%; }
