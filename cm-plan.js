@@ -4,7 +4,7 @@
 //  - Parent 1 from your veterans, each with her own two parents (the ace's grandparents), by the
 //    family score, with Parent 2 as the rental character that suits the ace and her best;
 //  - a fresh Parent 1 to train, when one would beat your best veteran by MARGIN: one of your
-//    umas, her own two parents from your veterans, the G1s she should win for affinity, and the
+//    umas, one veteran and a rental (or two veterans), the G1s she should win for affinity, and the
 //    sparks a parent built for this race should get, in expectation at your own veterans' rates:
 //    the relevant whites her parent deck offers, learned (the best first, as many as your
 //    veterans learn) and turned into sparks as often as theirs were, at their stars; her
@@ -167,38 +167,80 @@
       return { value: w.value + blue + pink, whites: w, blue, pink };
     }
     // Her G1 plan with these two veterans as her parents (extra: more G1s after the shared ones).
-    function plan(t, parents, extra) {
-      return A.planRaces({ self: t.cid, apt: t.apt, minGrade: "B", links: parents.map((v, i) => ({ role: i ? "g12" : "g11", cid: v.cid, wins: v.self.wins })), need: Infinity, extra: extra || [] });
+    function plan(t, parents, extra, priorityWins) {
+      return A.planRaces({ self: t.cid, apt: t.apt, minGrade: "B", links: parents.map((v, i) => ({ role: i ? "g12" : "g11", cid: v.cid, wins: v.self.wins })), need: Infinity, extra: extra || [], priorityWins: priorityWins || [] });
+    }
+    const asVeteran = r => ({ id: "rental:" + r.friend, cid: r.parent.cid, tid: r.parent.tid, self: r.parent, parents: r.parents, rental: r.friend });
+    function trainingContext(x, t, offers) {
+      return context({ ace: { cid: t.cid, tid: t.id }, race: x.race, rel: x.rel, offers: offers || {}, build: x.build });
+    }
+    function trainingFamily(parents) {
+      const v = parents[0], r = parents[1];
+      return { p1: v ? member(v.self, v.tid) : null, g11: v ? member(v.parents[0]) : null, g12: v ? member(v.parents[1]) : null,
+        p2: r ? member(r.self, r.tid) : null, g21: r ? member(r.parents[0]) : null, g22: r ? member(r.parents[1]) : null };
+    }
+    // A slot's spark value at its affinity in the complete family. Training counts white
+    // hints and key-blue start stats; an ace also benefits from uniques and needed pinks.
+    function contribution(f, s, x, slots, training) {
+      const whites = s.white.filter(w => slots.includes(w.slot));
+      const white = whites.reduce((n, w) => n + w.p * w.worth, 0), key = new Set(want(x).blue.map(b => b.i));
+      const start = [0, 0, 0, 0, 0], miss = {};
+      slots.forEach(k => { const m = f[k]; if (!m) return;
+        if (m.blue && m.blue[1]) start[m.blue[0]] += F.START_BLUE[m.blue[1] - 1];
+        if (m.pink && m.pink[1] && want(x).pink.some(p => p.i === m.pink[0])) miss[m.pink[0]] = (miss[m.pink[0]] == null ? 1 : miss[m.pink[0]]) * (1 - F.twice(F.PINK, m.pink[1], s.own[k]));
+      });
+      const blue = start.reduce((n, v, i) => n + (key.has(i) ? v : 0), 0) / F.STAT_PER_L;
+      const green = training ? 0 : s.green.filter(w => slots.includes(w.slot)).reduce((n, w) => n + w.p * w.L, 0);
+      const pink = training ? 0 : Object.values(miss).reduce((n, p) => n + (1 - p) * F.APT_L, 0);
+      return { value: white + blue + green + pink, white, blue, green, pink, start, hints: whites.reduce((n, w) => n + w.p, 0) };
     }
     // Every version in umas (trainee ids) that could be Parent 1 for the ace, trained with a
     // parent deck that offers offers: the best two of your veterans as her parents (her G1s
     // shared with them), best first. Each { kind: "fresh", t, parents, f, s, extra, value, plan }.
-    function rankFresh(x, vets, umas, offers) {
+    function rankFresh(x, vets, umas, offers, opts = {}) {
       const ace = x.ace.cid, out = [], seen = new Set(), r = rates(vets);
       (umas || []).map(trainee).filter(Boolean).forEach((t) => {
         if (+t.cid === +ace || seen.has(t.cid) || (o.chars && o.chars.indexOf(t.cid) === -1)) return;
         seen.add(t.cid);
         const base = freshMember(t), fit = fitsAll(t);
         const rent = rentalFor(ace, t.cid), p2 = rent ? charMember(rent.cid) : null;
-        const pool = (vets || []).filter((v) => +v.cid !== +ace && +v.cid !== +t.cid);
+        const rentalMode = opts.parentMode !== "veterans", pick = (opts.picks || {})[t.id] || {};
+        const selectedVet = pick.veteran != null ? pick.veteran : opts.veteran;
+        const selectedRental = opts.rental || (opts.rentals || []).find(r => r.friend === pick.rental);
+        const pool = (vets || []).filter(v => +v.cid !== +t.cid && (!rentalMode || selectedVet == null || selectedVet === "" || String(v.id) === String(selectedVet)));
+        const tx = trainingContext(x, t, offers);
         const total = (f) => { const s = fam.score(familyOf(f), x); return { s, extra: freshExtra(x, t, s, offers, r) }; };
         // Each veteran alone as her parent (sharing the G1s she can run), the best per character.
         const solo = new Map();
         pool.forEach((v) => {
           const f = { p1: Object.assign({}, base, { wins: (v.self.wins || []).filter((n) => fit.has(n)) }), g11: member(v.self, v.tid), p2 };
-          const y = total(f), value = y.s.value + y.extra.value, cur = solo.get(v.cid);
+          const y = total(f), tf = trainingFamily([v]), ts = fam.score(familyOf(tf), tx);
+          const value = y.s.value + y.extra.value + (rentalMode ? contribution(tf, ts, tx, F.SLOTS, true).value : 0), cur = solo.get(v.cid);
           if (!cur || value > cur.value) solo.set(v.cid, { v, value });
         });
         const top = [...solo.values()].sort((a, b) => b.value - a.value).slice(0, GRAND_SHORT);
         const tryParents = (ps) => {
-          const pl = plan(t, ps);
+          const pl = plan(t, ps, [], selectedRental ? selectedRental.parent.wins : []);
           const f = { p1: Object.assign({}, base, { wins: pl.agenda.map((z) => z.name) }), g11: member(ps[0].self, ps[0].tid), g12: ps[1] ? member(ps[1].self, ps[1].tid) : null, p2 };
           const y = total(f);
-          return y.s.problems.length ? null : { kind: "fresh", t, parents: ps, f, s: y.s, extra: y.extra, value: y.s.value + y.extra.value, rent, plan: pl, rates: r, offers };
+          const tf = trainingFamily(ps), ts = fam.score(familyOf(tf), tx);
+          const training = contribution(tf, ts, tx, F.SLOTS, true);
+          return y.s.problems.length || ts.problems.length ? null : { kind: "fresh", t, parents: ps, f, s: y.s, extra: y.extra, value: y.s.value + y.extra.value,
+            selectionValue: y.s.value + y.extra.value + training.value, rent, plan: pl, rates: r, offers, parentMode: rentalMode ? "rental" : "veterans", rental: rentalMode ? selectedRental || null : null };
         };
         let best = null;
-        top.forEach((a, i) => top.slice(i + 1).forEach((b) => { const c = tryParents([a.v, b.v]); if (c && (!best || c.value > best.value)) best = c; }));
-        if (!best && top.length === 1) best = tryParents([top[0].v]);
+        if (rentalMode) {
+          [...solo.values()].forEach(a => {
+            const rental = selectedRental && +selectedRental.parent.cid !== +t.cid && +selectedRental.parent.cid !== +a.v.cid ? selectedRental : null;
+            // A saved rental that cannot join this pair is never silently substituted.
+            if (selectedRental && !rental) return;
+            const c = tryParents([a.v].concat(rental ? [asVeteran(rental)] : []));
+            if (c && (!best || c.selectionValue > best.selectionValue)) best = c;
+          });
+        } else {
+          top.forEach((a, i) => top.slice(i + 1).forEach((b) => { const c = tryParents([a.v, b.v]); if (c && (!best || c.value > best.value)) best = c; }));
+          if (!best && top.length === 1) best = tryParents([top[0].v]);
+        }
         if (best) out.push(best);
       });
       return out.sort((a, b) => b.value - a.value);
@@ -218,7 +260,7 @@
     // popular ones; agenda races carry rank (extra races only: the first n make a plan of n).
     function racePlan(fresh, vets) {
       const pop = popular(vets), t = fresh.t;
-      const pl = plan(t, fresh.parents, pop.map((p) => p.name));
+      const pl = plan(t, fresh.parents, pop.map((p) => p.name), fresh.rental ? fresh.rental.parent.wins : []);
       const count = new Map(pop.map((p) => [p.name, p.n]));
       pl.agenda.forEach((r) => { r.pop = count.get(r.name) || 0; });
       // Her other career goal races, for her calendar (the agenda has the ones that add affinity).
@@ -333,8 +375,44 @@
       lines.push("Exclude: " + (c.emp || []).map(char).join(", ") + " (all versions)", "Sort: " + (q.sort === "whites" ? "P0, P1, P2, then affinity" : "affinity first"), "Any rental rank · trainers below 1,000 followers (site default)");
       return lines;
     }
+    // X is the target; V is the other parent. X's race whites are the ace's relevant
+    // whites, with X's own skills and parent-deck offers supplying their hint-discount value.
+    function trainingRentalSearch(x, fresh, opts = {}) {
+      const v = fresh.parents[0], tx = trainingContext(x, fresh.t, fresh.offers);
+      const f = { p1: member(v.self, v.tid), g11: member(v.parents[0]), g12: member(v.parents[1]) };
+      const s = fam.score(familyOf(f), tx);
+      return rentalSearch(tx, { kind: "vet", v, f, s }, opts);
+    }
+    function trainingStart(x, fresh) {
+      return fam.score(familyOf(trainingFamily(fresh.parents)), trainingContext(x, fresh.t, fresh.offers)).start;
+    }
+    function withTrainingRental(x, fresh, rental, vets, maxRaces = Infinity) {
+      const parents = [fresh.parents[0], asVeteran(rental)];
+      const out = Object.assign({}, fresh, { parents, rental });
+      const races = racePlan(out, vets || []), wins = upTo(races, maxRaces).map(r => r.name);
+      out.f = Object.assign({}, fresh.f, { p1: Object.assign({}, fresh.f.p1, { wins }), g11: member(parents[0].self, parents[0].tid), g12: member(rental.parent) });
+      out.s = fam.score(familyOf(out.f), x);
+      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates);
+      out.value = out.s.value + out.extra.value;
+      return out;
+    }
+    function rankTrainingRentals(x, fresh, rentals, opts = {}) {
+      const rows = [], hidden = [], v = fresh.parents[0], tx = trainingContext(x, fresh.t, fresh.offers);
+      (rentals || []).forEach(r => {
+        if (+r.parent.cid === +fresh.t.cid || +r.parent.cid === +v.cid) { hidden.push({ r, why: "same character as the parent you're training or her veteran" }); return; }
+        const next = withTrainingRental(x, fresh, r, opts.vets, opts.maxRaces);
+        const tf = trainingFamily(next.parents), ts = fam.score(familyOf(tf), tx);
+        const problems = next.s.problems.concat(ts.problems);
+        if (problems.length) { hidden.push({ r, why: problems[0] }); return; }
+        const acePart = contribution(next.f, next.s, x, ["g12"], false);
+        const trainingPart = contribution(tf, ts, tx, ["p2", "g21", "g22"], true);
+        rows.push({ r, fresh: next, f: next.f, s: next.s, trainingScore: ts, acePart, trainingPart, value: acePart.value + trainingPart.value });
+      });
+      rows.sort((a, b) => b.value - a.value || b.s.total - a.s.total);
+      return Object.assign(rows, { hidden });
+    }
     // Parent 1's G1 saddles for uma.moe: a veteran's own, or a fresh one's planned wins.
-    const saddlesOf = (p1) => (p1.kind === "vet" ? p1.v.saddles || [] : (p1.f.p1.wins || []).map((n) => saddleOf[n]).filter(Boolean));
+    const saddlesOf = (p1) => [...new Set((p1.kind === "vet" ? p1.v.saddles || [] : []).concat((p1.f.p1.wins || []).map(n => saddleOf[n]).filter(Boolean)))];
     // Pasted rentals (rentals.js) as Parent 2 with this Parent 1 (her family kept), best first.
     function rankRentals(x, p1, rentals) {
       const rows = [], hidden = [];
@@ -351,7 +429,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { context, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };

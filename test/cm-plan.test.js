@@ -82,7 +82,7 @@ test("a fresh Parent 1: one of your umas, two veterans as her parents, the G1s s
   const winsA = fits.slice(0, 3), winsB = fits.slice(2, 5);
   const vets = [vet(gpA, [[top[0], 2]], { wins: winsA }), vet(gpB, [[top[1], 2]], { wins: winsB }), vet(her, [[top[2], 1]])];
   const offers = Object.fromEntries(Object.keys(rel.targets).map((id) => [id, 0.5]));
-  const r = plan.rankFresh(x0(), vets, [her.id, ace.id], offers);
+  const r = plan.rankFresh(x0(), vets, [her.id, ace.id], offers, { parentMode: "veterans" });
   assert.equal(r.length, 1, "never the ace");
   const f = r[0];
   assert.equal(f.t.id, her.id);
@@ -235,4 +235,73 @@ test("rentals you paste, ranked as Parent 2 with your Parent 1", () => {
   list[0].score = 22000;
   list[1].score = 14500;
   assert.deepEqual(plan.rankRentals(x0(), p1, list).map(y => y.r.friend), out.map(y => y.r.friend), "an existing rental's rank adds no value or SS requirement to her actual sparks");
+});
+
+function freshFixture() {
+  const t = uniq[2], v = vet(uniq[3], [[top[0], 3]], { wins: open(t).slice(0, 2), parents: [uniq[6], uniq[7]], saddles: [10, 11] });
+  const x = x0(), fresh = plan.rankFresh(x, [v], [t.id], {})[0];
+  const rental = { friend: "qa-rental", trainer: "QA", names: [uniq[4].n, uniq[8].n, uniq[9].n], parent: m(uniq[4], [[top[1], 3]], { blue: [0, 3], wins: open(t).slice(2, 3) }),
+    parents: [m(uniq[8], [], { blue: [0, 3] }), m(uniq[9], [], { blue: [0, 3] })] };
+  return { x, t, v, fresh, rental };
+}
+
+for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`borrowed parent for X search: ${quality}, ${sort}`, () => {
+  const { x, t, v, fresh } = freshFixture();
+  assert.equal(fresh.parentMode, "rental"); assert.equal(fresh.parents.length, 1, "one veteran plus an unfilled rental");
+  const q = plan.trainingRentalSearch(x, fresh, { quality, sort, blue: 0 });
+  const f = decode(q), broad = quality === "broad";
+  assert.deepEqual(f.t, [t.id, null, null, null, null, null, null]);
+  assert.equal(f.p2c, v.tid); assert.deepEqual(f.p2w, [...new Set(v.saddles.concat(v.self.wins.map(n => saddles[n]).filter(Boolean)))]);
+  assert.deepEqual(f.emp, [t.cid, v.cid]);
+  assert.deepEqual(f.mb, [[10, broad ? 2 : 3, 3]]); assert.deepEqual(f.b, [[10, broad ? 6 : 7, 9]]);
+  assert.ok(!f.p && !f.mp && !f.w && !f.pr && !f.bss);
+  const expected = ["t", "p2c", "p2w", "emp", "mb", "b"];
+  if (sort === "affinity") assert.ok(!f.ow && !f.omw);
+  else {
+    assert.deepEqual(f.ow, q.whites.map(w => w.priority ? [+SB.DATA.skills[w.id][0] * 10, w.priority] : +SB.DATA.skills[w.id][0] * 10));
+    assert.deepEqual(f.omw, q.whites.filter(w => !w.priority).map(w => +SB.DATA.skills[w.id][0] * 10));
+    expected.push("ow", "omw");
+  }
+  assert.deepEqual(Object.keys(f).sort(), expected.sort());
+  const chosen = decode(plan.trainingRentalSearch(x, fresh, { required: [top[0]], pink: "7" }));
+  assert.deepEqual(chosen.w, [[+SB.DATA.skills[top[0]][0] * 10, 1, 9]]);
+  assert.deepEqual(chosen.p, [[220, 3, 9]]); assert.ok(!chosen.mp && !chosen.ow);
+  q.focused.forEach(g => { const gf = decode(g.search); const base = { ...gf }; delete base.mg; assert.deepEqual(base, f); assert.ok(gf.mg.every(w => !f.emp.includes(Math.floor(w[0] / 1000)))); });
+  assert.ok(plan.searchSummary(q).join(" · ").includes(t.n));
+});
+
+test("rental ranking adds her own sparks for the ace and her lineage for X; great-grandparents drop out", () => {
+  const { x, t, v, fresh, rental } = freshFixture();
+  const better = JSON.parse(JSON.stringify(rental)); better.friend = "qa-better";
+  better.parents.forEach(g => { g.white = [[top[2], 3]]; });
+  const rows = plan.rankTrainingRentals(x, fresh, [rental, better]);
+  assert.equal(rows[0].r.friend, "qa-better");
+  assert.equal(rows[0].acePart.value, rows[1].acePart.value, "R's parents never contribute to the ace");
+  assert.ok(rows[0].trainingPart.value > rows[1].trainingPart.value, "R's lineage gives X relevant hints");
+  for (const row of rows) {
+    assert.ok(Math.abs(row.value - row.acePart.value - row.trainingPart.value) < 1e-12);
+    assert.equal(row.f.g12.tid, rental.parent.tid);
+    assert.deepEqual(row.trainingPart.start, [63, 0, 0, 0, 0], "all three blues help X's key-stat / SS targets");
+    assert.deepEqual(row.acePart.start, [21, 0, 0, 0, 0], "only R's own blue helps the ace");
+    assert.deepEqual(row.trainingScore.own, A.individual({ trainee: t.cid, p1: v.cid, p2: rental.parent.cid, g11: v.parents[0].cid, g12: v.parents[1].cid, g21: rental.parents[0].cid, g22: rental.parents[1].cid }, { p1: v.self.wins, p2: rental.parent.wins, g11: [], g12: [], g21: [], g22: [] }));
+  }
+  const invalid = { ...rental, parent: m(t) };
+  assert.equal(plan.rankTrainingRentals(x, fresh, [invalid]).hidden.length, 1);
+  const oldRank = rows.map(r => r.r.friend); rental.score = 22000; better.score = 12000;
+  assert.deepEqual(plan.rankTrainingRentals(x, fresh, [rental, better]).map(r => r.r.friend), oldRank, "rental rating is irrelevant");
+});
+
+test("fresh-parent rental choice keeps X's borrowed parent and puts her shared G1s first", () => {
+  const { x, t, v, rental } = freshFixture();
+  const f = plan.rankFresh(x, [v], [t.id], {}, { rental })[0];
+  assert.equal(f.parents.length, 2); assert.equal(f.parents[1].rental, rental.friend);
+  assert.equal(f.f.g12.tid, rental.parent.tid);
+  const races = plan.racePlan(f, [v]);
+  const shared = races.agenda.filter(r => !r.free && r.with.length).sort((a, b) => a.rank - b.rank);
+  assert.ok(shared.length >= 2);
+  assert.ok(rental.parent.wins.includes(shared[0].name), "R's G1 first among equally shared races");
+  assert.equal(shared[0].points, 3);
+  const cut = plan.rankTrainingRentals(x, f, [rental], { maxRaces: 1, vets: [v] })[0];
+  assert.ok(cut.f.p1.wins.includes(shared[0].name));
+  assert.equal(cut.s.own.g12, A.together(x.ace.cid, t.cid, rental.parent.cid) + 3 * A.shared(cut.f.p1.wins, rental.parent.wins).length);
 });
