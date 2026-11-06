@@ -2469,6 +2469,8 @@
       j.optResult = result;
       if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
       if (deckTrainee(host) === tid) saved.forTrainee = tid;
+      // The Parents tab's plan uses a deck you built in ③ (not the planner's quick build).
+      if (host === "parents" && deckTrainee(host) === tid) saved.cardsFrom = "optimizer";
       if (host === "cm" && deckTrainee(host) === tid && c.goal === "race" && est) { const g = raceGaps(result, saved); saved.predicted = { stats: g.stats, target: g.target, sp: est.sp }; }
       save();
       j.wish = null;
@@ -2927,6 +2929,10 @@
       deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
       deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
       deckOffers: (opts, cards) => T.deckOffers(opts, cards),
+      // Her Ace-parent deck as you built it in ③ (Find my best deck), or null.
+      parentDeck: (tid) => { const c = state.pcm || {}; return c.cardsFrom === "optimizer" && +c.forTrainee === +tid && (c.cards || []).length ? c.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed })) : null; },
+      // These cards as an Ace-parent deck for that many extra races: { cards, offers }.
+      deckWith: (p, style, tid, races, cards) => { const x = planSetup(p, style, tid, races); return { cards, offers: T.deckOffers(x.opts, cards), link: x.link }; },
       // A new ace's deck settings start from CM & decks'.
       deckDefaults: () => { const c = state.cm || {}; return { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1", targets: Object.assign({}, c.targets || {}), rankGoal: c.rankGoal || "" }; },
       buildTarget: (p) => E.BUILDS[p.build].target,
@@ -3010,6 +3016,7 @@
     state.pcm = state.pcm || {};
     W.setParentRank(state, o.rank || "");
     cm("parents").cards = (o.cards || []).map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
+    cm("parents").cardsFrom = o.cardsFrom || "planner";
     state.pcm.forTrainee = o.p1.tid;
     ps.races = o.races.slice();
     state.tab = "parents";

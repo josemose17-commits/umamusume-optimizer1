@@ -742,6 +742,8 @@ table.pred .over { color: var(--accent); }
 .cmp-aim, .cmp-it { border-left: 3px solid var(--accent); padding-left: 10px; }
 .cmp-it h4 { margin: 0 0 4px; }
 .cmp-it ol { margin: 4px 0; padding-left: 22px; }
+.cmp-order { margin: 0; padding-left: 22px; display: grid; gap: 12px; }
+.cmp-order > li::marker { font-weight: 700; }
 .cmp-aim h4 { margin: 0 0 4px; }
 .cmp-aim li { margin: 2px 0; }
 .cmp-import { margin-top: 6px; }
