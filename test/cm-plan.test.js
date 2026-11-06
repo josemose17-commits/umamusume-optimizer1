@@ -412,3 +412,14 @@ test("Independent Training's prioritized skills: offered race whites by value ×
   if (gold) { const g = list.find(k => SB.DATA.skills[k.id][0] === SB.DATA.skills[w[2].id][0]); assert.equal(g.id, gold); assert.ok(g.gold); }
   assert.equal(plan.itSkills(x, offers, 2).length, 2);
 });
+
+test("a skill an event gives on every choice takes no priority slot; one given on one choice keeps its slot", () => {
+  const x = x0(), w = plan.want(x).white;
+  const offers = {}; offers[w[0].id] = 0.9; offers[w[1].id] = 0.9; offers[w[2].id] = 0.5;
+  const all = plan.itSkills(x, offers, 10);
+  const anyway = new Set([String(all[0].id)]);
+  const list = plan.itSkills(x, offers, 10, anyway);
+  assert.ok(!list.some(k => k.id === all[0].id), "it comes whatever is picked");
+  assert.deepEqual(list.anyway.map(k => k.id), [all[0].id], "listed apart");
+  assert.equal(list.filter(k => !k.gamble).length, all.filter(k => !k.gamble).length - 1, "its slot goes to the next skill");
+});
