@@ -296,6 +296,7 @@ test("fresh-parent rental choice keeps X's borrowed parent and puts her shared G
   const f = plan.rankFresh(x, [v], [t.id], {}, { rental })[0];
   assert.equal(f.parents.length, 2); assert.equal(f.parents[1].rental, rental.friend);
   assert.equal(f.f.g12.tid, rental.parent.tid);
+  assert.equal(plan.trainingStart(x, f)[0], 84, "V's 3★ plus the rental's 9★ lineage become X's starting stats");
   const races = plan.racePlan(f, [v]);
   const shared = races.agenda.filter(r => !r.free && r.with.length).sort((a, b) => a.rank - b.rank);
   assert.ok(shared.length >= 2);
@@ -303,5 +304,8 @@ test("fresh-parent rental choice keeps X's borrowed parent and puts her shared G
   assert.equal(shared[0].points, 3);
   const cut = plan.rankTrainingRentals(x, f, [rental], { maxRaces: 1, vets: [v] })[0];
   assert.ok(cut.f.p1.wins.includes(shared[0].name));
+  const limited = plan.atRaceCount(x, f, races, 1);
+  assert.deepEqual(limited.f.p1.wins, plan.raceWins(races, 1), "ace affinity never assumes X wins rank-cut races");
+  A.goalG1s(t.cid).forEach(g => assert.ok(limited.f.p1.wins.includes(g.name), "fixed career G1 wins are kept even when not shared yet"));
   assert.equal(cut.s.own.g12, A.together(x.ace.cid, t.cid, rental.parent.cid) + 3 * A.shared(cut.f.p1.wins, rental.parent.wins).length);
 });

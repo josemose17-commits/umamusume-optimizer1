@@ -742,6 +742,9 @@ table.pred .over { color: var(--accent); }
 .cmp-filters { margin: 4px 0 8px; overflow-wrap: anywhere; }
 .cmp-rental-settings { margin: 4px 0 10px; min-width: 0; }
 .cmp-rental-settings > .row-wrap { margin-top: 8px; }
+.cmp-rental-settings .row-wrap > .field { flex: 1 1 160px; }
+.cmp-training-rental .field, .cmp-rental-settings .field { grid-template-columns: minmax(0, 1fr); }
+.cmp-training-rental select, .cmp-rental-settings select { width: 100%; min-width: 0; }
 .cmp-required { min-width: 0; margin: 8px 0; border: 1px solid var(--line); border-radius: 8px; }
 .cmp-required .row-wrap { gap: 6px; }
 .cmp-filter-table { table-layout: fixed; }
@@ -783,6 +786,11 @@ table.pred .over { color: var(--accent); }
 .cmp-pred { margin-top: 6px; }
 .cmp-steps { margin-top: 10px; }
 @media (max-width: 520px) {
+  .cmp-training-scores { table-layout: fixed; width: 100%; font-size: .75rem; }
+  .cmp .cmp-training-scores th { white-space: normal; font-size: .62rem; }
+  .cmp-training-scores th, .cmp-training-scores td { padding: 6px 3px; overflow-wrap: anywhere; }
+  .cmp-training-scores th:first-child { width: 40%; }
+  .cmp-training-scores .linkish { white-space: normal; font-size: .7rem; }
   .cmp-targets .tg-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cmp-ace-chip { width: 100%; }
   .cmp-pred { font-size: .8rem; }

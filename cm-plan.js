@@ -166,7 +166,7 @@
       const blue = blueExpected(x), pink = pinkExpected(x, t, aff);
       return { value: w.value + blue + pink, whites: w, blue, pink };
     }
-    // Her G1 plan with these two veterans as her parents (extra: more G1s after the shared ones).
+    // Her G1 plan with these parents (veterans or a rental) (extra: more G1s after the shared ones).
     function plan(t, parents, extra, priorityWins) {
       return A.planRaces({ self: t.cid, apt: t.apt, minGrade: "B", links: parents.map((v, i) => ({ role: i ? "g12" : "g11", cid: v.cid, wins: v.self.wins })), need: Infinity, extra: extra || [], priorityWins: priorityWins || [] });
     }
@@ -189,14 +189,14 @@
         if (m.blue && m.blue[1]) start[m.blue[0]] += F.START_BLUE[m.blue[1] - 1];
         if (m.pink && m.pink[1] && want(x).pink.some(p => p.i === m.pink[0])) miss[m.pink[0]] = (miss[m.pink[0]] == null ? 1 : miss[m.pink[0]]) * (1 - F.twice(F.PINK, m.pink[1], s.own[k]));
       });
-      const blue = start.reduce((n, v, i) => n + (key.has(i) ? v : 0), 0) / F.STAT_PER_L;
+      const blue = start.reduce((n, v, i) => n + (training || key.has(i) ? v : 0), 0) / F.STAT_PER_L;
       const green = training ? 0 : s.green.filter(w => slots.includes(w.slot)).reduce((n, w) => n + w.p * w.L, 0);
       const pink = training ? 0 : Object.values(miss).reduce((n, p) => n + (1 - p) * F.APT_L, 0);
       return { value: white + blue + green + pink, white, blue, green, pink, start, hints: whites.reduce((n, w) => n + w.p, 0) };
     }
     // Every version in umas (trainee ids) that could be Parent 1 for the ace, trained with a
-    // parent deck that offers offers: the best two of your veterans as her parents (her G1s
-    // shared with them), best first. Each { kind: "fresh", t, parents, f, s, extra, value, plan }.
+    // parent deck that offers offers: one veteran plus a rental, or two veterans, sharing
+    // their G1s. The veteran is chosen for both the ace and her own career. Each { kind: "fresh", t, parents, f, s, extra, value, plan }.
     function rankFresh(x, vets, umas, offers, opts = {}) {
       const ace = x.ace.cid, out = [], seen = new Set(), r = rates(vets);
       (umas || []).map(trainee).filter(Boolean).forEach((t) => {
@@ -347,7 +347,7 @@
       const pink = focus ? Object.assign({}, focus, { min: 3, main: false }) : null;
       const blueIndex = opts.blue != null && opts.blue !== "auto" && BLUE_IDS[+opts.blue] ? +opts.blue : (needs.blue[0] || { i: 0 }).i;
       const blue = [{ i: blueIndex, label: F.STAT_LABELS[blueIndex] }];
-      const whites = missingWhites(x, p1.s).slice(0, 12).map((w, i) => Object.assign({}, w, { priority: i < 3 ? 0 : i < 7 ? 1 : 2 }));
+      const whites = (opts.whites || missingWhites(x, p1.s)).slice(0, 12).map((w, i) => Object.assign({}, w, { priority: i < 3 ? 0 : i < 7 ? 1 : 2 }));
       // At most two explicitly checked families; keep them visible after a deck change.
       const families = new Set(), required = [];
       (opts.required || []).map(String).filter(id => meta[id]).forEach(id => { if (required.length < 2 && !families.has(meta[id][0])) { families.add(meta[id][0]); required.push(id); } });
@@ -366,7 +366,7 @@
       const required = new Set((q.required || []).map(id => meta[id] && meta[id][0]));
       const names = (q.whites || []).filter(w => !required.has(meta[w.id] && meta[w.id][0])).map(w => skillName(w.id) + (q.sort === "whites" ? " (P" + w.priority + ")" : ""));
       const lines = ["Target: " + tn(c.t[0]), "Legacy: " + (c.p2c ? tn(c.p2c) + " · " + (c.p2w || []).length + " G1 wins" : "none")];
-      if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · own " + c.mb[0][1] + "–3★ · lineage " + c.b[0][1] + "–9★");
+      if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · own " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " · lineage " + c.b[0][1] + "–9★");
       lines.push("Pink: " + (c.p ? (MOE_STYLES[PINK_IDS.indexOf(c.p[0][0])] || F.APT_LABELS[PINK_IDS.indexOf(c.p[0][0])]) + " · lineage 3–9★; no own minimum" : "off"));
       lines.push("Required whites: " + (q.required.length ? q.required.map(skillName).join(", ") + " · 1–9★ each; all required" : "none"));
       lines.push((q.sort === "whites" ? "Preferred whites: " : "Whites to look for (no filter): ") + (names.join(", ") || "none"));
@@ -381,7 +381,17 @@
       const v = fresh.parents[0], tx = trainingContext(x, fresh.t, fresh.offers);
       const f = { p1: member(v.self, v.tid), g11: member(v.parents[0]), g12: member(v.parents[1]) };
       const s = fam.score(familyOf(f), tx);
-      return rentalSearch(tx, { kind: "vet", v, f, s }, opts);
+      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s) }));
+    }
+    function raceWins(races, n) {
+      return [...new Set(upTo(races, n).map(r => r.name).concat((races.goals || []).filter(r => r.goal === "fixed" && g1Map.has(r.name)).map(r => r.name)))];
+    }
+    function atRaceCount(x, fresh, races, n) {
+      const out = Object.assign({}, fresh, { f: Object.assign({}, fresh.f, { p1: Object.assign({}, fresh.f.p1, { wins: raceWins(races, n) }) }) });
+      out.s = fam.score(familyOf(out.f), x);
+      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates);
+      out.value = out.s.value + out.extra.value;
+      return out;
     }
     function trainingStart(x, fresh) {
       return fam.score(familyOf(trainingFamily(fresh.parents)), trainingContext(x, fresh.t, fresh.offers)).start;
@@ -389,7 +399,7 @@
     function withTrainingRental(x, fresh, rental, vets, maxRaces = Infinity) {
       const parents = [fresh.parents[0], asVeteran(rental)];
       const out = Object.assign({}, fresh, { parents, rental });
-      const races = racePlan(out, vets || []), wins = upTo(races, maxRaces).map(r => r.name);
+      const races = racePlan(out, vets || []), wins = raceWins(races, maxRaces);
       out.f = Object.assign({}, fresh.f, { p1: Object.assign({}, fresh.f.p1, { wins }), g11: member(parents[0].self, parents[0].tid), g12: member(rental.parent) });
       out.s = fam.score(familyOf(out.f), x);
       out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates);
@@ -429,7 +439,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { context, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };
