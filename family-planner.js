@@ -158,6 +158,12 @@
       return f;
     }
     const blank = () => ({ cid: null, tid: null, white: [], blue: [0, 0], pink: [0, 0], green: 0, wins: [] });
+    function markManual(f, k) {
+      if (!f[k]) return;
+      f[k].manual = true; f[k].planned = false;
+      const parent = F.PARENT_OF[k];
+      if (parent && f[parent]) { f[parent].manual = true; f[parent].planned = false; }
+    }
     // A member as family.js scores her: her version's unique for the green spark.
     const scored = (m) => (m && m.cid ? Object.assign({}, m, { unique: uniqueOf(trainee(m.tid)) }) : null);
     const familyOf = (f, swap) => {
@@ -203,9 +209,24 @@
       const row = (k) => {
         const m = f[k], t = trainee(m.tid), grand = F.PARENT_OF[k];
         return `<tr${grand ? ' class="fp-grandrow"' : ""}><td class="mini">${SLOT_LABELS[k]}</td><td>${m.cid ? `${esc(ctx.charName(m.cid))}${t && versions(m.cid).length > 1 ? ` <span class="mini">[${esc(t.t)}]</span>` : ""}<div class="mini">${[from(m), sparkText(m)].filter(Boolean).join(" · ")}</div>` : '<span class="mini">—</span>'}</td>
-          <td class="num">${m.cid && s.own[k] != null ? s.own[k] : ""}</td><td>${m.cid ? `<button type="button" class="linkish" data-fp-clear="${k}" aria-label="Clear">✕</button>` : ""}</td></tr>`;
+          <td class="num">${m.cid && s.own[k] != null ? s.own[k] : ""}</td><td><button type="button" class="linkish" data-fp-edit="${k}">Edit</button> ${m.cid ? `<button type="button" class="linkish" data-fp-clear="${k}" aria-label="Clear">✕</button>` : ""}</td></tr>`;
       };
-      return `<div class="table-wrap"><table class="plan fp-fam"><thead><tr><th></th><th>Her family</th><th title="Each uma's own affinity: her sparks fire × (1 + this ÷ 100)">Affinity</th><th></th></tr></thead><tbody>${ORDER.map(row).join("")}</tbody></table></div>${scoreHTML(s)}`;
+      return `<div class="table-wrap"><table class="plan fp-fam"><thead><tr><th></th><th>Her family</th><th title="Each uma's own affinity: her sparks fire × (1 + this ÷ 100)">Affinity</th><th></th></tr></thead><tbody>${ORDER.map(row).join("")}</tbody></table></div>${scoreHTML(s)}
+        <div class="fp-tree">${ORDER.map(k => memberHTML(f, k)).join("")}</div>`;
+    }
+    function memberHTML(f, k) {
+      const m = f[k], vs = m.cid ? versions(m.cid) : [];
+      const select = (attr, vals, value) => `<select ${attr}>${vals.map(([v, label]) => `<option value="${v}"${String(value) === String(v) ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
+      const stars = [0, 1, 2, 3].map(n => [n, n ? n + "★" : "None"]);
+      const key = "fpEdit-" + k;
+      return `<details class="fp-card" id="${key}" data-pp-open="${key}"${ctx.isOpen(key) ? " open" : ""}><summary>${SLOT_LABELS[k]} · ${m.cid ? esc(ctx.charName(m.cid)) : "Enter by hand"}</summary>
+        <div class="pp-form"><label class="field grow"><span>Character</span>${ctx.charInput("fp-" + k, m.cid)}</label>${vs.length ? `<label class="field"><span>Version</span>${select(`data-fp-ver="${k}"`, vs.map(t => [t.id, t.t]), m.tid)}</label>` : ""}</div>
+        <div class="row-wrap"><label class="field"><span>Blue stat</span>${select(`data-fp-blue-stat="${k}"`, F.STAT_LABELS.map((l, i) => [i, l]), m.blue[0])}</label><label class="field"><span>Blue stars</span>${select(`data-fp-blue="${k}"`, stars, m.blue[1])}</label><label class="field"><span>Pink aptitude</span>${select(`data-fp-pink-apt="${k}"`, F.APT_LABELS.map((l, i) => [i, l]), m.pink[0])}</label><label class="field"><span>Pink stars</span>${select(`data-fp-pink="${k}"`, stars, m.pink[1])}</label><label class="field"><span>Green stars</span>${select(`data-fp-green="${k}"`, stars, m.green)}</label></div>
+        <div class="row-wrap">${m.white.map((w, i) => `<span class="chip">${esc(ctx.skillName(w[0]))} ${w[1]}★ <button type="button" class="linkish" data-fp-white-del="${k},${i}" aria-label="Remove spark">✕</button></span>`).join("")}</div>
+        <div class="row-wrap"><label class="field grow"><span>White skill</span><input data-fp-white-name list="ppSkills" placeholder="Skill name" autocomplete="off"></label><label class="field"><span>Stars</span>${select("data-fp-white-stars", stars.slice(1), 3)}</label><button type="button" class="btn ghost small" data-fp-white-add="${k}">Add spark</button><button type="button" class="btn ghost small" data-fp-keep="${k}">Keep as a candidate</button></div>
+        <details><summary class="mini">G1 wins (${m.wins.length})</summary><div class="pp-g1grid">${g1.map(name => `<label class="pp-g1"><input type="checkbox" data-fp-win="${k}" value="${esc(name)}"${m.wins.includes(name) ? " checked" : ""}> ${esc(name)}</label>`).join("")}</div></details>
+        ${(f.cands[k] || []).length ? `<div class="row-wrap">${f.cands[k].map((c, i) => `<span class="chip">${esc(ctx.charName(c.cid))} <button type="button" class="linkish" data-fp-use="${k},${i}">Use</button> <button type="button" class="linkish" data-fp-cand-del="${k},${i}" aria-label="Remove candidate">✕</button></span>`).join("")}</div>` : ""}
+      </details>`;
     }
     function p1HTML(f, x, w) {
       const vetCids = new Set(veterans().list.map((v) => +v.cid)), mine = mineCids().size > 0, name = ctx.charName;
@@ -234,6 +255,7 @@
     // ---------- 3 · Train Parent 1 ----------
     function trainHTML() {
       const f = st();
+      if (ctx.merged) return `${f.p1.tid && f.p1.vet == null && +ctx.parentsState().selfTrainee !== +f.p1.tid ? `<button type="button" class="btn small" data-fp-build>Train ${esc(ctx.charName(f.p1.cid))} here</button>` : ""}${f.builderUndo ? '<button type="button" class="linkish" data-fp-build-undo>Undo parent setup</button>' : ""}`;
       if (!f.ace.cid || !f.p1.cid) return `<p class="mini">Pick Parent 1 in 2: if she's one you'll train, what to build into her shows here. ① to ④ build any parent.</p>`;
       if (f.p1.vet != null) return `<p class="mini">Parent 1 is your veteran ${esc(ctx.charName(f.p1.cid))}: nothing to train. ① to ④ build any parent.</p>`;
       const { rel, x } = inputs(f);
@@ -244,6 +266,7 @@
     function vetsHTML() {
       if (!V) return "";
       const v = veterans(), n = v.list.length;
+      if (ctx.merged) return `<details class="pred-help" data-pp-open="fpVets"${ctx.isOpen("fpVets") ? " open" : ""}><summary>My veterans (${n})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Sparks and rating</th><th></th></tr></thead><tbody>${v.list.map(x => `<tr><td>${esc(vetName(x))}</td><td>${vetText(x)}</td><td><button type="button" class="linkish" data-fp-vet="p1,${x.id}">Use as Parent 1</button></td></tr>`).join("")}</tbody></table></div><button type="button" class="linkish" data-cmp-jump="cup">Import a newer export</button>${n ? '<button type="button" class="linkish" data-fp-vets-clear>Remove veterans</button>' : ""}</details>`;
       return `<details class="pred-help" data-pp-open="fpVets"${ctx.isOpen("fpVets") ? " open" : ""}><summary><b>Import your veterans</b> · ${n ? `${n} imported${v.at ? " " + esc(v.at) : ""}` : "from umaextractor"}</summary>
         <p class="mini">Paste the veterans JSON from umaextractor (or pick the file), again whenever you've trained more. Each import replaces the list; it stays in this browser. Her sparks, G1 wins and her two parents (the ace's grandparents when she's a parent) come with her; Parent 1 above ranks them. It also fills in what it can: the versions you've trained are ticked in My umas, and the cards in their decks (not the friend's card you borrowed) go into My cards at the limit break you trained with. Neither ever loses anything: a card you've raised since stays as you set it.</p>
         <textarea class="fp-vets" data-fp-vets-text rows="3" placeholder="Paste the umaextractor veterans JSON here"></textarea>
@@ -377,14 +400,16 @@
       const f = st(), t = e.target;
       const hit = (attr) => t.closest("[" + attr + "]");
       let el;
-      if ((el = hit("data-fp-pair"))) { const [a, b] = el.dataset.fpPair.split(",").map(Number); setChar(f, "p1", a); setChar(f, "p2", b); }
+      if ((el = hit("data-fp-edit"))) { ctx.openSection("fpEdit-" + el.dataset.fpEdit); }
+      else if ((el = hit("data-fp-pair"))) { const [a, b] = el.dataset.fpPair.split(",").map(Number); setChar(f, "p1", a); setChar(f, "p2", b); }
       else if ((el = hit("data-fp-grand"))) { const [k, cid] = el.dataset.fpGrand.split(","); const slot = k === "p1" ? (f.g11.cid ? "g12" : "g11") : (f.g21.cid ? "g22" : "g21"); setChar(f, slot, +cid); }
       else if ((el = hit("data-fp-white-add"))) {
         const k = el.dataset.fpWhiteAdd, card = el.closest(".fp-card");
         const id = ctx.skillIdByName(card.querySelector("[data-fp-white-name]").value);
         if (!id) { ctx.flash("Pick a skill from the list first."); return true; }
         f[k].white.push([fam.baseWhite(id), +card.querySelector("[data-fp-white-stars]").value]);
-      } else if ((el = hit("data-fp-white-del"))) { const [k, i] = el.dataset.fpWhiteDel.split(","); f[k].white.splice(+i, 1); }
+        markManual(f, k);
+      } else if ((el = hit("data-fp-white-del"))) { const [k, i] = el.dataset.fpWhiteDel.split(","); f[k].white.splice(+i, 1); markManual(f, k); }
       else if ((el = hit("data-fp-keep"))) { const k = el.dataset.fpKeep; (f.cands[k] = f.cands[k] || []).push(JSON.parse(JSON.stringify(f[k]))); ctx.flash("Saved as a candidate: enter the next one and compare."); }
       else if ((el = hit("data-fp-clear"))) f[el.dataset.fpClear] = blank();
       else if ((el = hit("data-fp-use"))) { const [k, i] = el.dataset.fpUse.split(","); f[k] = JSON.parse(JSON.stringify(f.cands[k][+i])); }
@@ -454,6 +479,8 @@
       else if (ds.fpGreen) f[ds.fpGreen].green = +t.value;
       else if (ds.fpWin) { const w = f[ds.fpWin].wins, i = w.indexOf(t.value); if (t.checked && i === -1) w.push(t.value); if (!t.checked && i !== -1) w.splice(i, 1); }
       else return !!(ds.fpWhiteName != null || ds.fpWhiteStars != null);
+      const slot = ds.fpVer || ds.fpBlueStat || ds.fpBlue || ds.fpPinkApt || ds.fpPink || ds.fpGreen || ds.fpWin || (ds.ppChar && ds.ppChar.startsWith("fp-") ? ds.ppChar.slice(3) : null);
+      if (slot && slot !== "ace") markManual(f, slot);
       ctx.rerender();
       return true;
     }

@@ -173,7 +173,7 @@
       const vers = p.self ? versions(p.self) : [];
       const a = apt(p);
       return `<div class="pp-form">
-          <label class="field"><span>The parent you're training <i class="mini">also the coach's trainee</i></span>${charInput("self", p.self, "Your trainee")}</label>
+          <label class="field"><span>The parent you're training</span>${charInput("self", p.self, "Your trainee")}</label>
           ${vers.length > 1 ? `<label class="field"><span>Version</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}
         </div>
         ${a ? `<div class="pp-apt"><span class="mini">${esc(charName(p.self))}'s aptitudes (change one if a spark raised it):</span> ${[0, 1, 2, 3, 4, 5].map((i) => `<label class="pp-aptf"><span>${APT_LABELS[i]}</span><select data-pp-apt="${i}">${GRADES.map((g) => `<option${a[i] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("")}${p.apt ? ' <button type="button" class="btn ghost small" data-pp-act="aptReset">Use her base aptitudes</button>' : ""}</div>` : ""}`;
