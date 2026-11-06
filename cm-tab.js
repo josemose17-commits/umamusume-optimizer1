@@ -173,7 +173,10 @@
       if (prefs.setup === "B" && !trained) {
         await stage(`${who}: the best new Parent 1 from My umas…`, 0.4);
         const pdeck = ctx.deck(p, style, null, PLAN_RACES);
-        fresh = CP.rankFresh(x, vetsAll, umas, pdeck.offers, { parentMode: "rental", picks: prefs.picks, rentals: [] });
+        // The grandparent you borrowed (entered under the grandparent search), per new parent.
+        const gps = gpRentals(prefs), picks = {};
+        Object.keys(prefs.picks).forEach((k) => { picks[k] = Object.assign({}, prefs.picks[k], gps[k] ? { rental: gps[k].friend } : {}); });
+        fresh = CP.rankFresh(x, vetsAll, umas, pdeck.offers, { parentMode: "rental", picks, rentals: Object.values(gps) });
       }
       // The ace's family affinity each choice can reach once you borrow (cm-plan.js outlook).
       vets.concat(fresh).forEach((y) => { y.aff = CP.outlook(x, y.f, vetsAll); });
@@ -373,10 +376,11 @@
         const chosen = prefs.picks[pick.t.id] || {}, ranked = pick.vetOptions || [], seen = new Set(ranked.map((o) => o.v.id));
         const rest = ctx.veterans().list.filter((x) => !seen.has(x.id) && +x.cid !== +pick.t.cid && +x.cid !== +r.t.cid).sort((a, b) => vetName(a).localeCompare(vetName(b)));
         const top = ranked[0];
-        out += `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and a borrowed grandparent · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
+        out += `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and ${pick.rental ? `your borrowed grandparent <b>${esc(pick.rental.names[0])}</b> (${sparks(pick.rental.parent) || "no sparks entered"})` : "a borrowed grandparent"} · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
           <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her${top ? " (" + esc(vetName(top.v)) + ")" : ""}</option>${ranked.map((o, i) => `<option value="${o.v.id}"${String(chosen.veteran) === String(o.v.id) ? " selected" : ""}>${i + 1}. ${esc(vetName(o.v))} · score ${fmt(o.value)}${o.aff ? " · ~" + o.aff.total + " " + o.aff.symbol : ""} · ${sparks(o.v.self)}</option>`).join("")}${rest.length ? `<optgroup label="Not ranked (a stronger one of the same character is above)">${rest.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</optgroup>` : ""}</select></label>
           <p class="mini">Ranked by what the pair gives the ace and the new parent's own career, best first. The ace's own character isn't offered: as the ace's grandparent she'd have 0 affinity with her.</p>
-          ${searchHTML("Grandparent search", grandparentSearch(r, prefs.rental), "training", prefs.rental, `the grandparent you borrow for ${tName(pick.t)}`)}`;
+          ${searchHTML("Grandparent search", grandparentSearch(r, prefs.rental), "training", prefs.rental, `the grandparent you borrow for ${tName(pick.t)}`)}
+          ${gpHTML(r, prefs)}`;
       } else {
         out += `<p><b>${pick.v.id === "manual" ? "Your parent" : "Your veteran"} ${esc(vetName(pick.v))}</b>${pick.v.score ? ` · rating ${fmtN(pick.v.score)}` : ""} · ${sparks(pick.v.self)} · score <b>${fmt(pick.s.value)}</b> · affinity <b>${affText(pick)}</b>.</p>`;
       }
@@ -387,6 +391,44 @@
         return `<tr${x.aff.total >= MIN_AFFINITY ? "" : ' class="cmp-cut"'}><td>${fresh ? "Train " : "Veteran: "}<b>${esc(fresh ? tName(x.t) : vetName(x.v))}</b>${ps.length ? `<div class="mini">Parents: ${ps.map(esc).join(" + ")}</div>` : ""}</td><td class="num">${fresh ? "~" : ""}${fmt(x.value)}</td><td class="num">${affText(x)}</td><td><button type="button" class="linkish" data-cmp-p1="${fresh ? "fresh|" + x.t.id : "vet|" + x.v.id}">Use</button></td></tr>`;
       }).join("")}</tbody></table></div><p class="mini">Ranked by what she gives the ace: her expected sparks (whites boosted by copies her parents carry), the G1s she can share, and affinity. Faded: under ${MIN_AFFINITY}.</p></details>`;
       return setup + out;
+    }
+
+    // ---------- the grandparent you borrowed ----------
+    // What you read off her uma.moe card: her version, her own sparks (her parents never reach
+    // the ace) and the G1s she won. Saved per new parent: prefs.picks[tid].gp.
+    const g1Names = () => A.g1Races().map((r) => r.name);
+    function gpRentals(prefs) {
+      const out = {};
+      Object.keys(prefs.picks || {}).forEach((k) => {
+        const g = prefs.picks[k].gp, t = g && trainee(g.tid);
+        if (!t) return;
+        out[k] = { friend: "gp-" + k, trainer: "you", names: [tName(t)], parents: [null, null], unknown: [],
+          parent: { cid: t.cid, tid: t.id, white: (g.white || []).map((w) => w.slice()), blue: (g.blue || [0, 0]).slice(), pink: (g.pink || [0, 0]).slice(), green: +g.green || 0, wins: (g.wins || []).slice() } };
+      });
+      return out;
+    }
+    function gpHTML(r, prefs) {
+      const f = r.train.f, tid = f.t.id, g = (prefs.picks[tid] || {}).gp || null, attr = `data-cmp-gp="${tid}"`;
+      const using = f.rental && f.rental.friend === "gp-" + tid;
+      const avoid = new Set([+f.t.cid, +f.parents[0].cid]);
+      const glob = new Set(ctx.chars()), list = D.DATA.trainees.filter((t) => glob.has(t.cid) && !avoid.has(+t.cid)).sort((a, b) => a.n.localeCompare(b.n) || a.t.localeCompare(b.t));
+      const opt = (rows, v) => rows.map(([k, l]) => `<option value="${k}"${String(k) === String(v) ? " selected" : ""}>${esc(l)}</option>`).join("");
+      const stars = (v, zero) => opt((zero ? [[0, zero]] : []).concat([[1, "1★"], [2, "2★"], [3, "3★"]]), v);
+      const whites = CP.want(r.x).white.map((w) => w.id), have = new Set((g && g.white || []).map((w) => String(w[0])));
+      const body = g ? `<div class="row-wrap">
+          <label class="field"><span>Blue</span><select data-cmp-gp-field="blue0" ${attr}>${opt(F.STAT_LABELS.map((l, i) => [i, l]), g.blue[0])}</select></label>
+          <label class="field"><span>Stars</span><select data-cmp-gp-field="blue1" ${attr}>${stars(g.blue[1], "none")}</select></label>
+          <label class="field"><span>Pink</span><select data-cmp-gp-field="pink0" ${attr}>${opt(F.APT_LABELS.map((l, i) => [i, l]), g.pink[0])}</select></label>
+          <label class="field"><span>Stars</span><select data-cmp-gp-field="pink1" ${attr}>${stars(g.pink[1], "none")}</select></label>
+          <label class="field"><span>Green (her unique)</span><select data-cmp-gp-field="green" ${attr}>${stars(g.green, "none")}</select></label></div>
+        <div class="row-wrap"><label class="field grow"><span>Her whites that matter here</span><select data-cmp-gp-white ${attr}><option value="">Add a white…</option>${whites.filter((id) => !have.has(String(id))).map((id) => `<option value="${id}">${esc(ctx.skillName(id))}</option>`).join("")}</select></label>
+          <label class="field"><span>Stars</span><select data-cmp-gp-white-stars ${attr}>${stars(g.whiteStars || 1)}</select></label></div>
+        ${(g.white || []).length ? `<div class="row-wrap">${g.white.map((w) => `<span class="chip">${esc(ctx.skillName(w[0]))} ${w[1]}★ <button type="button" class="linkish" data-cmp-gp-white-del="${w[0]}" ${attr} aria-label="Remove">✕</button></span>`).join("")}</div>` : ""}
+        <details data-cmp-open="gp-wins"><summary class="mini">G1s she won (${(g.wins || []).length}): her shared ones go first in ${esc(f.t.n)}'s races</summary><div class="row-wrap">${g1Names().map((n) => `<label class="chip-toggle small"><input type="checkbox" data-cmp-gp-win="${esc(n)}" ${attr}${(g.wins || []).includes(n) ? " checked" : ""}>${esc(n)}</label>`).join("")}</div></details>
+        <div class="row-wrap"><button type="button" class="btn small" data-cmp-gp-use ${attr}>${using ? "Plan again with her" : "Plan with her"}</button><button type="button" class="linkish" data-cmp-gp-clear ${attr}>Remove her</button>${using ? '<span class="mini ok">✓ In the plan</span>' : '<span class="mini">Not in the plan yet.</span>'}</div>` : "";
+      return `<div class="cmp-gp"><h4>The grandparent you borrowed</h4>
+        <label class="field"><span>Her uma (from the uma.moe card)</span><select data-cmp-gp-field="tid" ${attr}><option value="">Pick her…</option>${list.map((t) => `<option value="${t.id}"${g && +g.tid === +t.id ? " selected" : ""}>${esc(t.n + " [" + t.t + "]")}</option>`).join("")}</select></label>
+        ${body}${g ? '<p class="mini">Only her own sparks: her parents never reach the ace. Whites not listed here don\'t count for this race.</p>' : ""}</div>`;
     }
 
     // A search link, exactly what it sets in plain words, and its settings.
@@ -558,6 +600,13 @@
       if ((el = t.closest("[data-cmp-edit]"))) { editAce = editAce === +el.dataset.cmpEdit ? null : +el.dataset.cmpEdit; ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-ace-remove]"))) { aces(c).splice(+el.dataset.cmpAceRemove, 1); editAce = null; ctx.save(); ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-sel]"))) { c.sel[c.cup] = +el.dataset.cmpSel; ctx.save(); ctx.rerender(); return true; }
+      const gpEl = t.closest("[data-cmp-gp]");
+      if (gpEl && a && (t.closest("[data-cmp-gp-use]") || t.closest("[data-cmp-gp-clear]") || t.closest("[data-cmp-gp-white-del]"))) {
+        const prefs = freshOf(deckOf(c, a)), tid = gpEl.dataset.cmpGp, pick = prefs.picks[tid] = prefs.picks[tid] || {};
+        if (t.closest("[data-cmp-gp-white-del]") && pick.gp) { const id = t.closest("[data-cmp-gp-white-del]").dataset.cmpGpWhiteDel; pick.gp.white = pick.gp.white.filter((w) => String(w[0]) !== id); ctx.save(); ctx.rerender(); return true; }
+        if (t.closest("[data-cmp-gp-clear]")) delete pick.gp;
+        prefs.tid = +tid; ctx.save(); findParents(); return true;
+      }
       const req = t.closest("[data-cmp-require]");
       if (req && a) {
         const prefs = req.dataset.cmpRentalScope === "training" ? freshOf(deckOf(c, a)).rental : deckOf(c, a).rental;
@@ -593,6 +642,20 @@
         return true;
       }
       if (a && ds.cmpSetup != null) { freshOf(deckOf(c, a)).setup = t.value; ctx.save(); findParents(); return true; }
+      if (a && ds.cmpGp != null && (ds.cmpGpField != null || ds.cmpGpWhite != null || ds.cmpGpWhiteStars != null || ds.cmpGpWin != null)) {
+        const prefs = freshOf(deckOf(c, a)), pick = prefs.picks[ds.cmpGp] = prefs.picks[ds.cmpGp] || {};
+        if (ds.cmpGpField === "tid") { if (!t.value) delete pick.gp; else pick.gp = Object.assign({ blue: [0, 0], pink: [0, 0], green: 0, white: [], wins: [] }, pick.gp || {}, { tid: +t.value }); }
+        else if (pick.gp) {
+          const gp = pick.gp, v = +t.value;
+          if (ds.cmpGpField === "blue0") gp.blue[0] = v; else if (ds.cmpGpField === "blue1") gp.blue[1] = v;
+          else if (ds.cmpGpField === "pink0") gp.pink[0] = v; else if (ds.cmpGpField === "pink1") gp.pink[1] = v;
+          else if (ds.cmpGpField === "green") gp.green = v;
+          else if (ds.cmpGpWhiteStars != null) gp.whiteStars = v;
+          else if (ds.cmpGpWhite != null && t.value) gp.white = gp.white.filter((w) => String(w[0]) !== t.value).concat([[+t.value, gp.whiteStars || 1]]);
+          else if (ds.cmpGpWin != null) gp.wins = t.checked ? [...new Set(gp.wins.concat(ds.cmpGpWin))] : gp.wins.filter((n) => n !== ds.cmpGpWin);
+        }
+        ctx.save(); ctx.rerender(); return true;
+      }
       if (a && ds.cmpTrainingVet != null) {
         const prefs = freshOf(deckOf(c, a)), tid = ds.cmpTrainingVet;
         prefs.tid = +tid; prefs.picks[tid] = prefs.picks[tid] || {};
