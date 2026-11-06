@@ -284,6 +284,15 @@
       });
       return out.sort((a, b) => b.value - a.value);
     }
+    // The new parent you planned (plan: { tid, vet: her veteran's character, at: when planned }),
+    // once you've trained her and imported her: a veteran of that version made after the plan,
+    // or one with that veteran as a parent. The newest such one, or null.
+    function trainedParent(plan, vets) {
+      if (!plan || !plan.tid) return null;
+      const t0 = Date.parse(plan.at || "") || 0, when = (v) => Date.parse(String(v.at || "").replace(" ", "T")) || 0;
+      return (vets || []).filter((v) => +v.tid === +plan.tid && ((t0 && when(v) >= t0) || (v.parents || []).some((m) => m && plan.vet != null && +m.cid === +plan.vet)))
+        .sort((a, b) => when(b) - when(a))[0] || null;
+    }
     // Is your best veteran good enough? A fresh one is worth training when she'd beat it by MARGIN.
     const freshWins = (vet, fresh) => !!fresh && (!vet || fresh.value > vet.value * (1 + MARGIN));
 
@@ -417,7 +426,11 @@
       const mode = opts.pink == null || opts.pink === "auto" ? "auto" : opts.pink === "none" ? "none" : String(opts.pink);
       const focus = mode === "auto" ? auto : mode === "none" ? null : choices.find((p) => String(p.i) === mode);
       const pink = focus ? Object.assign({}, focus, { min: 3, main: false }) : null;
-      const blueIndex = opts.blue != null && opts.blue !== "auto" && BLUE_IDS[+opts.blue] ? +opts.blue : (needs.blue[0] || { i: 0 }).i;
+      // The gap her known family (Parent 1 and her parents, with their real sparks) leaves: the
+      // rental's blue goes to the biggest one still open.
+      const given = p1.s && p1.s.blueStats, remaining = x.gaps ? x.gaps.map((g, i) => Math.max(0, Math.round(g - ((given && given[i]) || 0)))) : null;
+      const left = remaining && remaining.some((v) => v > 0) ? remaining.indexOf(Math.max(...remaining)) : null;
+      const blueIndex = opts.blue != null && opts.blue !== "auto" && BLUE_IDS[+opts.blue] ? +opts.blue : left != null ? left : (needs.blue[0] || { i: 0 }).i;
       const blue = [{ i: blueIndex, label: F.STAT_LABELS[blueIndex] }];
       const whites = (opts.whites || missingWhites(x, p1.s)).slice(0, 12).map((w, i) => Object.assign({}, w, { priority: i < 3 ? 0 : i < 7 ? 1 : 2 }));
       // At most two explicitly checked families; keep them visible after a deck change.
@@ -428,7 +441,7 @@
         .filter((g) => g.owners.length).slice(0, 3);
       const saddles = [...new Set(opts.saddles || saddlesOf(p1))], broad = opts.quality === "broad", sort = opts.sort === "whites" ? "whites" : "affinity";
       const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: blueIndex, pink, whites, required, sort, quality: broad ? "broad" : "recommended" };
-      return Object.assign(umaMoe(q), { q, blue, pink, auto, mode, choices, whites, required, green, wins: saddles.length, broad, sort,
+      return Object.assign(umaMoe(q), { q, blue, pink, auto, mode, remaining, given: given || null, choices, whites, required, green, wins: saddles.length, broad, sort,
         focused: green.map((g) => ({ skill: g, search: Object.assign(umaMoe(Object.assign({}, q, { green: g.owners.map((t) => t.id) })), { q: Object.assign({}, q, { green: g.owners.map((t) => t.id) }) }) })) });
     }
     // All fields set by umaMoe, including a unique-focus link's extra requirement.
@@ -512,7 +525,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, outlook, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { context, outlook, trainedParent, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };

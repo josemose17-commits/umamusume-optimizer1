@@ -364,3 +364,29 @@ test("the new parent's veteran: ranked best first, never the ace's own character
   const picked = plan.rankFresh(x, [own, a, b], [t.id], {}, { picks: { [t.id]: { veteran: String(b.id) } } })[0];
   assert.equal(picked.parents[0].id, b.id, "your pick wins"); assert.equal(picked.vetOptions.length, fresh.vetOptions.length, "and the list stays whole");
 });
+
+test("the parent you planned, once imported, is found by version and date or by her veteran parent", () => {
+  const t = uniq[2], plan0 = { tid: t.id, vet: uniq[3].cid, at: "2026-11-06T12:00:00Z" };
+  const older = Object.assign(vet(t, []), { at: "2026-10-01 10:00:00" });
+  assert.equal(plan.trainedParent(plan0, [older]), null, "a veteran of her from before the plan isn't the new one");
+  const made = Object.assign(vet(t, [], { parents: [uniq[3], uniq[8]] }), { at: "2026-11-07 09:30:00" });
+  const later = Object.assign(vet(t, []), { at: "2026-11-08 09:30:00" });
+  assert.equal(plan.trainedParent(plan0, [older, made]), made);
+  assert.equal(plan.trainedParent(plan0, [older, made, later]), later, "the newest one made after the plan");
+  assert.equal(plan.trainedParent({ tid: t.id, vet: uniq[3].cid }, [older, made]), made, "no date: her veteran parent identifies her");
+  assert.equal(plan.trainedParent(null, [made]), null);
+  assert.equal(plan.trainedParent(plan0, [vet(uniq[4], [])]), null, "another uma never counts");
+});
+
+test("Parent 2's blue goes to the gap her known family leaves open", () => {
+  const gaps = [0, 45, 0, 40, 0];
+  const x = plan.context({ ace: { cid: ace.cid, tid: ace.id }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build], gaps });
+  const covers = plan.rankVets(x, [vet(uniq[0], [], { blue: [1, 3], parents: [uniq[5], uniq[6]] })])[0];
+  assert.ok(covers.s.blueStats[1] >= 45, "her Stamina 3★ covers the Stamina gap");
+  const q = plan.rentalSearch(x, covers);
+  assert.equal(q.blue[0].i, 3, "so the rental's blue goes to Guts");
+  assert.deepEqual(q.remaining, [0, 0, 0, 40, 0]);
+  assert.deepEqual(decode(q).mb, [[CP.BLUE_IDS[3], 3, 3]]);
+  const none = plan.rankVets(x, [vet(uniq[0], [], { blue: [0, 3] })])[0];
+  assert.equal(plan.rentalSearch(x, none).blue[0].i, 1, "a family with no blue there leaves the biggest gap first");
+});

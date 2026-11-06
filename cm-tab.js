@@ -165,8 +165,11 @@
       const x = CP.context({ ace: { cid: t.cid, tid: t.id }, race: { preset: p, style }, rel, offers: v.offers, build: ctx.build(p), gaps: gapsOf(d) });
       await stage(`${who}: your veterans as Parent 1…`, 0.2);
       const vets = CP.rankVets(x, vetsAll);
+      // The new parent you planned, trained and imported: she's Parent 1 now, with her real sparks.
+      const made = prefs.setup === "B" ? CP.trainedParent(prefs.plan, vetsAll) : null;
+      const trained = made && prefs.useTrained !== false ? CP.rankVets(x, [made])[0] || null : null;
       let fresh = [];
-      if (prefs.setup === "B") {
+      if (prefs.setup === "B" && !trained) {
         await stage(`${who}: the best new Parent 1 from My umas…`, 0.4);
         const pdeck = ctx.deck(p, style, null, PLAN_RACES);
         fresh = CP.rankFresh(x, vetsAll, umas, pdeck.offers, { parentMode: "rental", picks: prefs.picks, rentals: [] });
@@ -181,7 +184,8 @@
         else if (selected.vet != null) chosenVet = vets.find((z) => z.v.id === selected.vet) || chosenVet;
         else if (selected.manual || selected.green || selected.blue[1] || selected.pink[1] || selected.white.length) chosenVet = CP.rankVets(x, [{ id: "manual", cid: selected.cid, tid: selected.tid, self: selected, parents: [family.g11, family.g12] }])[0] || chosenVet;
       }
-      const useFresh = prefs.setup === "B" && !!chosenFresh;
+      if (trained) chosenVet = trained;
+      const useFresh = prefs.setup === "B" && !trained && !!chosenFresh;
       if (useFresh && chosenFresh.vetOptions) chosenFresh.vetOptions.forEach((y) => { y.aff = CP.outlook(x, y.f, vetsAll); });
       let train = null;
       if (useFresh) {
@@ -201,7 +205,12 @@
       const p1 = useFresh ? chosenFresh : chosenVet;
       if (p1 && !p1.aff) p1.aff = CP.outlook(x, p1.f, vetsAll);
       if (p1 && !(p1.kind === "vet" && p1.v.id === "manual")) ctx.planFamily(p1, train, selected && selected.cid && !selected.planned);
-      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), fresh: fresh.slice(0, 6), useFresh, train, p1 };
+      // Remember the parent you'll train (and when), so a later import finds her.
+      if (useFresh) {
+        const plan = prefs.plan, vet = train.f.parents[0].cid;
+        prefs.plan = { tid: train.f.t.id, vet, at: plan && +plan.tid === +train.f.t.id && +plan.vet === +vet && plan.at ? plan.at : new Date().toISOString() };
+      }
+      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), fresh: fresh.slice(0, 6), useFresh, train, p1, trained: !!trained, made };
     }
 
     // The most extra races (her plan's order) that keep her at SS. Your veterans in the scenario
@@ -346,18 +355,29 @@
       const pick = r.p1;
       if (!pick) return setup + `<p class="mini">${r.setup === "B" ? "No uma in My umas fits. Tick more in the Trainees tab." : "Import your veterans below."}</p>`;
       let out;
+      const made = prefs.setup === "B" && !r.trained ? CP.trainedParent(prefs.plan, ctx.veterans().list) : null;
+      if (r.trained) {
+        const v = pick.v, ps = (v.parents || []).filter(Boolean).map((m) => esc(ctx.charName(m.cid)));
+        out = `<p class="ok"><b>✓ Parent 1 is trained:</b> your veteran <b>${esc(vetName(v))}</b>${v.at ? ` (imported, made ${esc(String(v.at).slice(0, 10))})` : ""}${ps.length ? `, her parents ${ps.join(" + ")}` : ""}.</p>
+          <p>${sparks(v.self)}${v.score ? ` · rating ${fmtN(v.score)}` : ""} · for the ace: score <b>${fmt(pick.s.value)}</b> · affinity <b>${affText(pick)}</b>. The Parent 2 search below now uses her real sparks and G1s.</p>
+          <button type="button" class="linkish" data-cmp-trained="no">Plan a new parent instead</button>`;
+        return setup + out;
+      }
+      if (made && prefs.useTrained === false) out = `<p class="mini">You trained ${esc(vetName(made))}. <button type="button" class="linkish" data-cmp-trained="yes">Use her as Parent 1</button></p>`;
+      else if (made) out = `<p class="mini warn">Your trained ${esc(vetName(made))} is imported: press Find again to use her.</p>`;
+      else out = "";
       if (r.useFresh) {
         // Your veterans for her, best first (never her character or the ace's); the ones the
         // ranking skipped (a weaker one of the same character) follow by name.
         const chosen = prefs.picks[pick.t.id] || {}, ranked = pick.vetOptions || [], seen = new Set(ranked.map((o) => o.v.id));
         const rest = ctx.veterans().list.filter((x) => !seen.has(x.id) && +x.cid !== +pick.t.cid && +x.cid !== +r.t.cid).sort((a, b) => vetName(a).localeCompare(vetName(b)));
         const top = ranked[0];
-        out = `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and a borrowed grandparent · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
+        out += `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and a borrowed grandparent · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
           <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her${top ? " (" + esc(vetName(top.v)) + ")" : ""}</option>${ranked.map((o, i) => `<option value="${o.v.id}"${String(chosen.veteran) === String(o.v.id) ? " selected" : ""}>${i + 1}. ${esc(vetName(o.v))} · score ${fmt(o.value)}${o.aff ? " · ~" + o.aff.total + " " + o.aff.symbol : ""} · ${sparks(o.v.self)}</option>`).join("")}${rest.length ? `<optgroup label="Not ranked (a stronger one of the same character is above)">${rest.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</optgroup>` : ""}</select></label>
           <p class="mini">Ranked by what the pair gives the ace and the new parent's own career, best first. The ace's own character isn't offered: as the ace's grandparent she'd have 0 affinity with her.</p>
           ${searchHTML("Grandparent search", grandparentSearch(r, prefs.rental), "training", prefs.rental, `the grandparent you borrow for ${tName(pick.t)}`)}`;
       } else {
-        out = `<p><b>${pick.v.id === "manual" ? "Your parent" : "Your veteran"} ${esc(vetName(pick.v))}</b>${pick.v.score ? ` · rating ${fmtN(pick.v.score)}` : ""} · ${sparks(pick.v.self)} · score <b>${fmt(pick.s.value)}</b> · affinity <b>${affText(pick)}</b>.</p>`;
+        out += `<p><b>${pick.v.id === "manual" ? "Your parent" : "Your veteran"} ${esc(vetName(pick.v))}</b>${pick.v.score ? ` · rating ${fmtN(pick.v.score)}` : ""} · ${sparks(pick.v.self)} · score <b>${fmt(pick.s.value)}</b> · affinity <b>${affText(pick)}</b>.</p>`;
       }
       const other = (r.useFresh ? r.fresh : r.vets).filter((x) => x !== pick);
       if (other.length) out += `<details data-cmp-open="p1-other"><summary class="mini">Other choices (${other.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th class="num">For the ace</th><th class="num">Affinity</th><th></th></tr></thead><tbody>${other.map((x) => {
@@ -399,6 +419,7 @@
     // ③ SS, as many G1s as SS allows (her veteran's first), her Ace-parent deck and skills, then ① to ④.
     function trainHTML(c, a, d, r) {
       if (!r) return `<p class="mini">Find Parent 1 first.</p>`;
+      if (r.trained) return `<p class="ok">✓ Done: ${esc(vetName(r.p1.v))} is trained and imported.</p>`;
       if (!r.useFresh) return `<p class="mini">Your veteran is Parent 1: nothing to train. ${r.setup === "A" ? "Switch step 2 to a new parent to train one." : ""}</p>`;
       const tr = r.train, ss = tr.ss, f = tr.f;
       const keep = tr.agenda.filter((x) => !x.free);
@@ -433,8 +454,10 @@
     // ④ The Parent 2 search for the ace.
     function p2HTML(c, a, d, r) {
       if (!r || !r.p1) return `<p class="mini">Find Parent 1 first.</p>`;
-      const p1 = r.useFresh ? r.train.f.t : trainee(r.p1.v.tid);
-      return searchHTML("Parent 2 search", parent2Search(r, d.rental), "ace", d.rental, tName(trainee(a.tid)) + ", with " + (p1 ? tName(p1) : "Parent 1") + " as Parent 1");
+      const p1 = r.useFresh ? r.train.f.t : trainee(r.p1.v.tid), l = parent2Search(r, d.rental);
+      const given = l.given ? l.given.map((v, i) => v >= 1 && r.gaps && r.gaps[i] ? `${F.STAT_LABELS[i]} ~+${fmtN(v)}` : "").filter(Boolean) : [];
+      const note = r.gaps && given.length ? `<p class="mini">${r.trained ? "Her real family" : "Her family so far"} covers ${given.join(", ")} of the gaps; ${l.remaining && l.remaining.some((v) => v > 0) ? `Parent 2's blue goes to <b>${F.STAT_LABELS[l.blue[0].i]}</b> (~${fmtN(l.remaining[l.blue[0].i])} still short)` : "no gap is left, so blue goes to her key stat"}.</p>` : "";
+      return note + searchHTML("Parent 2 search", l, "ace", d.rental, tName(trainee(a.tid)) + ", with " + (p1 ? tName(p1) : "Parent 1") + " as Parent 1");
     }
 
     // ⑤ The ace's family affinity: the minimum, or what's missing.
@@ -471,6 +494,14 @@
       </ul></details>`;
     }
 
+    // After an import: if the parent you planned is in it, plan again with her as Parent 1.
+    function afterImport() {
+      const c = st(), a = current(c), d = a && deckOf(c, a), prefs = d && freshOf(d);
+      const r = a && found.get(keyOf(c, a));
+      if (prefs && prefs.setup === "B" && prefs.useTrained !== false && d.cards && d.cards.length && !(r && r.trained) && CP.trainedParent(prefs.plan, ctx.veterans().list)) { ctx.gotoParents("p1"); findParents(); }
+      else ctx.rerender();
+    }
+
     // ---------- events ----------
     function jump(key) {
       if (["who", "races", "parent-deck", "rating"].includes(key)) { ctx.gotoParents(key === "parent-deck" ? "deck" : key); return; }
@@ -481,6 +512,8 @@
       const jumpTo = t.closest("[data-cmp-jump]");
       if (jumpTo) { jump(jumpTo.dataset.cmpJump); return true; }
       if (t.closest("#cmpParents")) { findParents(); return true; }
+      const tr = t.closest("[data-cmp-trained]");
+      if (tr && a) { freshOf(deckOf(c, a)).useTrained = tr.dataset.cmpTrained === "yes"; ctx.save(); findParents(); return true; }
       const choose = t.closest("[data-cmp-p1]");
       if (choose && a) {
         const r = found.get(keyOf(c, a)), [kind, id] = choose.dataset.cmpP1.split("|");
@@ -491,7 +524,7 @@
         const ta = document.getElementById("cmpVetsText");
         if (!ta || !ta.value.trim()) { ctx.flash("Paste the JSON first."); return true; }
         ctx.importVeterans(ta.value);
-        ctx.rerender();
+        afterImport();
         return true;
       }
       if (t.closest("#cmpTeam")) { c.byCup[c.cup] = ctx.pullTeam(cup(c)).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES); editAce = null; ctx.save(); ctx.rerender(); return true; }
@@ -516,7 +549,7 @@
       if (t.id === "cmpCup") { c.cup = t.value; editAce = null; ctx.save(); ctx.rerender(); return true; }
       if (t.id === "cmpVetsFile") {
         const file = t.files && t.files[0];
-        if (file) { const fr = new root.FileReader(); fr.onload = () => { ctx.importVeterans(String(fr.result)); ctx.rerender(); }; fr.readAsText(file); }
+        if (file) { const fr = new root.FileReader(); fr.onload = () => { ctx.importVeterans(String(fr.result)); afterImport(); }; fr.readAsText(file); }
         return true;
       }
       if (ds.cmpAce != null) {
