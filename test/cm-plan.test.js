@@ -396,3 +396,19 @@ test("Parent 2's blue goes to the gap her known family leaves open", () => {
   const none = plan.rankVets(x, [vet(uniq[0], [], { blue: [0, 3] })])[0];
   assert.equal(plan.rentalSearch(x, none).blue[0].i, 1, "a family with no blue there leaves the biggest gap first");
 });
+
+test("Independent Training's prioritized skills: offered race whites by value × chance, gold when offered, then random-event gambles, 10 at most", () => {
+  const x = x0();
+  const w = plan.want(x).white;
+  const offers = {}; offers[w[0].id] = 0.3; offers[w[1].id] = 0.9; offers[w[2].id] = 0.9;
+  const gold = Object.keys(SB.DATA.skills).find(id => SB.DATA.skills[id][2] && SB.DATA.skills[id][0] === SB.DATA.skills[w[2].id][0]);
+  if (gold) offers[gold] = 0.5;
+  const list = plan.itSkills(x, offers, 10);
+  assert.equal(list.length, Math.min(10, list.length)); assert.ok(list.length <= 10);
+  const offered = list.filter(k => !k.gamble);
+  assert.equal(offered.length, 3, "only the whites her deck offers count as offered");
+  assert.deepEqual(offered.map(k => k.score), offered.map(k => k.score).slice().sort((a, b) => b - a), "most valuable × likely first");
+  assert.ok(list.findIndex(k => k.gamble) === -1 || list.findIndex(k => k.gamble) >= offered.length, "gambles only after every offered one");
+  if (gold) { const g = list.find(k => SB.DATA.skills[k.id][0] === SB.DATA.skills[w[2].id][0]); assert.equal(g.id, gold); assert.ok(g.gold); }
+  assert.equal(plan.itSkills(x, offers, 2).length, 2);
+});

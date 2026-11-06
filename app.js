@@ -2962,11 +2962,13 @@
       // The race's skills for her style, most valuable first ({ id, L }), for must-haves.
       raceSkills: (p, style) => { const m = skillMap(p.id, style).map; return Object.keys(m).filter((id) => m[id] > 0 && D.DATA.skills[id] && released(id, p)).map((id) => ({ id, L: m[id] })).sort((a, b) => b.L - a.L); },
       // A parent's run with this deck and n extra races, as ② predicts it (16 careers).
-      simulate: (p, tid, cards, n, blueStart = []) => {
+      // focus: Independent Training's Training Focus ("balanced", "stamina", "sprint"), or none.
+      simulate: (p, tid, cards, n, blueStart = [], focus = null) => {
         const c = state.pcm || {};
         const sim = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, n / 60), runs: 16,
           helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false });
         sim.start = sim.start.map((v, i) => v + (blueStart[i] || 0));
+        if (focus) OPT.applyFocus(sim, focus);
         const est = OPT.simulate(sim, cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         return { stats: est.stats, sp: est.sp, finals: est.finals };
       },

@@ -93,6 +93,21 @@
     };
   }
 
+  // Independent Training's Training Focus, as uma.guide describes it: Balanced gives every stat
+  // the same priority; Stamina and Sprint give "slightly more priority" to Stamina and to Power.
+  // The game doesn't say how much: FOCUS_LEAN is an estimate. Balanced uses one weight and one
+  // target (the build's averages) for all five stats.
+  const FOCUS_LEAN = 1.25;
+  function applyFocus(ctx, focus) {
+    const avg = (o) => STATS.reduce((n, s) => n + o[s], 0) / STATS.length;
+    const w = avg(ctx.w), t = Math.round(avg(ctx.target));
+    ctx.w = {}; ctx.target = Object.assign({}, ctx.target);
+    STATS.forEach((s) => { ctx.w[s] = w; ctx.target[s] = t; });
+    const lean = focus === "stamina" ? "stamina" : focus === "sprint" ? "power" : null;
+    if (lean) ctx.w[lean] = w * FOCUS_LEAN;
+    return ctx;
+  }
+
   // Marginal value of one point of a stat at x: the turn coach's pointValue, plus a "need"
   // factor so a stat far below its target (stamina for a long race, say) counts for more.
   const NEED = 1.5;
@@ -1039,7 +1054,7 @@
     };
   }
 
-  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, targetFit, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
