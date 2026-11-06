@@ -2240,7 +2240,7 @@
     svCache[id] = "loading";
     fetch("data/skillvalues/" + id + ".json?v=" + ASSET_V)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { svCache[id] = j; if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); })
+      .then((j) => { svCache[id] = j; if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); if (state.tab === "cmplan") renderTab(); })
       .catch(() => { svCache[id] = "error"; if (state.tab === "cm" || state.tab === "parents") renderCM(); });
   }
 
@@ -2300,7 +2300,7 @@
       euLoading = true;
       const sc = document.createElement("script");
       sc.src = "data/euophrys-cards.js?v=" + ASSET_V;
-      sc.onload = () => { if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); };
+      sc.onload = () => { if (state.tab === "cm" || state.tab === "parents") renderCM(); if (state.tab === "tiers") renderTiers(); if (state.tab === "cmplan") renderTab(); };
       sc.onerror = () => { euLoading = false; flash("Couldn't load the tier list data. Check your connection."); };
       document.head.appendChild(sc);
     }
@@ -2814,22 +2814,33 @@
   }
 
   // The CM planner's decks, built the quick way CM & decks starts (Euophrys' scoring plus the
-  // race's skill values, no simulated search), with CM & decks' makeup, friend card and skill
-  // weight: her racing deck (races null), or an Ace parent's deck for this race in Independent
-  // Training with that many G1s (the Parents tab's ③ settings). tid: her version (null: none).
-  function planDeck(p, style, tid, races) {
+  // race's skill values, no simulated search): her racing deck (races null), or an Ace parent's
+  // deck for this race in Independent Training with that many G1s (the Parents tab's ③
+  // settings). tid: her version (null: none). s: the planner's own settings for her racing deck
+  // ({ comp, borrow, skillW, must, exclude: card ids left out, locked: your cards kept,
+  // friend: the friend's card kept }), else CM & decks'. planSetup gives what the builder works
+  // with ({ opts, pool, bp, link }), planDeck the deck.
+  function planSetup(p, style, tid, races, s) {
     const parent = races != null;
     const base = Object.assign({ statsW: "0.1", comp: {}, ownedOnly: true, borrow: true, skillW: "1", itManual: "0.5", eventSuccessRate: "0.5", globalSkills: true }, parent ? state.pcm || {} : state.cm || {});
     const c = Object.assign({}, base, { goal: parent ? "ace" : "race", preset: p.id, style, independent: parent, itRaces: parent ? races : null, locked: [], must: [], reachSS: false, comp: Object.assign({}, base.comp || {}) });
-    const pool = optPool(c);
-    let bp = c.borrow ? borrowPool() : [];
-    const locked = [], link = itLink(c, pool, bp);
-    if (link && link.lock) locked.push(link.lock);
+    if (s) Object.assign(c, { comp: Object.assign({}, s.comp || {}), borrow: s.borrow !== false, skillW: s.skillW != null ? s.skillW : c.skillW, must: (s.must || []).slice() });
+    const out = new Set((s && s.exclude) || []);
+    const pool = optPool(c).filter((x) => !out.has(x.id));
+    let bp = c.borrow ? borrowPool().filter((x) => !out.has(x.id)) : [];
+    const locked = ((s && s.locked) || []).filter((id) => pool.some((x) => x.id === id));
+    const link = itLink(c, pool, bp);
+    if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
     if (link && link.borrow) bp = [link.borrow];
+    if (s && s.friend && c.borrow) bp = [{ id: s.friend, lb: 4 }];
     const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: c.comp, trainee: tid || null });
     if (opts.parent) delete opts.parent.reachSS;
-    const r = T.buildDeck(opts, pool, bp);
-    return { cards: r.cards, skills: r.skills, offers: T.deckOffers(opts, r.cards), link };
+    return { opts, pool, bp, link };
+  }
+  function planDeck(p, style, tid, races, s) {
+    const x = planSetup(p, style, tid, races, s);
+    const r = T.buildDeck(x.opts, x.pool, x.bp);
+    return { cards: r.cards, skills: r.skills, offers: T.deckOffers(x.opts, r.cards), link: x.link };
   }
 
   // The CM/LoH planner tab (cm-tab.js): the cup and your aces, then for each her deck, Parent 1
@@ -2858,7 +2869,31 @@
       ensureSkills: (ids) => ensureSkills(ids),
       aceSkills: (race) => aceSkillsFor(race),
       build: (p) => E.BUILDS[p.build] || null,
-      deck: (p, style, tid, races) => planDeck(p, style, tid, races),
+      deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
+      deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
+      // A new ace's deck settings start from CM & decks'.
+      deckDefaults: () => { const c = state.cm || {}; return { comp: Object.assign({}, c.comp || {}), borrow: c.borrow !== false, skillW: c.skillW != null ? String(c.skillW) : "1" }; },
+      skillWeights: SKILL_W, compTypes: COMP_TYPES,
+      // The race's skills for her style, most valuable first ({ id, L }), for must-haves.
+      raceSkills: (p, style) => { const m = skillMap(p.id, style).map; return Object.keys(m).filter((id) => m[id] > 0 && D.DATA.skills[id] && released(id, p)).map((id) => ({ id, L: m[id] })).sort((a, b) => b.L - a.L); },
+      // Her racing deck's predicted run (CM & decks' readout: 16 simulated careers).
+      simulateRace: (p, style, tid, cards, must) => {
+        const c = state.cm || {}, sv = skillMap(p.id, style);
+        const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), runs: 16, skills: sv.map, costs: sv.costs,
+          helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), must: must || [], independent: false, skillBudget: true }), cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
+        return { stats: est.stats, sp: est.sp, scenario: scenario().name };
+      },
+      // This deck into CM & decks: its cup, style and ace, the planner's settings, and its cards
+      // locked in, so its search starts from them.
+      useInCM: (o) => {
+        const c = state.cm || (state.cm = {});
+        Object.assign(c, { preset: o.cup, style: o.style, goal: "race", comp: Object.assign({}, o.comp || {}), borrow: o.borrow !== false, skillW: o.skillW, must: (o.must || []).slice(), locked: o.cards.filter((x) => !x.borrowed).map((x) => x.id) });
+        state.tab = "cm";
+        save();
+        setTrainee(o.tid);
+        renderTab();
+        flash("In CM & decks with your planner deck's cards locked in: press Find my best deck there to simulate it or set target stats.");
+      },
       // A parent's run with this deck and n extra races, as ② predicts it (16 careers).
       simulate: (p, tid, cards, n) => {
         const c = state.pcm || {};
