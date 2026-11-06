@@ -429,10 +429,9 @@
         return `<tr${on ? "" : ' class="cmp-cut"'}><td>${x.turn}<div class="mini">${esc(ctx.turnText(x.turn))}</div></td><td>${esc(x.name)}</td><td class="mini">${why}${on ? "" : " · skip: keeps SS"}</td></tr>`;
       }).join("");
       const sims = ss.rows.map(x => `<tr><td>${x.n}</td>${x.stats.map(v => `<td>${v}</td>`).join("")}<td>${x.sp}</td><td>${fmtN(x.rating)}</td><td>${x.hit}/${x.of}</td></tr>`).join("");
-      const skills = f.extra && f.extra.whites ? f.extra.whites.list.slice(0, 8).map((w) => esc(ctx.skillName(w.id))).join(", ") : "";
-      return `<p><b>${esc(tName(f.t))} at SS</b> with <b>${plural(keep.length, "extra G1")}</b>: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). ${ssText(ss)}</p>
+      return `${aimHTML(r)}<p><b>${esc(tName(f.t))} at SS</b> with <b>${plural(keep.length, "extra G1")}</b>: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). ${ssText(ss)}</p>
         <p class="mini"><b>Her Ace-parent deck:</b> ${tr.deck.cards.map((x) => esc(cardName(x.id)) + (x.borrowed ? " (borrow)" : "")).join(", ")}.</p>
-        ${skills ? `<p class="mini"><b>Skills to learn</b> (they can become white sparks; copies in her lineage help): ${skills}.</p>` : ""}
+
         ${stepsHTML(r)}
         <details data-cmp-open="races"><summary class="mini">Her race plan and the SS check</summary>
           <div class="table-wrap"><table class="plan cmp-races"><thead><tr><th>Turn</th><th>Race</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -440,6 +439,30 @@
           <p class="mini">16 careers each, with known blue start bonuses · about ${fmtN(ss.perRace)} rating per extra race.</p></details>
         ${sentThere(r) ? ctx.trainingHTML() : ""}`;
     }
+    // The sparks to aim for on the parent you train. Blue's stat and pink's aptitude are picked at
+    // random (blue: any stat; pink: one of her A/S aptitudes, equal chances), so only whites,
+    // her unique and the stars can be steered (uma.guide, Prydwen, GameTora).
+    function aimHTML(r) {
+      const f = r.train.f, t = f.t, ss = r.train.ss, row = ss.rows.find((y) => y.n === ss.n) || ss.rows[0];
+      const apt = t.apt || [], good = (g) => g === "A" || g === "S";
+      const tops = F.APT_LABELS.filter((_, i) => good(apt[i]));
+      const need = CP.want(r.x).pink.find((p) => p.target === "S") || CP.want(r.x).pink[0];
+      let pink;
+      if (!need) pink = "the ace needs none for this race.";
+      else if (good(apt[need.i])) pink = `<b>${need.label}</b> for the ace (to ${need.target}). Hers lands on one of her A/S aptitudes at random (${tops.join(", ")}): about 1 in ${tops.length} for ${need.label}. Inherited pinks that lift another aptitude to A lower that.`;
+      else pink = `<b>${need.label}</b> for the ace, but she has ${need.label} ${apt[need.i] || "?"}: her pink can only land there if her parents' pinks lift it to A (it picks among her A/S aptitudes).`;
+      const pct = (v) => (v > 1100 ? 10 : v >= 600 ? 5 : 0);
+      const stats = row ? F.STAT_LABELS.map((l, i) => `${l} ${row.stats[i]} (${pct(row.stats[i])}%)`).join(", ") : "";
+      const uid = CP.inherited(t), uL = uid && r.x.raceL ? r.x.raceL[uid] || 0 : 0;
+      const whites = f.extra && f.extra.whites ? f.extra.whites.list.slice(0, 8).map((w) => esc(ctx.skillName(w.id))).join(", ") : "";
+      return `<div class="cmp-aim"><h4>Sparks to aim for on ${esc(tName(t))}</h4><ul class="mini">
+        <li><b>Whites</b> (the ones you control): learn ${whites || "the race's skills"}. A learned skill becomes a spark about 20% of the time, 40% if you learn its gold version; at SS they come out 1★/2★/3★ 20/70/10%.</li>
+        <li><b>Green:</b> her unique ${uL >= 0.1 ? `is worth about ${uL.toFixed(2)} L here, so it counts for the ace` : "is weak on this race; it won't count much"}.</li>
+        <li><b>Pink:</b> ${pink}</li>
+        <li><b>Blue:</b> the stat is random, so you can't pick it; its stars depend on that stat (3★: 5% from 600, 10% over 1,100). Push as many stats past 1,100 as SS allows. Her predicted run: ${stats}.</li>
+      </ul></div>`;
+    }
+
     // Is she set up below (for this ace and cup)?
     function sentThere(r) {
       const f = ctx.training(), c = st();

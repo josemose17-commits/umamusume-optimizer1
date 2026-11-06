@@ -387,14 +387,16 @@
     }
     // Both searches share the same codec and defaults. One stat, on the rental and across
     // her branch; no total-any-stat shortcut, pink requirement, or preferred-white sort by default.
+    // q.own: only the rental's own sparks count (the grandparent: her parents would be the ace's
+    // great-grandparents), so blue, pink and required whites go on her (mb, mp, mw), not her line.
     function umaMoe(q) {
-      const c = { t: [q.ace ? +q.ace : null, null, null, null, null, null, null] };
+      const c = { t: [q.ace ? +q.ace : null, null, null, null, null, null, null] }, own = !!q.own;
       if (q.p1 && q.p1.tid) {
         c.p2c = +q.p1.tid;
         if (q.p1.saddles && q.p1.saddles.length) c.p2w = [...new Set(q.p1.saddles.map(Number))];
       }
       const blue = Array.isArray(q.blue) ? q.blue[0] : q.blue, broad = q.quality === "broad";
-      if (BLUE_IDS[blue]) { c.mb = [[BLUE_IDS[blue], broad ? 2 : 3, 3]]; c.b = [[BLUE_IDS[blue], broad ? 6 : 7, 9]]; }
+      if (BLUE_IDS[blue]) { c.mb = [[BLUE_IDS[blue], broad ? 2 : 3, 3]]; if (!own) c.b = [[BLUE_IDS[blue], broad ? 6 : 7, 9]]; }
       const factor = (id) => meta[id] ? +meta[id][0] * 10 : null;
       const ws = new Map();
       (q.whites || []).forEach((w) => {
@@ -404,12 +406,16 @@
       const required = [...new Set((q.required || []).map(factor).filter(Boolean))].slice(0, 2);
       required.forEach((id) => ws.delete(id));
       if (q.sort === "whites" && ws.size) {
-        c.ow = [...ws].map(([id, p]) => p ? [id, p] : id);
-        const main = [...ws].filter(([, p]) => p === 0).map(([id]) => id);
-        if (main.length) c.omw = main;
+        if (own) c.omw = [...ws].map(([id, p]) => p ? [id, p] : id);
+        else {
+          c.ow = [...ws].map(([id, p]) => p ? [id, p] : id);
+          const main = [...ws].filter(([, p]) => p === 0).map(([id]) => id);
+          if (main.length) c.omw = main;
+        }
       }
-      if (required.length) c.w = required.map((id) => [id, 1, 9]);
-      if (q.pink && PINK_IDS[q.pink.i]) c.p = [[PINK_IDS[q.pink.i], 3, 9]];
+      if (required.length) c[own ? "mw" : "w"] = required.map((id) => [id, 1, own ? 3 : 9]);
+      // Her own pink: 2–3★ (1–3★ wider); across a whole line: 3–9★.
+      if (q.pink && PINK_IDS[q.pink.i]) c[own ? "mp" : "p"] = [[PINK_IDS[q.pink.i], own ? (broad ? 1 : 2) : 3, own ? 3 : 9]];
       if (q.green && q.green.length) c.mg = [...new Set(q.green)].map((tid, k) => k ? [+tid * 10, 1, 3, 1] : [+tid * 10, 1, 3]);
       const excluded = [...new Set([q.ace, q.p1 && q.p1.tid].filter(Boolean).map((id) => Math.floor(+id / 100)))];
       if (excluded.length) c.emp = excluded;
@@ -440,7 +446,7 @@
       const green = needs.green.map((g) => Object.assign({}, g, { owners: g.owners.filter((t) => +t.cid !== +x.ace.cid && +t.cid !== +p1.f.p1.cid && (!o.today || t.en && t.en <= o.today)) }))
         .filter((g) => g.owners.length).slice(0, 3);
       const saddles = [...new Set(opts.saddles || saddlesOf(p1))], broad = opts.quality === "broad", sort = opts.sort === "whites" ? "whites" : "affinity";
-      const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: blueIndex, pink, whites, required, sort, quality: broad ? "broad" : "recommended" };
+      const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: blueIndex, pink, whites, required, sort, quality: broad ? "broad" : "recommended", own: !!opts.own };
       return Object.assign(umaMoe(q), { q, blue, pink, auto, mode, remaining, given: given || null, choices, whites, required, green, wins: saddles.length, broad, sort,
         focused: green.map((g) => ({ skill: g, search: Object.assign(umaMoe(Object.assign({}, q, { green: g.owners.map((t) => t.id) })), { q: Object.assign({}, q, { green: g.owners.map((t) => t.id) }) }) })) });
     }
@@ -451,11 +457,13 @@
       const required = new Set((q.required || []).map(id => meta[id] && meta[id][0]));
       const names = (q.whites || []).filter(w => !required.has(meta[w.id] && meta[w.id][0])).map(w => skillName(w.id) + (q.sort === "whites" ? " (P" + w.priority + ")" : ""));
       const lines = ["Affinity target: " + tn(c.t[0]), "Other parent (legacy): " + (c.p2c ? tn(c.p2c) + " · her " + (c.p2w || []).length + " G1 wins" : "none")];
-      if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " on the rental herself · " + c.b[0][1] + "–9★ across her and her parents");
-      lines.push("Pink: " + (c.p ? (MOE_STYLES[PINK_IDS.indexOf(c.p[0][0])] || F.APT_LABELS[PINK_IDS.indexOf(c.p[0][0])]) + " · 3–9★ across her and her parents; none needed on her" + (q.pink && q.pink.target ? " (to take the ace to " + q.pink.target + ")" : "") : "off"));
-      lines.push("Required whites: " + (q.required.length ? q.required.map(skillName).join(", ") + " · 1–9★ each; all required" : "none"));
+      const aptName = (id) => MOE_STYLES[PINK_IDS.indexOf(id)] || F.APT_LABELS[PINK_IDS.indexOf(id)], toS = q.pink && q.pink.target ? " (to take the ace to " + q.pink.target + ")" : "";
+      if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " on the rental herself" + (c.b ? " · " + c.b[0][1] + "–9★ across her and her parents" : " (her own sparks only: her parents don't reach the ace)"));
+      lines.push("Pink: " + (c.mp ? aptName(c.mp[0][0]) + " · " + c.mp[0][1] + "–3★ on the rental herself" + toS : c.p ? aptName(c.p[0][0]) + " · 3–9★ across her and her parents; none needed on her" + toS : "off"));
+      lines.push("Required whites: " + (q.required.length ? q.required.map(skillName).join(", ") + (c.mw ? " · on the rental herself, 1–3★ each" : " · 1–9★ each") + "; all required" : "none"));
       lines.push((q.sort === "whites" ? "Preferred whites: " : "Whites to look for (no filter): ") + (names.join(", ") || "none"));
-      if (c.omw) lines.push("Own preferred whites: " + q.whites.filter(w => w.priority === 0 && !required.has(meta[w.id][0])).map(w => skillName(w.id) + " (P0)").join(", "));
+      if (c.omw && !c.ow) lines.push("Preferred whites are hers, not her parents'");
+      else if (c.omw) lines.push("Own preferred whites: " + q.whites.filter(w => w.priority === 0 && !required.has(meta[w.id][0])).map(w => skillName(w.id) + " (P0)").join(", "));
       if (c.mg) lines.push("Own unique: " + q.green.map(tn).join(" or ") + " · 1–3★");
       lines.push("Exclude: " + (c.emp || []).map(char).join(", ") + " (all versions)", "Sort: " + (q.sort === "whites" ? "P0, P1, P2, then affinity" : "affinity first"), "Any rental rank · trainers below 1,000 followers (site default)");
       return lines;
@@ -467,7 +475,9 @@
       const f = { p1: member(v.self, v.tid), g11: member(v.parents[0]), g12: member(v.parents[1]) };
       const s = fam.score(familyOf(f), tx);
       // Her grandparent is the ace's grandparent too: pink by the ace's rule, the ace's missing whites.
-      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s), pinkFor: x }));
+      // Only her own sparks reach the ace (her parents would be great-grandparents), so the search
+      // asks for them on her: own blue, own pink, own required whites.
+      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s), pinkFor: x, own: true }));
     }
     function raceWins(races, n) {
       return [...new Set(upTo(races, n).map(r => r.name).concat((races.goals || []).filter(r => r.goal === "fixed" && g1Map.has(r.name)).map(r => r.name)))];
