@@ -164,59 +164,65 @@ test("how many extra races keep her at SS: your veterans' ratings, less what eac
   assert.equal(plan.ssLimit(atS, 300, 20, 0).n, 20, 'no minimum keeps every available race');
 });
 
-test("the uma.moe search: its own filters in the link", () => {
-  const p1 = { tid: uniq[0].id, saddles: [10, 11, 10] };
-  const q = plan.umaMoe({ ace: ace.id, p1, blue: [0, 2], whites: top.slice(0, 2) });
-  assert.ok(q.url.startsWith(CP.UMA_MOE + "?filters="));
-  const back = JSON.parse(Buffer.from(decodeURIComponent(q.url.split("filters=")[1]), "base64").toString("utf8"));
+const decode = q => {
+  const back = JSON.parse(Buffer.from(new URL(q.url).searchParams.get("filters"), "base64").toString("utf8"));
   assert.deepEqual(back, q.filters);
-  assert.deepEqual(back.t, [ace.id, null, null, null, null, null, null], "the ace: the affinity target");
-  assert.equal(back.p2c, uniq[0].id, "Parent 1: the legacy she joins");
-  assert.deepEqual(back.p2w, [10, 11], "with her G1 saddles");
-  assert.deepEqual(back.mb, [[10, 3, 3], [30, 3, 3, 1]], "Speed 3★ or Power 3★ on the rental herself");
-  assert.deepEqual(back.ow, top.slice(0, 2).map((id) => SB.DATA.skills[id][0] * 10), "preferred whites by factor id");
-  assert.deepEqual(back.emp, [ace.cid, uniq[0].cid], "exclude every version of the ace and Parent 1 as the rental");
-  // uma.moe's factor id is the game's without its star digit: Nimble Navigator 2★ (2004902) → 200490.
-  const nn = Object.keys(SB.DATA.skills).find((id) => String(SB.DATA.skills[id][0]) === "20049");
-  assert.deepEqual(plan.umaMoe({ ace: ace.id, whites: [nn] }).filters.ow, [200490]);
+  return back;
+};
+test("uma.moe codec: one blue stat across the branch, version target, legacy wins and character exclusions", () => {
+  const q = plan.umaMoe({ ace: ace.id, p1: { tid: uniq[0].id, saddles: [10, 11, 10] }, blue: 0, whites: top });
+  const f = decode(q);
+  assert.deepEqual(f, { t: [ace.id, null, null, null, null, null, null], p2c: uniq[0].id, p2w: [10, 11], mb: [[10, 3, 3]], b: [[10, 7, 9]], emp: [ace.cid, uniq[0].cid] });
 });
 
-test("uma.moe advanced settings: family stars, own sparks and P0/P1/P2 use the site's codec", () => {
+for (const quality of ["recommended", "broad"]) for (const sort of ["affinity", "whites"]) test(`Parent 2 search decodes every field: ${quality}, ${sort}`, () => {
   const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
-  p1.f.p1.pink = [4, 3];
-  const q = plan.rentalSearch(x, p1);
-  assert.equal(q.filters.t[0], ace.id, "keeps the target's version");
-  assert.equal(q.pink.i, 4, "Medium race: distance pink when no aptitude is missing");
-  assert.equal(q.pink.known, 3, "count Parent 1's existing pink before asking the rental");
-  assert.deepEqual(q.filters.p, [[330, 3, 9]], "family pink uses the 1–9★ range");
-  assert.deepEqual(q.filters.mp, [[330, 3, 3]], "direct parent pink uses the 1–3★ range");
-  assert.equal(q.filters.bss, 9);
-  assert.ok(q.filters.ow.some(w => !Array.isArray(w)), "P0 is the first priority group");
-  assert.ok(q.filters.ow.some(w => Array.isArray(w) && w[1] === 1), "P1 follows P0");
-  assert.ok(q.filters.ow.some(w => Array.isArray(w) && w[1] === 2), "P2 follows P1");
-  assert.deepEqual(q.filters.omw, q.whites.filter(w => w.priority === 0).map(w => +SB.DATA.skills[w.id][0] * 10));
-  for (const k of ['pr', 'sid', 'sc', 'lb', 'mwc', 'mwh', 'rs', 'gss', 'wss']) assert.ok(!(k in q.filters), k + ' stays unrestricted');
+  p1.v.saddles = [10, 11];
+  const q = plan.rentalSearch(x, p1, { quality, sort, blue: 0 });
+  const f = decode(q), broad = quality === "broad";
+  assert.deepEqual(f.t, [ace.id, null, null, null, null, null, null]);
+  assert.equal(f.p2c, uniq[0].id); assert.deepEqual(f.p2w, [10, 11]);
+  assert.deepEqual(f.emp, [ace.cid, uniq[0].cid]);
+  assert.deepEqual(f.mb, [[10, broad ? 2 : 3, 3]]);
+  assert.deepEqual(f.b, [[10, broad ? 6 : 7, 9]]);
+  for (const key of ["p", "mp", "bss", "w", "pr"]) assert.ok(!(key in f), key + " is not a hidden requirement");
+  const expected = ["t", "p2c", "p2w", "emp", "mb", "b"];
+  if (sort === "whites") {
+    assert.deepEqual(f.ow, q.whites.map(w => w.priority ? [+SB.DATA.skills[w.id][0] * 10, w.priority] : +SB.DATA.skills[w.id][0] * 10));
+    assert.deepEqual(f.omw, q.whites.filter(w => w.priority === 0).map(w => +SB.DATA.skills[w.id][0] * 10));
+    assert.ok(f.ow.some(w => Array.isArray(w) && w[1] === 1));
+    assert.ok(f.ow.some(w => Array.isArray(w) && w[1] === 2));
+    expected.push("ow", "omw");
+  }
+  assert.deepEqual(Object.keys(f).sort(), expected.sort(), "no other filters");
+  const text = plan.searchSummary(q, id => "Skill " + id).join(" · ");
+  for (const part of [ace.n, uniq[0].n, "2 G1 wins", "Speed", "Pink: off", "Exclude:", "Sort:"]) assert.ok(text.includes(part), part);
+  q.whites.forEach(w => assert.ok(text.includes("Skill " + w.id + (sort === "whites" ? " (P" + w.priority + ")" : ""))));
   q.focused.forEach(g => {
-    assert.ok(g.search.filters.mg.every(w => w[1] === 1 && w[2] === 3), "unique focus is on the rental herself");
-    assert.deepEqual(g.search.filters.mg.map(w => w[0]), g.skill.owners.map(t => t.id * 10));
-    assert.ok(g.skill.owners.every(t => t.cid !== ace.cid && t.cid !== p1.f.p1.cid), "unique focus never conflicts with main-parent exclusions");
+    const gf = decode(g.search);
+    const rest = { ...gf }; delete rest.mg; assert.deepEqual(rest, f);
+    assert.deepEqual(gf.mg, g.skill.owners.map((t, k) => k ? [t.id * 10, 1, 3, 1] : [t.id * 10, 1, 3]));
+    assert.ok(plan.searchSummary(g.search).join(" · ").includes("Own unique:"));
+    assert.ok(g.skill.owners.every(t => !gf.emp.includes(t.cid)));
   });
 });
 
-test("uma.moe wider search preserves required white families and can leave pink unrestricted", () => {
+test("search defaults use the top key blue; pink is optional, lineage-only; whites are required only when checked", () => {
   const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
+  const defaults = decode(plan.rentalSearch(x, p1));
+  assert.equal(defaults.mb[0][0], CP.BLUE_IDS[plan.want(x).blue[0].i]);
+  assert.ok(!defaults.ow && !defaults.omw && !defaults.p && !defaults.mp && !defaults.w);
+  const q = plan.rentalSearch(x, p1, { blue: 4, pink: "7", required: [top[0]] });
+  const f = decode(q);
+  assert.deepEqual(f.b, [[50, 7, 9]]); assert.deepEqual(f.mb, [[50, 3, 3]]);
+  assert.deepEqual(f.p, [[220, 3, 9]]); assert.ok(!f.mp);
+  assert.deepEqual(f.w, [[+SB.DATA.skills[top[0]][0] * 10, 1, 9]]);
+  assert.ok(!f.ow && !f.omw);
   const same = Object.keys(SB.DATA.skills).find(id => id !== top[0] && SB.DATA.skills[id][0] === SB.DATA.skills[top[0]][0]);
-  const q = plan.rentalSearch(x, p1, { quality: 'broad', pink: 'none', required: [top[0], same || top[0]] });
-  assert.equal(q.filters.bss, 6);
-  assert.ok(!q.filters.p && !q.filters.mp, "no hidden pink requirement");
-  const factor = +SB.DATA.skills[top[0]][0] * 10;
-  assert.deepEqual(q.filters.w, [[factor, 1, 9]], "same family's gold/white requirements deduplicate; each family is AND");
-  assert.ok(!q.filters.ow.some(w => (Array.isArray(w) ? w[0] : w) === factor), "required is not counted again as optional");
-  assert.deepEqual(q.filters.mb.map(w => w.slice(1, 3)), [[3, 3], [3, 3]], "own key-stat blue stays 3★");
-  const focus = plan.rentalSearch(x, p1, { quality: 'broad', pink: '7' });
-  assert.deepEqual(focus.filters.p, [[220, 1, 9]]);
-  assert.ok(!focus.filters.mp, "grandparents can supply the focused pink in the wider search");
-  assert.equal(focus.pink.label, 'Pace Chaser');
+  const req = plan.rentalSearch(x, p1, { sort: "whites", required: [top[0], same || top[0], top[1], top[2]] });
+  const rf = decode(req);
+  assert.equal(rf.w.length, 2, "at most two distinct required families");
+  assert.ok(rf.w.every(w => !rf.ow.some(o => (Array.isArray(o) ? o[0] : o) === w[0])));
 });
 
 test("rentals you paste, ranked as Parent 2 with your Parent 1", () => {

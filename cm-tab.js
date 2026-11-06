@@ -78,7 +78,9 @@
       const d = c.decks[k], defaults = ctx.deckDefaults();
       Object.entries({ comp: {}, borrow: defaults.borrow, skillW: defaults.skillW, must: [], exclude: [], locked: [], cards: null }).forEach(([k, v]) => { if (d[k] == null) d[k] = v; });
       if (!c.decks[k].targets) c.decks[k].targets = {};
-      if (!c.decks[k].rental) c.decks[k].rental = { pink: "auto", quality: "recommended", required: [] };
+      if (!c.decks[k].rental) c.decks[k].rental = { pink: "none", blue: "auto", sort: "affinity", quality: "recommended", required: [] };
+      const prefs = c.decks[k].rental;
+      if (!prefs.version) { if (prefs.pink === "auto") prefs.pink = "none"; prefs.sort = "affinity"; prefs.version = 2; }
       return c.decks[k];
     }
     // The deck with your limit breaks now (a friend's card is always LB4).
@@ -509,10 +511,9 @@
       if (!r.p1) return `<p class="mini">Pick Parent 1 first.</p>`;
       const prefs = deckOf(c, a).rental;
       const l = linkFor(r.x, r.t, r.p1, r.useFresh ? r.train : null, prefs), p1 = r.p1;
-      const blue = l.blue.map((b) => `<b>${b.label} 3★</b>`).join(" or ");
       const rents = CP.rankRentals(r.x, p1, ctx.rentals());
       return `<p><a class="btn small" href="${esc(l.url)}" target="_blank" rel="noopener">Search uma.moe for her Parent 2</a></p>
-        <p class="mini cmp-filters">${blue} · ${l.pink ? `${l.pink.label} pink ${l.pink.min}–9★` : "any pink"} · preferred whites first, then affinity.</p>
+        ${filterSummaryHTML(l)}
         ${rentalSettingsHTML(l, r, prefs)}
         <details class="cmp-rent" data-cmp-open="rent"${(opened.rent != null ? opened.rent : rents.length > 0) ? " open" : ""}><summary class="mini"><b>Paste rentals from uma.moe</b> · ${ctx.rentals().length ? `${ctx.rentals().length} pasted` : "none yet"}</summary>
           <p class="mini">Paste whole uma.moe parent cards to rank them with Parent 1.</p>
@@ -523,58 +524,23 @@
         </details>`;
     }
 
-    function rentalSettingsHTML(l, r, prefs) {
-      const name = (id) => esc(ctx.skillName(id));
-      const list = (ids) => ids.length ? ids.map(name).join(", ") : "None";
-      const row = (field, value, why) => `<tr><th scope="row">${field}</th><td>${value}</td><td class="mini">${why}</td></tr>`;
-      const section = (title) => `<tr class="cmp-filter-section"><th colspan="3">${title}</th></tr>`;
-      const who = r.p1.kind === "vet" ? vetName(r.p1.v) : tName(r.p1.t);
-      const selected = new Set(l.required), grouped = [0, 1, 2].map((p) => ({ p, ids: l.whites.filter((w) => w.priority === p && !selected.has(w.id)).map((w) => w.id) })).filter((g) => g.ids.length);
-      const pink = l.pink ? `${l.pink.label}: ${l.pink.min}–9★` : "Any";
-      const wins = r.useFresh ? r.train.agenda.map((x) => x.name) : r.p1.f.p1.wins || [];
-      const allWins = [...new Set(wins)].map(esc).join(", ");
-      return `<details class="cmp-rental-settings" data-cmp-open="rental-settings"${opened["rental-settings"] ? " open" : ""}><summary><b>Full uma.moe settings</b> · factors, characters, rank and races</summary>
-        <div class="row-wrap"><label class="field"><span>Pink focus</span><select data-cmp-rental="pink"><option value="auto"${!prefs.pink || prefs.pink === "auto" ? " selected" : ""}>Auto (${l.pink ? l.pink.label : "none"})</option>${l.choices.map((p) => `<option value="${p.i}"${String(prefs.pink) === String(p.i) ? " selected" : ""}>${p.label} (ace: ${p.grade})</option>`).join("")}<option value="none"${prefs.pink === "none" ? " selected" : ""}>Any pink</option></select></label>
-          <label class="field"><span>Search width</span><select data-cmp-rental="quality"><option value="recommended"${!l.broad ? " selected" : ""}>More stars</option><option value="broad"${l.broad ? " selected" : ""}>More choices</option></select></label></div>
-        <p class="mini">More choices lowers the star limits and lets a grandparent carry the pink; your required whites stay.</p>
-        <fieldset class="cmp-required"><legend class="mini">Required white sparks (all checked skills must be in the rental branch)</legend><div class="row-wrap">${l.whites.map((w) => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}"${selected.has(w.id) ? " checked" : ""}>${name(w.id)}</label>`).join("") || '<span class="mini">No missing race whites.</span>'}</div></fieldset>
-        <div class="table-wrap"><table class="cmp-filter-table"><thead><tr><th>Field</th><th>Set it to</th><th>Why</th></tr></thead><tbody>
-          ${section("Affinity")}
-          ${row("Target character", esc(tName(r.t)), "The ace you're training.")}
-          ${row("Your legacy", `${esc(who)} · ${l.wins} G1 wins`, "Includes Parent 1 and her actual or planned shared wins in affinity.")}
-          ${section("Include / Exclude Umas · Support Cards · Search")}
-          ${row("Main Parent · Include", "Any character", "Compare whole families before locking a character.")}
-          ${row("Main Parent · Exclude", `${esc(tName(r.t))} + ${esc(who)} (all versions)`, "Neither can be Parent 2 under the game's rules.")}
-          ${row("Great Parent · Include / Exclude", "Any", "Keep good grandparents; sharing a character across branches can be legal.")}
-          ${row("Support Card & LB", "Any card · Any LB", "Your rental parent and borrowed support card can come from different trainers.")}
-          ${row("Search users", "Trainer ID and username blank", "Search all trainers.")}
-          ${section("Inheritance Factors · rental and her two parents")}
-          ${row("Blue Factors (Stats)", "No extra type limit", "The main parent's blue and the total below set the blue requirements.")}
-          ${row("Pink Factors (Aptitude)", pink, l.pink ? `${l.pink.known}★ of ${l.pink.label} is known on your Parent 1 branch. ${l.pink.needed ? `The ace starts at ${esc(l.pink.grade)} there; this is an aptitude gap to fix.` : "More carriers improve your chance at an S aptitude; the roll is not guaranteed."}` : "No pink requirement selected.")}
-          ${row("Green Factors (Unique)", "Any; focus links below", "Use a focus link when a specific inherited unique is essential.")}
-          ${row("White Factors · Required", l.required.length ? `${list(l.required)} · 1–9★ each · AND` : "None", "Check only skills you need this rental branch to supply.")}
-          ${row("Preferred White Factors", grouped.map((g) => `<b>P${g.p}:</b> ${list(g.ids)}`).join("<br>") || "None", "Missing skills first, accounting for her deck and Parent 1. P0 sorts before P1, then P2.")}
-          ${row("Lineage White Factors", "None", "Repeat stacks are optional; this search fills the ace's missing hints.")}
-          ${section("Main Parent Factors · the rental herself")}
-          ${row("Blue Factors (Stats)", l.blue.map((b) => `${b.label} 3★`).join(" OR "), "One key-stat blue on the rental, not just on a grandparent.")}
-          ${row("Pink Factors (Aptitude)", l.pink && l.pink.main ? `${l.pink.label} 3★` : "Any", l.pink && l.pink.main ? "Keep the focused pink on the direct parent too." : "The family pink filter can be met by a grandparent.")}
-          ${row("Green / Required White Factors", "Any / None", "The required whites may be anywhere in this rental branch.")}
-          ${row("Preferred White Factors", list(l.q.mainWhites) + (l.q.mainWhites.length ? " · P0" : ""), "Prefer the most valuable missing whites on the direct parent.")}
-          ${row("White categories · Common / Scenario / Race", "All minimums 0", "Useful skills matter more than unrelated factor counts.")}
-          ${section("General Criteria")}
-          ${row("Training Scenario", "Any scenario", "Compare the sparks she already has.")}
-          ${row("Min Win Count / Min White Factor Count", "0 / 0", "Shared G1 names and useful whites matter more than raw counts.")}
-          ${row("Parent Rank", "Any rank", "SS is the priority when training your own parent; a rental's existing sparks determine her value.")}
-          ${row("Max Follower Accounts", "Off (fewer than 1,000)", "uma.moe's default leaves out trainers with no free follower slot.")}
-          ${section("Total Star Count · rental branch only")}
-          ${row("Total Blue ★", String(l.q.totalBlue), l.broad ? "A broader search, keeping her own 3★ key blue." : "Three 3★ blues across this branch.")}
-          ${row("Total Pink / Green / White ★", "0 / 0 / 0", "The focused pink above is specific; unrelated total stars do not prove a good parent.")}
-          ${row("White categories · Common / Scenario / Race", "All minimums 0", "Preferred and required skills already guide this search.")}
-          ${section("Race Schedule Filter and sorting")}
-          ${row("Race Schedule Filter", "Blank", allWins ? `Shared wins to check: ${allWins}. Add specific wins only if you need to narrow the results.` : "The legacy context already accounts for shared wins; an extra hard calendar filter can discard useful families.")}
-          ${row("Sort by", "Preferred white groups, then Affinity", "uma.moe applies P0/P1/P2 first; paste candidates below for the planner's whole-family comparison.")}
-        </tbody></table></div>
-        ${l.focused.length ? `<p class="mini"><b>Focus an inherited unique:</b> ${l.focused.map((g) => `<a href="${esc(g.search.url)}" target="_blank" rel="noopener">${name(g.skill.id)} · ${g.skill.owners.map((t) => esc(tName(t))).join(" / ")}</a>`).join(" · ")}. Each link also requires that unique on the rental herself.</p>` : ""}
+    function filterSummaryHTML(l) {
+      return `<p class="mini cmp-filters">${CP.searchSummary(l, ctx.skillName).map(esc).join(" · ")}.</p>`;
+    }
+    function rentalSettingsHTML(l, r, prefs, scope = "ace") {
+      const attr = `data-cmp-rental-scope="${scope}"`, key = "rental-settings-" + scope;
+      const selected = new Set(l.required);
+      const options = (rows, value) => rows.map(([v, label]) => `<option value="${v}"${String(v) === String(value) ? " selected" : ""}>${esc(label)}</option>`).join("");
+      return `<details class="cmp-rental-settings" data-cmp-open="${key}"${opened[key] ? " open" : ""}><summary><b>Full uma.moe settings</b></summary>
+        <div class="row-wrap">
+          <label class="field"><span>Blue stat</span><select data-cmp-rental="blue" ${attr}>${options([["auto", "Auto (" + l.blue[0].label + ")"], ...F.STAT_LABELS.map((v, i) => [i, v])], prefs.blue == null ? "auto" : prefs.blue)}</select></label>
+          <label class="field"><span>Search width</span><select data-cmp-rental="quality" ${attr}>${options([["recommended", "Own 3★ · lineage 7–9★"], ["broad", "Wider: own 2–3★ · lineage 6–9★"]], l.broad ? "broad" : "recommended")}</select></label>
+          <label class="field"><span>Pink focus</span><select data-cmp-rental="pink" ${attr}>${options([["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.pink ? l.pink.i : "none")}</select></label>
+          <label class="field"><span>Sort</span><select data-cmp-rental="sort" ${attr}>${options([["affinity", "Affinity first"], ["whites", "Whites first"]], l.sort)}</select></label>
+        </div>
+        <fieldset class="cmp-required"><legend class="mini">Required whites · choose up to two (all checked must be in the rental branch)</legend><div class="row-wrap">${l.whites.map(w => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}" ${attr}${selected.has(w.id) ? " checked" : ""}>${esc(ctx.skillName(w.id))}</label>`).join("") || '<span class="mini">No missing race whites.</span>'}</div></fieldset>
+        <p class="mini">Affinity first leaves the listed whites out of the filters. Whites first uses P0, then P1, then P2 before affinity. Pink needs no stars on the rental herself. Rank, support, scenario, counts, other star totals and the race calendar stay open; the legacy's G1 wins are affinity context.</p>
+        ${l.focused.length ? `<details><summary class="mini">Focus an inherited unique</summary>${l.focused.map(g => `<p><a href="${esc(g.search.url)}" target="_blank" rel="noopener">${esc(ctx.skillName(g.skill.id))} · ${g.skill.owners.map(t => esc(tName(t))).join(" / ")}</a></p>${filterSummaryHTML(g.search)}`).join("")}</details>` : ""}
       </details>`;
     }
 
@@ -720,6 +686,7 @@
       if (a && ds.cmpRental != null) { deckOf(c, a).rental[ds.cmpRental] = t.value; ctx.save(); ctx.rerender(); return true; }
       if (a && ds.cmpRentalWhite != null) {
         const prefs = deckOf(c, a).rental, have = new Set(prefs.required || []);
+        if (t.checked && !have.has(ds.cmpRentalWhite) && have.size >= 2) { ctx.flash("Choose at most two required whites."); t.checked = false; return true; }
         if (t.checked) have.add(ds.cmpRentalWhite); else have.delete(ds.cmpRentalWhite);
         prefs.required = [...have]; ctx.save(); ctx.rerender(); return true;
       }
