@@ -114,7 +114,7 @@
       const p = d && d.predicted;
       return p && p.stats && p.target ? p.target.map((t, i) => Math.max(0, Math.round(t - p.stats[i]))) : null;
     }
-    const inputsKey = (c) => { const a = current(c), d = a && deckOf(c, a); return JSON.stringify([ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.family(), d && d.fresh, d && d.predicted]); };
+    const inputsKey = (c) => { const a = current(c), d = a && deckOf(c, a), tid = d && d.fresh && d.fresh.plan && d.fresh.plan.tid; return JSON.stringify([ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.family(), d && d.fresh, d && d.predicted, tid ? ctx.parentDeck(tid) : null]); };
 
     async function ready(p) {
       for (let i = 0; !ctx.euReady(); i++) { if (i > 600) throw new Error("The card data didn't load. Check your connection."); await new Promise((r) => setTimeout(r, 100)); }
@@ -199,11 +199,22 @@
       let train = null;
       if (useFresh) {
         let f = chosenFresh;
-        const races = CP.racePlan(f, vetsAll);
-        const her = ctx.deck(p, style, f.t.id, races.extraRaces);
+        // In the order it depends on: her races → her deck → how many races keep SS with that deck
+        // → (the quick build only) the deck again for the races she keeps, and the count again.
+        const races = CP.racePlan(f, vetsAll), mine = ctx.parentDeck(f.t.id);
+        let her = mine ? Object.assign(ctx.deckWith(p, style, f.t.id, races.extraRaces, mine), { source: "yours" }) : Object.assign(ctx.deck(p, style, f.t.id, races.extraRaces), { source: "quick" });
         f = Object.assign({}, f, { offers: her.offers });
         await stage(`${who}: ${tName(f.t)}'s races at SS…`, 0.7);
-        const ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, CP.trainingStart(x, f));
+        const blueStart = CP.trainingStart(x, f);
+        let ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
+        if (!mine && ss.n < races.extraRaces) {
+          await stage(`${who}: her deck for the ${plural(ss.n, "race")} she keeps…`, 0.8);
+          const kept = Object.assign(ctx.deck(p, style, f.t.id, ss.n), { source: "quick" });
+          if (kept.cards.map((y) => y.id).join() !== her.cards.map((y) => y.id).join()) {
+            her = kept; f = Object.assign({}, f, { offers: her.offers });
+            ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
+          }
+        }
         chosenFresh = f = CP.atRaceCount(x, f, races, ss.n);
         f.aff = CP.outlook(x, f.f, vetsAll);
         // The chosen veteran's line shows the same number as the headline: with her race plan at SS.
@@ -531,14 +542,20 @@
         return `<tr${on ? "" : ' class="cmp-cut"'}><td>${x.turn}<div class="mini">${esc(ctx.turnText(x.turn))}</div></td><td>${esc(x.name)}</td><td class="mini">${why}${on ? "" : " · skip: keeps SS"}</td></tr>`;
       }).join("");
       const sims = ss.rows.map(x => `<tr><td>${x.n}</td>${x.stats.map(v => `<td>${v}</td>`).join("")}<td>${x.sp}</td><td>${fmtN(x.rating)}</td><td>${x.hit}/${x.of}</td></tr>`).join("");
-      return `${itHTML(r)}${aimHTML(r)}<p><b>${esc(tName(f.t))} at SS</b> with <b>${plural(keep.length, "extra G1")}</b>: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). ${ssText(ss)}</p>
-        <p class="mini"><b>Her Ace-parent deck:</b> ${tr.deck.cards.map((x) => esc(cardName(x.id)) + (x.borrowed ? " (borrow)" : "")).join(", ")}.</p>
-
-        ${stepsHTML(r)}
-        <details data-cmp-open="races"><summary class="mini">Her race plan and the SS check</summary>
+      // Top to bottom in the order it's worked out: her deck → her races at SS → what to set in
+      // Independent Training → the sparks to aim for → set her up.
+      const deckLine = tr.deck.source === "yours" ? "your deck from ③ (Find my best deck)" : "a quick build from your cards; build your own in ③ below, then Find again to plan with it";
+      return `<ol class="cmp-order">
+        <li><b>Her Ace-parent deck</b> <span class="mini">(${deckLine})</span>: ${tr.deck.cards.map((x) => esc(cardName(x.id)) + (x.borrowed ? " (borrow)" : "")).join(", ")}.</li>
+        <li><b>${esc(tName(f.t))} at SS with ${plural(keep.length, "extra G1")}</b> with that deck: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). <span class="mini">${ssText(ss)}</span>
+          <details data-cmp-open="races"><summary class="mini">Her race plan and the SS check</summary>
           <div class="table-wrap"><table class="plan cmp-races"><thead><tr><th>Turn</th><th>Race</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
           <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th>Extra</th>${F.STAT_LABELS.map(l => `<th>${l.slice(0, 3)}</th>`).join("")}<th>SP</th><th>Rating</th><th>SS</th></tr></thead><tbody>${sims}</tbody></table></div>
-          <p class="mini">16 careers each, with known blue start bonuses · about ${fmtN(ss.perRace)} rating per extra race.</p></details>
+          <p class="mini">16 careers each, with known blue start bonuses · about ${fmtN(ss.perRace)} rating per extra race.</p></details></li>
+        <li>${itHTML(r)}</li>
+        <li>${aimHTML(r)}</li>
+      </ol>
+        ${stepsHTML(r)}
         ${sentThere(r) ? ctx.trainingHTML() : ""}`;
     }
     // What to set in Independent Training: Training Focus, the 10 prioritized skills, the agenda.
@@ -554,7 +571,7 @@
       const races = tr.agenda.filter((x) => !x.free).map((x) => x.name);
       const anySS = fo && fo.rows.some((y) => y.hit > 0);
       const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${y.over.toFixed(1)} stats over 1,100`).join(" · ")} (16 careers each, before inheritance). Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
-      return `<div class="cmp-it"><h4>Independent Training settings</h4>${focus}
+      return `<div class="cmp-it"><h4>Independent Training settings</h4><p class="mini">For this deck and these ${plural(races.length, "extra G1")}.</p>${focus}
         <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it targets their hints in event choices):</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
         <p class="mini"><b>Agenda:</b> ${races.length ? races.map(esc).join(", ") : "her career goals only"}.</p></div>`;
     }
