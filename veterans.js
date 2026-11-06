@@ -94,7 +94,26 @@
       return { list, skipped, cards };
     }
 
-    return { parse, member, whiteOf: (f) => base[String(f)] || null };
+    // A trainer's uma.moe profile (/api/v4/user/profile/{trainer id}) → the uma she lends:
+    // { tid (her version, or null), cid, self: member, source }. Her veteran record when the
+    // profile lists it (exact sparks and G1 saddles: the same raw game payload as the export),
+    // else the listing's own factors (no G1 wins). Factor ids are the game's: type × 100 + stars.
+    function fromUmaMoe(profile) {
+      const raw = profile && profile.inheritance, inh = Array.isArray(raw) ? raw[0] : raw;
+      if (!inh || !inh.main_parent_id) throw new Error("This trainer has no uma listed on uma.moe.");
+      const main = +inh.main_parent_id, isVersion = main >= 100000;
+      const same = (id) => isVersion ? +id === main : Math.floor(+id / 100) === main;
+      const ps = [inh.parent_left_id, inh.parent_right_id].map(Number).filter(Boolean);
+      const vets = (profile.veterans || []).filter((v) => v && v.card_id && same(v.card_id) && Array.isArray(v.factor_info_array));
+      const hasParents = (v) => ps.every((id) => (v.succession_chara_array || []).some((p) => p && (+p.card_id === id || Math.floor(+p.card_id / 100) === id)));
+      const v = vets.find(hasParents) || (vets.length === 1 && !ps.length ? vets[0] : null);
+      if (v) return { tid: v.card_id, cid: Math.floor(v.card_id / 100), self: member(v), source: "veteran" };
+      const ids = [inh.main_blue_factors, inh.main_pink_factors, inh.main_green_factors].concat(inh.main_white_factors || []).map(Number).filter((f) => f > 100);
+      const tid = isVersion ? main : null;
+      return { tid, cid: isVersion ? Math.floor(main / 100) : main, self: member({ card_id: tid || 0, factor_info_array: ids.map((f) => ({ factor_id: f })) }), source: "listing" };
+    }
+
+    return { parse, member, fromUmaMoe, whiteOf: (f) => base[String(f)] || null };
   }
 
   const api = { create, SADDLE, PINK, SCENARIO };

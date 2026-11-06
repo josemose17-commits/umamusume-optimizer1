@@ -82,3 +82,20 @@ test("veterans: the cards of their decks, each at the highest limit break, the f
   assert.deepStrictEqual(r.list[0].saddles, [10, 99], "raw saddle ids, titles too (uma.moe reads them)");
   assert.deepStrictEqual(vets.parse(EXPORT).cards, {}, "an export without decks gives no cards");
 });
+
+test("uma.moe profile: the lent uma from her veteran record, else from the listing", () => {
+  const v = EXPORT[0];
+  const profile = { inheritance: { main_parent_id: 101701, parent_left_id: 101501, parent_right_id: 101301, main_blue_factors: 103 }, veterans: [uma(101701, [101], []), v] };
+  const r = vets.fromUmaMoe(profile);
+  assert.strictEqual(r.source, "veteran", "the veteran with the same parents");
+  assert.strictEqual(r.tid, 101701);
+  assert.deepStrictEqual(r.self, vets.member(v), "exact sparks and G1 wins, as the export reads them");
+  assert.ok(r.self.wins.length > 0);
+  const listing = vets.fromUmaMoe({ inheritance: { main_parent_id: 101701, main_blue_factors: 203, main_pink_factors: 3301, main_white_factors: [2004902], main_green_factors: 10170102 } });
+  assert.strictEqual(listing.source, "listing");
+  assert.deepStrictEqual(listing.self.blue, [1, 3]); assert.deepStrictEqual(listing.self.pink, [vets.member(uma(1, [3301], [])).pink[0], 1]);
+  assert.strictEqual(listing.self.white.length, 1); assert.strictEqual(listing.self.green, 2); assert.deepStrictEqual(listing.self.wins, []);
+  const byChar = vets.fromUmaMoe({ inheritance: { main_parent_id: 1017, main_blue_factors: 101 } });
+  assert.strictEqual(byChar.tid, null); assert.strictEqual(byChar.cid, 1017);
+  assert.throws(() => vets.fromUmaMoe({}), /no uma listed/);
+});

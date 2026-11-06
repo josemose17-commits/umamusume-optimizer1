@@ -25,6 +25,11 @@
   function create(ctx) {
     const { D, P, A, F, PR, esc } = ctx;
     const CP = root.UmaCmPlan.create({ A, F, skills: ctx.SB.DATA.skills, trainees: D.DATA.trainees, chars: ctx.chars(), saddles: ctx.saddles, SS: PR.SS, today: ctx.today });
+    const VT = root.UmaVeterans ? root.UmaVeterans.create(ctx.SB.DATA.skills) : null;
+    // Your own uma.moe API key (uma.moe → Settings → API Keys): kept in this browser only.
+    const KEY = "uma-moe-api-key-v1";
+    const apiKey = () => { try { return root.localStorage.getItem(KEY) || ""; } catch (e) { return ""; } };
+    const setKey = (v) => { try { if (v) root.localStorage.setItem(KEY, v); else root.localStorage.removeItem(KEY); } catch (e) { /* private window */ } };
     let job = null;             // a search in progress: { stage, f }
     const views = new Map();    // each ace's deck as it stands, described: { sig, … }
     const found = new Map();    // each ace's parents, with the deck they were found for
@@ -426,9 +431,43 @@
         ${(g.white || []).length ? `<div class="row-wrap">${g.white.map((w) => `<span class="chip">${esc(ctx.skillName(w[0]))} ${w[1]}★ <button type="button" class="linkish" data-cmp-gp-white-del="${w[0]}" ${attr} aria-label="Remove">✕</button></span>`).join("")}</div>` : ""}
         <details data-cmp-open="gp-wins"><summary class="mini">G1s she won (${(g.wins || []).length}): her shared ones go first in ${esc(f.t.n)}'s races</summary><div class="row-wrap">${g1Names().map((n) => `<label class="chip-toggle small"><input type="checkbox" data-cmp-gp-win="${esc(n)}" ${attr}${(g.wins || []).includes(n) ? " checked" : ""}>${esc(n)}</label>`).join("")}</div></details>
         <div class="row-wrap"><button type="button" class="btn small" data-cmp-gp-use ${attr}>${using ? "Plan again with her" : "Plan with her"}</button><button type="button" class="linkish" data-cmp-gp-clear ${attr}>Remove her</button>${using ? '<span class="mini ok">✓ In the plan</span>' : '<span class="mini">Not in the plan yet.</span>'}</div>` : "";
-      return `<div class="cmp-gp"><h4>The grandparent you borrowed</h4>
+      const key = apiKey();
+      const look = `<div class="row-wrap"><label class="field"><span>Her trainer ID</span><input inputmode="numeric" data-cmp-gp-trainer="${tid}" value="${esc(g && g.trainer || "")}" placeholder="9–12 digits" autocomplete="off"></label>
+          <button type="button" class="btn small" data-cmp-gp-lookup ${attr}${key ? "" : " disabled"}>Fill from uma.moe</button>${g && g.filled ? `<span class="mini">${esc(g.filled)}</span>` : ""}</div>
+        ${key ? `<p class="mini">Uses your uma.moe API key (kept in this browser). <button type="button" class="linkish" data-cmp-key-forget>Forget the key</button></p>`
+          : `<div class="row-wrap"><label class="field grow"><span>Your uma.moe API key (needed once)</span><input type="password" data-cmp-key autocomplete="off" placeholder="uma.moe → Settings → API Keys"></label><button type="button" class="btn ghost small" data-cmp-key-save>Save in this browser</button></div>
+          <p class="mini">uma.moe only answers lookups made with a key: sign in at <a href="https://uma.moe/settings" target="_blank" rel="noopener">uma.moe/settings</a> and create one under API Keys. It stays in this browser; the app sends it only to uma.moe.</p>`}`;
+      return `<div class="cmp-gp"><h4>The grandparent you borrowed</h4>${look}
         <label class="field"><span>Her uma (from the uma.moe card)</span><select data-cmp-gp-field="tid" ${attr}><option value="">Pick her…</option>${list.map((t) => `<option value="${t.id}"${g && +g.tid === +t.id ? " selected" : ""}>${esc(t.n + " [" + t.t + "]")}</option>`).join("")}</select></label>
         ${body}${g ? '<p class="mini">Only her own sparks: her parents never reach the ace. Whites not listed here don\'t count for this race.</p>' : ""}</div>`;
+    }
+
+    // Her trainer ID → her uma.moe profile → the form (still yours to check and change).
+    async function lookupGp(c, a, tid, trainer) {
+      const id = String(trainer || "").replace(/\D/g, "");
+      if (!/^\d{9,12}$/.test(id)) { ctx.flash("A trainer ID has 9 to 12 digits."); return; }
+      if (!apiKey() || !VT) { ctx.flash("Save your uma.moe API key first."); return; }
+      let res;
+      try { res = await root.fetch("https://uma.moe/api/v4/user/profile/" + id, { headers: { "X-API-Key": apiKey() } }); }
+      catch (e) { ctx.flash("Couldn't reach uma.moe. Check your connection."); return; }
+      const why = { 401: "uma.moe didn't accept the API key. Create a new one in uma.moe's settings.", 403: "That trainer's profile is hidden on uma.moe.", 404: "No trainer with that ID on uma.moe.", 429: "uma.moe says too many lookups: wait a minute." }[res.status];
+      if (!res.ok) { ctx.flash(why || "uma.moe answered " + res.status + "."); return; }
+      let got;
+      try { got = VT.fromUmaMoe(await res.json()); } catch (e) { ctx.flash(e.message || "Couldn't read her uma.moe profile."); return; }
+      const prefs = freshOf(deckOf(c, a)), pick = prefs.picks[tid] = prefs.picks[tid] || {};
+      const versions = D.DATA.trainees.filter((t) => +t.cid === +got.cid);
+      const version = got.tid && trainee(got.tid) ? +got.tid : versions.length === 1 ? versions[0].id : null;
+      const m = got.self;
+      pick.gp = { tid: version, blue: m.blue.slice(), pink: m.pink.slice(), green: m.green || 0, white: m.white.map((w) => w.slice()), wins: m.wins.slice(), trainer: id,
+        filled: got.source === "veteran" ? "Filled from her veteran record on uma.moe: check it, then Plan with her." : `Filled from her uma.moe listing${version ? "" : " (pick her version)"}: tick her G1s, then Plan with her.` };
+      if (!version) pick.gp.tid = null;
+      // The game's rules: she can't be the same character as the new parent or your veteran;
+      // as the ace's own character she'd have 0 affinity with the ace.
+      const r = found.get(keyOf(c, a)), f = r && r.train && r.train.f;
+      const clash = f && [f.t, f.parents[0]].find((u) => +u.cid === +got.cid);
+      if (clash) { delete pick.gp; ctx.flash(`She's ${ctx.charName(got.cid)}, the same character as ${tName(trainee(clash.tid || clash.id)) || ctx.charName(clash.cid)}: she can't be her parent.`); }
+      else if (+got.cid === +(trainee(a.tid) || {}).cid) pick.gp.filled += " She's the ace's own character: 0 affinity with the ace.";
+      ctx.save(); ctx.rerender();
     }
 
     // A search link, exactly what it sets in plain words, and its settings.
@@ -600,6 +639,10 @@
       if ((el = t.closest("[data-cmp-edit]"))) { editAce = editAce === +el.dataset.cmpEdit ? null : +el.dataset.cmpEdit; ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-ace-remove]"))) { aces(c).splice(+el.dataset.cmpAceRemove, 1); editAce = null; ctx.save(); ctx.rerender(); return true; }
       if ((el = t.closest("[data-cmp-sel]"))) { c.sel[c.cup] = +el.dataset.cmpSel; ctx.save(); ctx.rerender(); return true; }
+      if (t.closest("[data-cmp-key-save]")) { const k = document.querySelector("[data-cmp-key]"); if (k && k.value.trim()) { setKey(k.value.trim()); ctx.flash("Key saved in this browser."); } ctx.rerender(); return true; }
+      if (t.closest("[data-cmp-key-forget]")) { setKey(""); ctx.rerender(); return true; }
+      const lk = t.closest("[data-cmp-gp-lookup]");
+      if (lk && a) { const box = document.querySelector(`[data-cmp-gp-trainer="${lk.dataset.cmpGp}"]`); lookupGp(c, a, lk.dataset.cmpGp, box && box.value); return true; }
       const gpEl = t.closest("[data-cmp-gp]");
       if (gpEl && a && (t.closest("[data-cmp-gp-use]") || t.closest("[data-cmp-gp-clear]") || t.closest("[data-cmp-gp-white-del]"))) {
         const prefs = freshOf(deckOf(c, a)), tid = gpEl.dataset.cmpGp, pick = prefs.picks[tid] = prefs.picks[tid] || {};
@@ -668,7 +711,7 @@
         if (t.checked) have.add(ds.cmpRentalWhite); else have.delete(ds.cmpRentalWhite);
         prefs.required = [...have]; ctx.save(); ctx.rerender(); return true;
       }
-      if (t.id === "cmpVetsText") return true;
+      if (t.id === "cmpVetsText" || ds.cmpKey != null || ds.cmpGpTrainer != null) return true;
       return false;
     }
 
