@@ -640,10 +640,10 @@
       const f = r.train.f, t = f.t, ss = r.train.ss, row = ss.rows.find((y) => y.n === ss.n) || ss.rows[0];
       const apt = t.apt || [], good = (g) => g === "A" || g === "S";
       const tops = F.APT_LABELS.filter((_, i) => good(apt[i]));
-      const need = CP.want(r.x).pink.find((p) => p.target === "S") || CP.want(r.x).pink[0];
+      const need = CP.pinkFocus(r.x, f.s);
       let pink;
       if (!need) pink = "the ace needs none for this race.";
-      else if (good(apt[need.i])) pink = `<b>${need.label}</b> for the ace (to ${need.target}). Hers lands on one of her A/S aptitudes at random (${tops.join(", ")}): about 1 in ${tops.length} for ${need.label}. Inherited pinks that lift another aptitude to A lower that.`;
+      else if (good(apt[need.i])) pink = `<b>${need.label}</b> for the ace (${need.grade} → ${need.target}${need.target === "A" ? ": any pink there lifts it at the start" : ""}). Hers lands on one of her A/S aptitudes at random (${tops.join(", ")}): about 1 in ${tops.length} for ${need.label}. Inherited pinks that lift another aptitude to A lower that.`;
       else pink = `<b>${need.label}</b> for the ace, but she has ${need.label} ${apt[need.i] || "?"}: her pink can only land there if her parents' pinks lift it to A (it picks among her A/S aptitudes).`;
       const stats = row ? F.STAT_LABELS.map((l, i) => `${l} ${row.stats[i]} (${Math.round(twoPlus(row.stats[i]) * 100)}%)`).join(", ") : "";
       const uid = CP.inherited(t), uL = uid && r.x.raceL ? r.x.raceL[uid] || 0 : 0;

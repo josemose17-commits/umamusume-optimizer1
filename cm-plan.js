@@ -157,6 +157,12 @@
       });
       return { value, list, fire };
     }
+    // The pink the ace needs most with this family (s: her family's score): an aptitude still
+    // below A it doesn't lift, else the one your rule takes to S. Same order as the searches.
+    function pinkFocus(x, s) {
+      const needs = want(x).pink, lifted = (i) => { const q = ((s && s.pink) || []).find((y) => y.i === i); return q ? q.p : 0; };
+      return needs.find((p) => p.target === "A" && lifted(p.i) < 0.9) || needs.find((p) => p.target === "S") || needs[0] || null;
+    }
     // Independent Training's prioritized skills (the game takes up to 10): the race's whites her
     // deck can offer, most valuable as a spark for the ace first (worth × chance the deck offers
     // it). The gold version when her deck offers it (a learned gold doubles the spark chance).
@@ -459,9 +465,12 @@
       const needs = want(x), course = x.race.preset.course, px = opts.pinkFor || x, pinks = want(px).pink;
       const indexes = [...new Set([course.surface === "Dirt" ? 1 : 0, DIST(course.distance), STYLE_INDEX[x.race.style]].filter((i) => i != null))];
       const choices = indexes.map((i) => { const n = pinks.find((p) => p.i === i); return { i, label: MOE_STYLES[i] || F.APT_LABELS[i], grade: (px.ace.apt || [])[i] || "?", needed: !!n, target: n ? n.target : null }; });
-      // Your rule: the aptitude she still has to take to S (her distance; her surface in a sprint),
-      // else one still below A; none when she's already there.
-      const auto = choices.find((p) => p.needed && p.target === "S") || choices.find((p) => p.needed) || null;
+      // An aptitude still below A that her known family doesn't already lift first (1–3★ of pink
+      // anywhere in the family lifts it to A at the start, for sure), then your rule's S (her
+      // distance; her surface in a sprint), which only a pink firing at an inspiration gives.
+      const fam = opts.pinkReach || (!opts.pinkFor && p1.s && p1.s.pink) || [];
+      const lifted = (i) => { const q = fam.find((y) => y.i === i); return q ? q.p : 0; };
+      const auto = choices.find((p) => p.needed && p.target === "A" && lifted(p.i) < 0.9) || choices.find((p) => p.needed && p.target === "S") || choices.find((p) => p.needed) || null;
       const mode = opts.pink == null || opts.pink === "auto" ? "auto" : opts.pink === "none" ? "none" : String(opts.pink);
       const focus = mode === "auto" ? auto : mode === "none" ? null : choices.find((p) => String(p.i) === mode);
       const pink = focus ? Object.assign({}, focus, { min: 3, main: false }) : null;
@@ -509,7 +518,7 @@
       // Her grandparent is the ace's grandparent too: pink by the ace's rule, the ace's missing whites.
       // Only her own sparks reach the ace (her parents would be great-grandparents), so the search
       // asks for them on her: own blue, own pink, own required whites.
-      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s), pinkFor: x, own: true, given: fresh.s && fresh.s.blueStats }));
+      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s), pinkFor: x, own: true, given: fresh.s && fresh.s.blueStats, pinkReach: fresh.s && fresh.s.pink }));
     }
     function raceWins(races, n) {
       return [...new Set(upTo(races, n).map(r => r.name).concat((races.goals || []).filter(r => r.goal === "fixed" && g1Map.has(r.name)).map(r => r.name)))];
@@ -567,7 +576,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, outlook, trainedParent, itSkills, familyCover, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { context, outlook, trainedParent, itSkills, familyCover, pinkFocus, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };

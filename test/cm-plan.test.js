@@ -440,3 +440,21 @@ test("whites the ace's family already gives rank lower on the parent you train; 
   assert.equal(fresh.extra.whites.list.find(k => famOf(k.id) === famOf(w[0].id)).cover, cover[famOf(w[0].id)], "the parent's own white list knows it too");
   assert.ok(fresh.s.blueStats[1] > 21, "her veteran's Stamina 3★: the start bonus and more");
 });
+
+test("pink: an aptitude still below A comes first (start stars lift it for sure), then your rule's S", () => {
+  const apt = ace.apt.slice(); apt[0] = "B"; // Turf B on a turf race
+  const x = plan.context({ ace: { cid: ace.cid, tid: ace.id, apt }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build] });
+  const p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
+  const q = plan.rentalSearch(x, p1);
+  assert.equal(q.pink.label, "Turf", "Turf B → A first");
+  assert.equal(q.pink.target, "A");
+  assert.deepEqual(decode(q).p, [[CP.PINK_IDS[0], 3, 9]]);
+  assert.ok(plan.searchSummary(q).join(" · ").includes("to take the ace to A"));
+  assert.equal(plan.pinkFocus(x, p1.s).label, "Turf");
+  // her family already brings Turf pink: it lifts her to A, so pink goes to the S rule
+  const lifted = plan.rankVets(x, [vet(uniq[0], [], { parents: [] })].map(v => (v.self.pink = [0, 2], v)))[0];
+  assert.ok(lifted.s.pink.find(p => p.i === 0).p >= 0.9);
+  const q2 = plan.rentalSearch(x, lifted);
+  assert.equal(q2.pink.target, "S"); assert.notEqual(q2.pink.label, "Turf");
+  assert.equal(plan.pinkFocus(x, lifted.s).target, "S");
+});
