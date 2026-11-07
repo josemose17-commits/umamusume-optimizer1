@@ -26,6 +26,13 @@
     const { D, P, A, F, PR, esc } = ctx;
     const CP = root.UmaCmPlan.create({ A, F, skills: ctx.SB.DATA.skills, trainees: D.DATA.trainees, chars: ctx.chars(), saddles: ctx.saddles, SS: PR.SS, today: ctx.today });
     const VT = root.UmaVeterans ? root.UmaVeterans.create(ctx.SB.DATA.skills) : null;
+    // A parent's blue spark: the stat is random (1 in 5); its stars by that stat's final value
+    // (uma.guide; umareference gives 50/45/6 for the middle band): under 600 90/10/0,
+    // 600–1,100 45/50/5, over 1,100 20/70/10. You aim for 2★; 3★ is luck.
+    const BLUE_BANDS = [[600, [0.9, 0.1, 0]], [1100, [0.45, 0.5, 0.05]], [Infinity, [0.2, 0.7, 0.1]]];
+    const blueOdds = (v) => (BLUE_BANDS.find(([cap]) => v <= cap) || BLUE_BANDS[2])[1];
+    const twoPlus = (v) => { const o = blueOdds(v); return o[1] + o[2]; };
+    const blue2 = (stats) => stats.reduce((n, v) => n + twoPlus(v), 0) / stats.length;
     // Your own uma.moe API key (uma.moe → Settings → API Keys): kept in this browser only.
     const KEY = "uma-moe-api-key-v1";
     const apiKey = () => { try { return root.localStorage.getItem(KEY) || ""; } catch (e) { return ""; } };
@@ -281,7 +288,7 @@
     // Independent Training's Training Focus: her run (her deck, her extra G1s) simulated with each,
     // 16 careers; the one with the most runs at SS, then the higher average rating (the simulation
     // leaves out inheritance, so it often reaches SS in none: rating is the closest measure), then
-    // the most stats over 1,100 (the 3★ blue chance).
+    // the better chance her blue spark comes out 2★ or more.
     const FOCUS = [["balanced", "Balanced"], ["stamina", "Stamina"], ["sprint", "Sprint"]];
     async function focusPick(p, style, t, cards, n, blueStart) {
       const rate = ctx.spRate(p, style, t.apt), uniq = PR.uniqueBonus(t.r, t.r), minimum = PR.rankThreshold("SS");
@@ -290,7 +297,8 @@
       for (const [k, label] of FOCUS) {
         await tick();
         const x = ctx.simulate(p, t.id, cards, n, blueStart, k), fin = x.finals || [];
-        const over = fin.length ? fin.reduce((m, y) => m + y.stats.filter((v) => v > 1100).length, 0) / fin.length : x.stats.filter((v) => v > 1100).length;
+        // Her blue's chance of 2★ or better (the stat is random; stars by that stat's value).
+        const over = fin.length ? fin.reduce((m, y) => m + blue2(y.stats), 0) / fin.length : blue2(x.stats);
         rows.push({ k, label, stats: x.stats, sp: x.sp, rating: rating(x), hit: fin.filter((y) => rating(y) >= minimum).length, of: fin.length, over });
       }
       const best = rows.slice().sort((a, b) => b.hit - a.hit || b.rating - a.rating || b.over - a.over)[0];
@@ -366,6 +374,7 @@
     // A 3★ blue on a parent gives about 50 over the run, on a grandparent about 40 (family.js:
     // the start bonus plus both inspirations at a typical affinity).
     const PER_3STAR = Math.round((F.blueStats(3, 100, 1) + F.blueStats(3, 50, F.GRAND)) / 2);
+    const PER_2STAR = Math.round((F.blueStats(2, 100, 1) + F.blueStats(2, 50, F.GRAND)) / 2);
     // Her gaps, what her family's blues already give against them (her veteran, the grandparent
     // once you enter her, Parent 1 once she's trained), and the blue still to find.
     function gapsHTML(c, a, d, r) {
@@ -373,7 +382,8 @@
       if (!pred) return `<p class="mini">CM &amp; decks hasn't predicted her deck yet. <button type="button" class="btn small" data-goto-tab="cm">Build her deck in CM &amp; decks</button></p>`;
       const gaps = gapsOf(d), give = r && r.p1 && r.p1.s ? r.p1.s.blueStats || null : null;
       const left = gaps.map((g, i) => Math.max(0, Math.round(g - (give ? give[i] || 0 : 0))));
-      const cover = (g) => { const n = Math.ceil(g / PER_3STAR); return !g ? "—" : n > 6 ? `more than 6 sparks at 3★ (~${fmtN(g - 6 * PER_3STAR)} stays short)` : `${n} × 3★ (${n * 3}★ in all)`; };
+      // Your parents give 2★ (3★ is luck); rentals often carry 3★.
+      const cover = (g) => { if (!g) return "—"; const n2 = Math.ceil(g / PER_2STAR), n3 = Math.ceil(g / PER_3STAR); return n2 > 6 ? (n3 > 6 ? `more than 6 sparks even at 3★ (~${fmtN(g - 6 * PER_3STAR)} stays short)` : `more than 6 at 2★; ${n3} × 3★`) : `${n2} × 2★${n3 < n2 ? ` (or ${n3} × 3★)` : ""}`; };
       const rows = F.STAT_LABELS.map((l, i) => {
         const g = gaps[i];
         return `<tr${left[i] ? "" : ' class="cmp-cut"'}><td>${l}</td><td class="num">${pred.target[i]}</td><td class="num">${pred.stats[i]}</td><td class="num ${g ? "short" : ""}">${g ? "−" + g : "+" + (pred.stats[i] - pred.target[i])}</td>${give ? `<td class="num">${give[i] >= 1 ? "+" + fmtN(give[i]) : "—"}</td><td class="num ${left[i] ? "short" : ""}">${left[i] ? "−" + left[i] : g ? "✓" : "—"}</td>` : ""}<td>${cover(left[i])}</td></tr>`;
@@ -381,7 +391,7 @@
       const order = left.map((g, i) => [g, i]).filter(([g]) => g > 0).sort((x, y) => y[0] - x[0]).map(([, i]) => F.STAT_LABELS[i]);
       const who = r && r.p1 ? familyWho(r) : "";
       return `<div class="table-wrap"><table class="plan cmp-gaps"><thead><tr><th>Stat</th><th class="num">Target</th><th class="num">Predicted</th><th class="num">Gap</th>${give ? '<th class="num">Her family gives</th><th class="num">Still short</th>' : ""}<th>Blue to cover ${give ? "what's left" : "it"}</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="mini">${order.length ? `<b>Look for blue in ${order.join(", ")}</b>, biggest first.` : gaps.some(Boolean) ? "<b>Her family covers every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}About ${PER_3STAR} per 3★ spark over the run (start bonus + two inspirations).</p>`;
+        <p class="mini">${order.length ? `<b>Look for blue in ${order.join(", ")}</b>, biggest first.` : gaps.some(Boolean) ? "<b>Her family covers every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}About ${PER_2STAR} per 2★ spark and ${PER_3STAR} per 3★ over the run (start bonus + two inspirations).</p>`;
     }
     // The members whose sparks are known (or planned), in words.
     function familyWho(r) {
@@ -597,7 +607,7 @@
       }).join("");
       const races = tr.agenda.filter((x) => !x.free).map((x) => x.name);
       const anySS = fo && fo.rows.some((y) => y.hit > 0);
-      const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${y.over.toFixed(1)} stats over 1,100`).join(" · ")} (16 careers each, before inheritance). Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
+      const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${Math.round(y.over * 100)}% blue 2★+`).join(" · ")} (16 careers each, before inheritance). Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
       return `<div class="cmp-it"><h4>Independent Training settings</h4><p class="mini">For this deck and these ${plural(races.length, "extra G1")}.</p>${focus}
         <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it picks the event choice that gives them):</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
         ${list.anyway.length ? `<p class="mini"><b>Come anyway, no slot needed</b> (every choice of the event gives them, when it happens): ${list.anyway.map((k) => esc(ctx.skillName(k.id)) + (k.gold ? " (gold)" : "")).join(", ")}.</p>` : ""}
@@ -616,8 +626,7 @@
       if (!need) pink = "the ace needs none for this race.";
       else if (good(apt[need.i])) pink = `<b>${need.label}</b> for the ace (to ${need.target}). Hers lands on one of her A/S aptitudes at random (${tops.join(", ")}): about 1 in ${tops.length} for ${need.label}. Inherited pinks that lift another aptitude to A lower that.`;
       else pink = `<b>${need.label}</b> for the ace, but she has ${need.label} ${apt[need.i] || "?"}: her pink can only land there if her parents' pinks lift it to A (it picks among her A/S aptitudes).`;
-      const pct = (v) => (v > 1100 ? 10 : v >= 600 ? 5 : 0);
-      const stats = row ? F.STAT_LABELS.map((l, i) => `${l} ${row.stats[i]} (${pct(row.stats[i])}%)`).join(", ") : "";
+      const stats = row ? F.STAT_LABELS.map((l, i) => `${l} ${row.stats[i]} (${Math.round(twoPlus(row.stats[i]) * 100)}%)`).join(", ") : "";
       const uid = CP.inherited(t), uL = uid && r.x.raceL ? r.x.raceL[uid] || 0 : 0;
       // Whites her family already gives the ace count for less on her (they're ranked lower);
       // her family's copies still raise her chance of sparking them.
@@ -629,10 +638,10 @@
       const give = f.s && f.s.blueStats, gaps = r.gaps;
       const leftBlue = gaps && give ? gaps.map((g, i) => [Math.max(0, Math.round(g - (give[i] || 0))), i]).filter(([g]) => g > 0).sort((x, y) => y[0] - x[0]).map(([g, i]) => `${F.STAT_LABELS[i]} −${g}`).join(", ") : "";
       return `<div class="cmp-aim"><h4>Sparks to aim for on ${esc(tName(t))}</h4><ul class="mini">
-        <li><b>Whites</b> (the ones you control): learn ${whites || "the race's skills"}. A learned skill becomes a spark about 20% of the time, 40% if you learn its gold version; at SS they come out 1★/2★/3★ 20/70/10%.${had ? ` Her family already gives the ace ${had} (the chance one of their sparks fires for her), so those rank a little lower on her; their copies do raise her chance to spark them.` : ""}</li>
+        <li><b>Whites</b> (the ones you control): learn ${whites || "the race's skills"}. A learned skill becomes a spark about 20% of the time, 40% if you learn its gold version; at SS they come out 2★ 70% of the time (3★ 10%, luck).${had ? ` Her family already gives the ace ${had} (the chance one of their sparks fires for her), so those rank a little lower on her; their copies do raise her chance to spark them.` : ""}</li>
         <li><b>Green:</b> her unique ${uL >= 0.1 ? `is worth about ${uL.toFixed(2)} L here, so it counts for the ace` : "is weak on this race; it won't count much"}.</li>
         <li><b>Pink:</b> ${pink}${famPink}</li>
-        <li><b>Blue:</b> the stat is random, so you can't pick it; its stars depend on that stat (3★: 5% from 600, 10% over 1,100). Push as many stats past 1,100 as SS allows. Her predicted run: ${stats}.${gaps ? ` ${leftBlue ? `After her family's blues the ace is still short in ${leftBlue}: a blue there would help most.` : "Her family's blues already cover the ace's gaps."}` : ""}</li>
+        <li><b>Blue:</b> the stat is random (1 in 5), so you can't pick it. Aim for 2★: its stars depend on that stat, 2★ or better about 55% from 600 and 80% over 1,100 (3★ is luck: 5–10%). Get every stat past 600 first. Her predicted run, chance of 2★+ if it lands there: ${stats}; about ${row ? Math.round(blue2(row.stats) * 100) : "?"}% overall.${gaps ? ` ${leftBlue ? `After her family's blues the ace is still short in ${leftBlue}: a blue there would help most.` : "Her family's blues already cover the ace's gaps."}` : ""}</li>
       </ul></div>`;
     }
 
