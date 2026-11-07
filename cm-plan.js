@@ -435,7 +435,14 @@
         if (q.p1.saddles && q.p1.saddles.length) c.p2w = [...new Set(q.p1.saddles.map(Number))];
       }
       const blue = Array.isArray(q.blue) ? q.blue[0] : q.blue, broad = q.quality === "broad";
-      if (BLUE_IDS[blue]) { c.mb = [[BLUE_IDS[blue], broad ? 2 : 3, 3]]; if (!own) c.b = [[BLUE_IDS[blue], broad ? 6 : 7, 9]]; }
+      // blueRows: a planned split ({ main: [stat, min ★] on her, line: [[stat, min ★ across her and
+      // her parents], …] }), else one stat on her and across her line.
+      if (q.blueRows) {
+        const br = q.blueRows;
+        if (br.main && BLUE_IDS[br.main[0]]) c.mb = [[BLUE_IDS[br.main[0]], br.main[1], 3]];
+        const line = own ? [] : (br.line || []).filter(([i, n]) => BLUE_IDS[i] && n > 0);
+        if (line.length) c.b = line.map(([i, n]) => [BLUE_IDS[i], Math.min(9, n), 9]);
+      } else if (BLUE_IDS[blue]) { c.mb = [[BLUE_IDS[blue], broad ? 2 : 3, 3]]; if (!own) c.b = [[BLUE_IDS[blue], broad ? 6 : 7, 9]]; }
       const factor = (id) => meta[id] ? +meta[id][0] * 10 : null;
       const ws = new Map();
       (q.whites || []).forEach((w) => {
@@ -488,7 +495,7 @@
       const green = needs.green.map((g) => Object.assign({}, g, { owners: g.owners.filter((t) => +t.cid !== +x.ace.cid && +t.cid !== +p1.f.p1.cid && (!o.today || t.en && t.en <= o.today)) }))
         .filter((g) => g.owners.length).slice(0, 3);
       const saddles = [...new Set(opts.saddles || saddlesOf(p1))], broad = opts.quality === "broad", sort = opts.sort === "affinity" ? "affinity" : "whites";
-      const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: blueIndex, pink, whites, required, sort, quality: broad ? "broad" : "recommended", own: !!opts.own };
+      const q = { ace: x.ace.tid, p1: { tid: p1.f.p1.tid, saddles }, blue: blueIndex, blueRows: opts.blueRows || null, pink, whites, required, sort, quality: broad ? "broad" : "recommended", own: !!opts.own };
       return Object.assign(umaMoe(q), { q, blue, pink, auto, mode, remaining, given: given || null, choices, whites, required, green, wins: saddles.length, broad, sort,
         focused: green.map((g) => ({ skill: g, search: Object.assign(umaMoe(Object.assign({}, q, { green: g.owners.map((t) => t.id) })), { q: Object.assign({}, q, { green: g.owners.map((t) => t.id) }) }) })) });
     }
@@ -500,7 +507,8 @@
       const names = (q.whites || []).filter(w => !required.has(meta[w.id] && meta[w.id][0])).map(w => skillName(w.id) + (q.sort === "whites" ? " (P" + w.priority + ")" : ""));
       const lines = ["Affinity target: " + tn(c.t[0]), "Other parent (legacy): " + (c.p2c ? tn(c.p2c) + " · her " + (c.p2w || []).length + " G1 wins" : "none")];
       const aptName = (id) => MOE_STYLES[PINK_IDS.indexOf(id)] || F.APT_LABELS[PINK_IDS.indexOf(id)], toS = q.pink && q.pink.target ? " (to take the ace to " + q.pink.target + ")" : "";
-      if (c.mb) lines.push("Blue: " + F.STAT_LABELS[BLUE_IDS.indexOf(c.mb[0][0])] + " · " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " on the rental herself" + (c.b ? " · " + c.b[0][1] + "–9★ across her and her parents" : " (her own sparks only: her parents don't reach the ace)"));
+      const statName = (id) => F.STAT_LABELS[BLUE_IDS.indexOf(id)];
+      if (c.mb || c.b) lines.push("Blue: " + [c.mb ? statName(c.mb[0][0]) + " " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " on the rental herself" : ""].concat(c.b ? c.b.map((row) => statName(row[0]) + " " + row[1] + "–9★ across her and her parents") : []).filter(Boolean).join(" · ") + (c.b ? "" : " (her own sparks only: her parents don't reach the ace)"));
       lines.push("Pink: " + (c.mp ? aptName(c.mp[0][0]) + " · " + c.mp[0][1] + "–3★ on the rental herself" + toS : c.p ? aptName(c.p[0][0]) + " · 3–9★ across her and her parents; none needed on her" + toS : "off"));
       lines.push("Required whites: " + (q.required.length ? q.required.map(skillName).join(", ") + (c.mw ? " · on the rental herself, 1–3★ each" : " · 1–9★ each") + "; all required" : "none"));
       lines.push((q.sort === "whites" ? (q.own ? "Her own preferred whites (rank, don't filter): " : "Preferred whites (rank, don't filter): ") : "Whites to look for (not in the link): ") + (names.join(", ") || "none"));
