@@ -423,3 +423,20 @@ test("a skill an event gives on every choice takes no priority slot; one given o
   assert.deepEqual(list.anyway.map(k => k.id), [all[0].id], "listed apart");
   assert.equal(list.filter(k => !k.gamble).length, all.filter(k => !k.gamble).length - 1, "its slot goes to the next skill");
 });
+
+test("whites the ace's family already gives rank lower on the parent you train; the family's blues shrink her gaps", () => {
+  const x = x0(), w = plan.want(x).white;
+  const offers = {}; w.slice(0, 4).forEach(k => { offers[k.id] = 0.9; });
+  const v = vet(uniq[3], [[w[0].id, 3]], { blue: [1, 3] });
+  const t = uniq[2], fresh = plan.rankFresh(x, [v], [t.id], offers)[0];
+  const cover = plan.familyCover(fresh.s);
+  const famOf = (id) => SB.DATA.skills[id][0];
+  const g = fresh.s.white.find(k => famOf(k.id) === famOf(w[0].id));
+  assert.ok(g && Math.abs(cover[famOf(w[0].id)] - g.p) < 1e-12, "her veteran's 3★ spark: the chance it fires for the ace");
+  const plain = plan.itSkills(x, offers, 10), aware = plan.itSkills(x, offers, 10, new Set(), cover);
+  const rank = (list) => list.findIndex(k => famOf(k.id) === famOf(w[0].id));
+  assert.ok(rank(aware) >= rank(plain), "it moves down");
+  assert.equal(aware.find(k => famOf(k.id) === famOf(w[0].id)).cover, cover[famOf(w[0].id)]);
+  assert.equal(fresh.extra.whites.list.find(k => famOf(k.id) === famOf(w[0].id)).cover, cover[famOf(w[0].id)], "the parent's own white list knows it too");
+  assert.ok(fresh.s.blueStats[1] > 21, "her veteran's Stamina 3★: the start bonus and more");
+});
