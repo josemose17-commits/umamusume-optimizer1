@@ -138,11 +138,13 @@
     // copies: { family: how many of her parents and grandparents carry that white spark }; each
     // copy adds LINEAGE_WHITE to the chance a learned skill leaves its spark (uma.guide: 20% →
     // 22.5% → 25%…; the parenting guide has ×1.1 per copy instead, about the same for 1–3).
-    function freshWhites(x, offers, aff, r, copies) {
-      const fams = fam.families(x.rel), eff = fam.worthOf(x);
+    // cover: how likely the ace already gets each white from the rest of her family
+    // (familyCover); a white she'd get anyway is worth that much less on this parent.
+    function freshWhites(x, offers, aff, r, copies, cover) {
+      const fams = fam.families(x.rel), eff = fam.worthOf(x), cv = (f) => (cover && cover[f]) || 0;
       const fire = r.stars.reduce((n, d, k) => n + d * F.twice(F.WHITE, k + 1, aff), 0);
       const got = Object.keys(fams).map((f) => ({ f, p: Math.min(1, Math.max(0, ...fams[f].ids.map((id) => (offers && offers[id]) || 0))) }))
-        .filter((a) => a.p > 0).sort((a, b) => eff[b.f] - eff[a.f] || b.p - a.p);
+        .filter((a) => a.p > 0).sort((a, b) => eff[b.f] * (1 - cv(b.f)) - eff[a.f] * (1 - cv(a.f)) || b.p - a.p);
       let room = r.learn, value = 0;
       const list = [];
       got.forEach((a) => {
@@ -150,8 +152,8 @@
         if (p <= 0) return;
         room -= p;
         const chance = Math.min(1, r.spark + LINEAGE_WHITE * ((copies && copies[a.f]) || 0));
-        value += p * chance * fire * eff[a.f];
-        list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: p * chance, L: eff[a.f], copies: (copies && copies[a.f]) || 0 });
+        value += p * chance * fire * eff[a.f] * (1 - cv(a.f));
+        list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: p * chance, L: eff[a.f], copies: (copies && copies[a.f]) || 0, cover: cv(a.f) });
       });
       return { value, list, fire };
     }
@@ -162,7 +164,7 @@
     // anyway: skill ids one of her deck's events gives on every choice (most gold-skill events do):
     // they come whatever the AI picks, so they take no slot (listed apart, with .anyway).
     let famMembers = null;
-    function itSkills(x, offers, n = 10, anyway = new Set()) {
+    function itSkills(x, offers, n = 10, anyway = new Set(), cover = {}) {
       if (!famMembers) { famMembers = {}; Object.keys(meta).forEach((id) => { (famMembers[meta[id][0]] = famMembers[meta[id][0]] || []).push(id); }); }
       const fams = fam.families(x.rel), eff = fam.worthOf(x), o2 = offers || {}, rows = [];
       Object.keys(fams).forEach((f) => {
@@ -170,10 +172,11 @@
         const all = famMembers[f] || fams[f].ids, p = Math.min(1, Math.max(0, ...all.map((id) => o2[id] || 0)));
         const gold = all.filter((id) => meta[id] && meta[id][2] && o2[id] > 0).sort((a, b) => o2[b] - o2[a])[0];
         const white = fam.baseWhite(fams[f].ids[0]), id = String(gold || white);
-        rows.push({ family: f, id, white: String(white), gold: !!gold, p, L: eff[f], score: eff[f] * p, gamble: !(p > 0), anyway: anyway.has(id) || (gold && anyway.has(String(gold))) || false });
+        const c = cover[f] || 0;
+        rows.push({ family: f, id, white: String(white), gold: !!gold, p, L: eff[f], cover: c, score: eff[f] * p * (1 - c), gamble: !(p > 0), anyway: anyway.has(id) || (gold && anyway.has(String(gold))) || false });
       });
       const offered = rows.filter((r) => !r.gamble && !r.anyway).sort((a, b) => b.score - a.score || b.L - a.L);
-      const rest = rows.filter((r) => r.gamble).sort((a, b) => b.L - a.L);
+      const rest = rows.filter((r) => r.gamble).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
       return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L) });
     }
     // Her blue spark's stat is random (1 in 5 each), its stars 20/70/10% (her stats at SS are 1100+):
@@ -207,8 +210,17 @@
       return { cid: t.cid, tid: t.id, white: [], blue: [0, 0], pink: [0, 0], green: u ? FRESH_STARS : 0, wins: [], unique: u };
     }
     // The family score's parts for her that it can't count itself, at her own affinity there.
+    // How likely the ace already gets each white family's hint from her family without Parent 1
+    // (her veteran, the grandparent, Parent 2's side): 1 − Π(1 − each spark's chance).
+    function familyCover(s) {
+      const miss = {};
+      ((s && s.white) || []).forEach((w) => { if (w.slot === "p1") return; const f = fam.family(w.id); if (f == null) return; miss[f] = (miss[f] == null ? 1 : miss[f]) * (1 - w.p); });
+      const out = {};
+      Object.keys(miss).forEach((f) => { out[f] = 1 - miss[f]; });
+      return out;
+    }
     function freshExtra(x, t, s, offers, r, parents) {
-      const aff = s.own.p1 || 0, w = freshWhites(x, offers, aff, r, lineageCopies(x, parents));
+      const aff = s.own.p1 || 0, w = freshWhites(x, offers, aff, r, lineageCopies(x, parents), familyCover(s));
       const blue = blueExpected(x, aff), pink = pinkExpected(x, t, aff, s);
       return { value: w.value + blue + pink, whites: w, blue, pink };
     }
@@ -455,7 +467,7 @@
       const pink = focus ? Object.assign({}, focus, { min: 3, main: false }) : null;
       // The gap her known family (Parent 1 and her parents, with their real sparks) leaves: the
       // rental's blue goes to the biggest one still open.
-      const given = p1.s && p1.s.blueStats, remaining = x.gaps ? x.gaps.map((g, i) => Math.max(0, Math.round(g - ((given && given[i]) || 0)))) : null;
+      const given = opts.given || (p1.s && p1.s.blueStats), remaining = x.gaps ? x.gaps.map((g, i) => Math.max(0, Math.round(g - ((given && given[i]) || 0)))) : null;
       const left = remaining && remaining.some((v) => v > 0) ? remaining.indexOf(Math.max(...remaining)) : null;
       const blueIndex = opts.blue != null && opts.blue !== "auto" && BLUE_IDS[+opts.blue] ? +opts.blue : left != null ? left : (needs.blue[0] || { i: 0 }).i;
       const blue = [{ i: blueIndex, label: F.STAT_LABELS[blueIndex] }];
@@ -497,7 +509,7 @@
       // Her grandparent is the ace's grandparent too: pink by the ace's rule, the ace's missing whites.
       // Only her own sparks reach the ace (her parents would be great-grandparents), so the search
       // asks for them on her: own blue, own pink, own required whites.
-      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s), pinkFor: x, own: true }));
+      return rentalSearch(tx, { kind: "vet", v, f, s }, Object.assign({}, opts, { whites: missingWhites(x, fresh.s), pinkFor: x, own: true, given: fresh.s && fresh.s.blueStats }));
     }
     function raceWins(races, n) {
       return [...new Set(upTo(races, n).map(r => r.name).concat((races.goals || []).filter(r => r.goal === "fixed" && g1Map.has(r.name)).map(r => r.name)))];
@@ -555,7 +567,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, outlook, trainedParent, itSkills, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { context, outlook, trainedParent, itSkills, familyCover, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };
