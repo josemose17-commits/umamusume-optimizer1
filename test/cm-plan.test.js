@@ -458,3 +458,15 @@ test("pink: an aptitude still below A comes first (start stars lift it for sure)
   assert.equal(q2.pink.target, "S"); assert.notEqual(q2.pink.label, "Turf");
   assert.equal(plan.pinkFocus(x, lifted.s).target, "S");
 });
+
+test("a planned blue split: Parent 2's own stat on her, each stat's stars across her line", () => {
+  const x = x0(), p1 = plan.rankVets(x, [vet(uniq[0], [])])[0];
+  const q = plan.rentalSearch(x, p1, { blueRows: { main: [1, 3], line: [[1, 6], [2, 3]] } });
+  const f = decode(q);
+  assert.deepEqual(f.mb, [[CP.BLUE_IDS[1], 3, 3]]);
+  assert.deepEqual(f.b, [[CP.BLUE_IDS[1], 6, 9], [CP.BLUE_IDS[2], 3, 9]], "Stamina 6–9★ and Power 3–9★ across her and her parents");
+  const text = plan.searchSummary(q).join(" · ");
+  assert.ok(text.includes("Stamina 3★ on the rental herself") && text.includes("Stamina 6–9★") && text.includes("Power 3–9★"));
+  const gp = decode(plan.trainingRentalSearch(...(() => { const t = uniq[2], v = vet(uniq[3], []); const fr = plan.rankFresh(x, [v], [t.id], {})[0]; return [x, fr, { blueRows: { main: [3, 2], line: [] } }]; })()));
+  assert.deepEqual(gp.mb, [[CP.BLUE_IDS[3], 2, 3]], "the grandparent's own blue at the planned stars"); assert.ok(!gp.b);
+});

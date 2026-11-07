@@ -308,17 +308,19 @@
     // The uma.moe search for the ace's Parent 2, with this Parent 1 (her G1s as the legacy).
     // Her blue goes to the biggest gap left after her family and the grandparent you'll borrow
     // (bluePlan), so the two searches don't chase the same stat when one 3★ would close it.
+    // Her blues follow the plan (bluePlan) unless you pick a stat yourself.
     function parent2Search(r, prefs) {
-      const saddles = CP.saddlesOf(r.useFresh ? r.train.f : r.p1), give = (r.p1.s && r.p1.s.blueStats) || [0, 0, 0, 0, 0];
-      const given = give.slice();
-      if (r.gaps) {
-        const left = r.gaps.map((g, i) => Math.max(0, Math.round(g - (give[i] || 0))));
-        bluePlan(r, left).picks.filter((p) => p.who.startsWith("Grandparent")).forEach((p) => { given[p.i] += p.add; });
-      }
-      return CP.rentalSearch(r.x, r.p1, Object.assign({}, prefs || {}, { saddles, given }));
+      const saddles = CP.saddlesOf(r.useFresh ? r.train.f : r.p1), plan = planFor(r);
+      const auto = !prefs || prefs.blue == null || prefs.blue === "auto";
+      const rows = auto && plan && plan.picks.some((p) => p.key.startsWith("p2")) ? blueRows(plan, ["p2", "p2a", "p2b"]) : null;
+      return CP.rentalSearch(r.x, r.p1, Object.assign({}, prefs || {}, { saddles, blueRows: rows }));
     }
     // The uma.moe search for the grandparent: the new parent is the target, your veteran the legacy.
-    const grandparentSearch = (r, prefs) => CP.trainingRentalSearch(r.x, r.train.f, prefs);
+    const grandparentSearch = (r, prefs) => {
+      const plan = planFor(r), gp = plan && plan.picks.find((p) => p.key === "gp");
+      const auto = !prefs || prefs.blue == null || prefs.blue === "auto";
+      return CP.trainingRentalSearch(r.x, r.train.f, Object.assign({}, prefs || {}, auto && gp ? { blueRows: { main: [gp.i, gp.stars], line: [] } } : {}));
+    };
 
     // ---------- CM & decks: the cup and your team ----------
     function teamHTML() {
@@ -391,27 +393,73 @@
       const plan = bluePlan(r, left), after = plan.after;
       const rows = F.STAT_LABELS.map((l, i) => {
         const g = gaps[i], picks = plan.picks.filter((p) => p.i === i);
-        return `<tr${left[i] ? "" : ' class="cmp-cut"'}><td>${l}</td><td class="num">${pred.target[i]}</td><td class="num">${pred.stats[i]}</td><td class="num ${g ? "short" : ""}">${g ? "−" + g : "+" + (pred.stats[i] - pred.target[i])}</td>${give ? `<td class="num">${give[i] >= 1 ? "+" + fmtN(give[i]) : "—"}</td>` : ""}<td>${picks.length ? picks.map((p) => `${esc(p.who)} ~+${fmtN(p.add)}`).join("<br>") : "—"}</td><td class="num ${after[i] ? "short" : ""}">${after[i] ? "−" + after[i] : g ? "✓" : "—"}</td></tr>`;
+        return `<tr${left[i] ? "" : ' class="cmp-cut"'}><td>${l}</td><td class="num">${pred.target[i]}</td><td class="num">${pred.stats[i]}</td><td class="num ${g ? "short" : ""}">${g ? "−" + g : "+" + (pred.stats[i] - pred.target[i])}</td>${give ? `<td class="num">${give[i] >= 1 ? "+" + fmtN(give[i]) : "—"}</td>` : ""}<td>${picks.length ? picks.map((p) => `${esc(p.who)} ~+${fmtN(p.add)}`).join("<br>") : "—"}</td><td class="num ${after[i] > ROLL ? "short" : ""}">${after[i] > ROLL ? "−" + after[i] : after[i] ? `≈ ✓ <span class="mini">(−${after[i]})</span>` : g ? "✓" : "—"}</td></tr>`;
       }).join("");
       const who = r && r.p1 ? familyWho(r) : "";
       return `<div class="table-wrap"><table class="plan cmp-gaps"><thead><tr><th>Stat</th><th class="num">Target</th><th class="num">Predicted</th><th class="num">Gap</th>${give ? '<th class="num">Her family gives</th>' : ""}<th>Blue you can still pick</th><th class="num">Still short</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="mini">${plan.picks.length ? `<b>Blue to look for:</b> ${plan.text}.` : gaps.some(Boolean) ? "<b>No blue left to pick</b>: every borrowed slot is filled." : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}Only the umas you borrow have a blue you choose (one each); the parent you train gets a random stat.</p>`;
+        <p class="mini">${plan.picks.length ? `<b>${plan.exact ? "✓ These close every gap" : plan.closed ? "✓ These close every gap (≈: within one inspiration roll)" : "Closes the most it can"}:</b> ${plan.text}.${plan.closed ? "" : ` Still short after them: ${after.map((v, i) => v > ROLL ? F.STAT_LABELS[i] + " −" + v : "").filter(Boolean).join(", ")}; a stronger deck in CM &amp; decks or lower targets would close the rest.`}` : gaps.some(Boolean) && after.some((v) => v > ROLL) ? "<b>No blue left to pick</b>: every borrowed slot is filled." : gaps.some(Boolean) ? "<b>✓ Her family closes every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}Only the umas you borrow have a blue you choose (one each); the parent you train gets a random stat.</p>`;
     }
-    // The blue sparks you still choose: the grandparent's own (her search: 3★, one stat), then
-    // Parent 2 and her two parents in one stat (her search: own 3★, 7–9★ across the three, so
-    // about 3★ + 3★ + 2★). Each goes to the biggest gap still open, in the order you borrow.
+    // The blue sparks you still choose, split to leave the least short: the grandparent's own
+    // (if not borrowed yet), Parent 2's own, and her two parents', each in any gap stat at 2★ or
+    // 3★. Every split is tried (least short, then fewest stars asked = more rentals, then fewer
+    // stats). The searches ask for exactly that split. Typical affinity: a parent's 3★ blue adds
+    // about 50 over the run, a grandparent's about 41 (2★: about 26 and 23).
+    const ROLL = 20;
     function bluePlan(r, left) {
       const after = left.slice(), picks = [];
-      if (!r || !r.p1) return { picks, after, text: "" };
-      const big = () => { let k = -1; after.forEach((g, i) => { if (g > 0 && (k < 0 || g > after[k])) k = i; }); return k; };
-      const take = (who, adds) => { const i = big(); if (i < 0) return; adds.forEach(([label, v]) => { picks.push({ i, who: label, add: v }); after[i] = Math.max(0, Math.round(after[i] - v)); }); return i; };
-      const gp3 = F.blueStats(3, 50, F.GRAND), p3 = F.blueStats(3, 100, 1), g2 = F.blueStats(2, 50, F.GRAND);
-      if (r.useFresh && !r.train.f.rental) take("gp", [["Grandparent 3★", gp3]]);
-      take("p2", [["Parent 2 3★", p3], ["her parents 3★ + 2★", gp3 + g2]]);
+      if (!r || !r.p1) return { picks, after, text: "", closed: false };
+      const stats = left.map((g, i) => [g, i]).filter(([g]) => g > 0).map(([, i]) => i);
+      if (!stats.length) return { picks, after, text: "", closed: true };
+      const val = { p: [0, 0, F.blueStats(2, 100, 1), F.blueStats(3, 100, 1)], g: [0, 0, F.blueStats(2, 50, F.GRAND), F.blueStats(3, 50, F.GRAND)] };
+      const slots = [];
+      if (r.useFresh && !(r.train && r.train.f.rental)) slots.push({ key: "gp", who: "Grandparent", scale: "g" });
+      slots.push({ key: "p2", who: "Parent 2", scale: "p" }, { key: "p2a", who: "Parent 2's parent", scale: "g" }, { key: "p2b", who: "Parent 2's other parent", scale: "g" });
+      const opts = [null].concat(...stats.map((i) => [[i, 2], [i, 3]]));
+      let best = null;
+      const pick = new Array(slots.length);
+      const walk = (k) => {
+        if (k === slots.length) {
+          const rest = left.slice(); let starsAsked = 0; const used = new Set();
+          pick.forEach((o, n) => { if (!o) return; rest[o[0]] -= val[slots[n].scale][o[1]]; starsAsked += o[1]; used.add(o[0]); });
+          // Her two parents are interchangeable: count each split once.
+          const a = pick[slots.length - 2], b = pick[slots.length - 1];
+          if (a && b && (a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]))) return;
+          if (!a && b) return;
+          // At most 8★ in one stat across Parent 2 and her parents (3★ + 3★ + 2★): a 9★ line is rare on uma.moe.
+          const line = {}; pick.forEach((o, n) => { if (o && slots[n].key.startsWith("p2")) line[o[0]] = (line[o[0]] || 0) + o[1]; });
+          if (Object.values(line).some((v) => v > 8)) return;
+          const short = rest.reduce((n, v) => n + Math.max(0, v), 0), key = [Math.round(short), starsAsked, used.size];
+          if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && (key[1] < best.key[1] || (key[1] === best.key[1] && key[2] < best.key[2])))) best = { key, pick: pick.slice() };
+          return;
+        }
+        opts.forEach((o) => { pick[k] = o; walk(k + 1); });
+      };
+      walk(0);
+      best.pick.forEach((o, n) => {
+        if (!o) return;
+        const add = val[slots[n].scale][o[1]];
+        picks.push({ i: o[0], stars: o[1], key: slots[n].key, who: `${slots[n].who} ${o[1]}★`, add });
+        after[o[0]] = Math.max(0, Math.round(after[o[0]] - add));
+      });
       const by = {}; picks.forEach((p) => { (by[p.i] = by[p.i] || []).push(p.who); });
       const text = Object.keys(by).map((i) => `${F.STAT_LABELS[i]} from ${by[i].join(", ")}`).join("; ");
-      return { picks, after, text };
+      // Within one inspiration roll (a 3★ blue firing adds a random 1–28) counts as closed: these
+      // are averages, and a real run lands a few dozen points either way.
+      return { picks, after, text, closed: after.every((v) => v <= ROLL), exact: after.every((v) => v <= 0) };
     }
+    // The planned split as uma.moe rows: Parent 2's own blue, and per stat the stars across her
+    // and her parents (hers included); the grandparent's own blue for her search.
+    function blueRows(plan, keys) {
+      const own = plan.picks.find((p) => p.key === keys[0]);
+      const line = {};
+      plan.picks.filter((p) => keys.includes(p.key)).forEach((p) => { line[p.i] = (line[p.i] || 0) + p.stars; });
+      return { main: own ? [own.i, own.stars] : null, line: Object.keys(line).map((i) => [+i, line[i]]) };
+    }
+    function planFor(r) {
+      const give = (r.p1.s && r.p1.s.blueStats) || [0, 0, 0, 0, 0];
+      return r.gaps ? bluePlan(r, r.gaps.map((g, i) => Math.max(0, Math.round(g - (give[i] || 0))))) : null;
+    }
+
     // The members whose sparks are known (or planned), in words.
     function familyWho(r) {
       const fam = (r.p1.aff && r.p1.aff.family) || {}, label = { p1: "Parent 1", g11: "her veteran", g12: "the grandparent", p2: "Parent 2", g21: "Parent 2's parent", g22: "Parent 2's parent" };
@@ -680,7 +728,8 @@
       if (!r || !r.p1) return `<p class="mini">Find Parent 1 first.</p>`;
       const p1 = r.useFresh ? r.train.f.t : trainee(r.p1.v.tid), l = parent2Search(r, d.rental);
       const given = l.given ? l.given.map((v, i) => v >= 1 && r.gaps && r.gaps[i] ? `${F.STAT_LABELS[i]} ~+${fmtN(v)}` : "").filter(Boolean) : [];
-      const note = r.gaps && given.length ? `<p class="mini">${r.trained ? "Her real family" : "Her family so far"} covers ${given.join(", ")} of the gaps; ${l.remaining && l.remaining.some((v) => v > 0) ? `Parent 2's blue goes to <b>${F.STAT_LABELS[l.blue[0].i]}</b> (~${fmtN(l.remaining[l.blue[0].i])} still short)` : "no gap is left, so blue goes to her key stat"}.</p>` : "";
+      const plan = planFor(r), mine = plan ? plan.picks.filter((p) => p.key.startsWith("p2")) : [];
+      const note = r.gaps ? `<p class="mini">${given.length ? `${r.trained ? "Her real family" : "Her family so far"} covers ${given.join(", ")} of the gaps. ` : ""}${mine.length ? `Parent 2's blues (step 1's plan): ${mine.map((p) => `${p.who} ${F.STAT_LABELS[p.i]}`).join(", ")}${plan.closed ? ", which closes every gap" : ""}.` : "No gap left for Parent 2: blue goes to her key stat."}</p>` : "";
       return note + searchHTML("Parent 2 search", l, "ace", d.rental, tName(trainee(a.tid)) + ", with " + (p1 ? tName(p1) : "Parent 1") + " as Parent 1");
     }
 
