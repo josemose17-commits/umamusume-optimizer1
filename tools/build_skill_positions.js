@@ -1,4 +1,4 @@
-// Which skills only fire from one half of the pack, from their conditions in alpha123's Umalator
+// Which skills only fire from one part of the pack, from their conditions in alpha123's Umalator
 // game data: "back" when every way to fire needs her in the back half (order_rate >= 50, or kept
 // outside the top 50%+), "front" when every way needs her in the front half (order_rate <= 50,
 // kept inside the top 50% or less, or in the top 3 places). The Umalator simulates one runner
@@ -6,8 +6,13 @@
 // for Front Runners and Pace Chasers and front-half skills for End Closers. The game's own style
 // skills split the pack the same way (Pace Chaser skills: order_rate <= 50; Late Surger skills:
 // order_rate >= 40).
+// "ahead" when every way to fire needs a rival ahead of her: one close in front in her lane
+// (No Stopping Me!, Slipstream), one to pass or passing one, being blocked from the front, moving
+// up places, or being within a length of the uma ahead. The Umalator takes those as happening at
+// some random moment, but the charts run a Front Runner in 1st place, where nobody is ahead of her,
+// so the app drops these for Front Runners.
 // Usage: node tools/build_skill_positions.js <skill_data.json>
-// (from https://github.com/alpha123/uma-skill-tools/blob/master/data/skill_data.json).
+// (Global's: https://alpha123.github.io/uma-tools/umalator-global/skill_data.json).
 "use strict";
 const fs = require("node:fs");
 const path = require("node:path");
@@ -27,31 +32,61 @@ function side(cond) {
   for (const m of cond.matchAll(/order(<=|==)(\d+)(?!\d)/g)) if (+m[2] <= 3) s = "front";
   return s;
 }
-// Skill data -> { back, front }: the skills whose every way to fire needs that half of the pack.
-// tools/build_skill_versions.js uses it too, for each JP-dated cup's own skill versions.
+
+// Clauses that only hold with a rival ahead of her: counts and times of umas in front (an
+// overtake target, one close in her lane, being blocked from the front, rushing umas in front)
+// that must be at least 1, places gained, and the gap to the uma ahead. "No uma close in front"
+// (near_infront_count==0) holds for a leader, so it isn't one.
+const AHEAD_COUNTS = /^(infront_near_lane_time|blocked_front|blocked_front_continuetime|is_overtake|overtake_target_time|overtake_target_no_order_up_time|temptation_opponent_count_infront|change_order_up_[a-z_]+)$/;
+function needsAhead(clause) {
+  const m = /^([a-z_0-9]+)(==|!=|>=|<=|>|<)(-?\d+)$/.exec(clause.trim());
+  if (!m) return false;
+  const k = m[1], op = m[2], x = +m[3];
+  if (AHEAD_COUNTS.test(k)) return (op === ">=" && x >= 1) || (op === ">" && x >= 0) || (op === "==" && x >= 1);
+  if (k === "bashin_diff_infront") return op === "<=" || op === "<";
+  // Her place went up (a smaller number): a leader has no place to gain.
+  if (k === "change_order_onetime") return (op === "<" && x <= 0) || ((op === "<=" || op === "==") && x < 0);
+  return false;
+}
+// Every way to fire of one skill entry: each precondition branch with each condition branch.
+function ways(entry) {
+  const out = [];
+  (entry.alternatives || []).forEach((a) => {
+    const pres = a.precondition ? a.precondition.split("@") : [""];
+    pres.forEach((p) => (a.condition || "").split("@").forEach((c) => out.push(p ? p + "&" + c : c)));
+  });
+  return out;
+}
+
+// Skill data -> { back, front, ahead }: the skills whose every way to fire needs that half of the
+// pack, or a rival ahead of her. tools/build_skill_versions.js uses it too, for each JP-dated
+// cup's own skill versions.
 function classify(data) {
-  const back = [], front = [];
+  const back = [], front = [], ahead = [];
   Object.keys(data).sort((a, b) => +a - +b).forEach((id) => {
-    const ways = [];
+    const sides = [];
     (data[id].alternatives || []).forEach((a) => {
       const pre = a.precondition ? a.precondition + "&" : "";
-      (a.condition || "").split("@").forEach((c) => ways.push(side(pre + c)));
+      (a.condition || "").split("@").forEach((c) => sides.push(side(pre + c)));
     });
-    if (!ways.length) return;
-    if (ways.every((s) => s === "back")) back.push(id);
-    else if (ways.every((s) => s === "front")) front.push(id);
+    if (!sides.length) return;
+    if (sides.every((s) => s === "back")) back.push(id);
+    else if (sides.every((s) => s === "front")) front.push(id);
+    const w = ways(data[id]);
+    if (w.length && w.every((c) => c.split("&").some(needsAhead))) ahead.push(id);
   });
-  return { back, front };
+  return { back, front, ahead };
 }
-module.exports = { classify };
+module.exports = { classify, needsAhead };
 
 if (require.main === module) {
   const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-  const { back, front } = classify(data);
-  const out = { meta: { source: "alpha123's Umalator Global game data (skill_data); game data © Cygames, Inc.", built: new Date().toISOString().slice(0, 10) }, back, front };
+  const { back, front, ahead } = classify(data);
+  const out = { meta: { source: "alpha123's Umalator Global game data (skill_data); game data © Cygames, Inc.", built: new Date().toISOString().slice(0, 10) }, back, front, ahead };
   fs.writeFileSync(path.join(__dirname, "../data/skill-positions.js"), "// Generated by tools/build_skill_positions.js. Do not edit. Game data © Cygames, Inc.\n" +
-    "// Skills that only fire from the back half (back) or the front half (front) of the pack.\n" +
+    "// Skills that only fire from the back half (back) or the front half (front) of the pack, or\n" +
+    "// with a rival ahead of her (ahead).\n" +
     "(function (root) {\n  const data = " + JSON.stringify(out) + ";\n" +
     "  if (typeof module !== \"undefined\" && module.exports) module.exports = data;\n  else root.UmaSkillPositions = data;\n})(typeof window !== \"undefined\" ? window : globalThis);\n");
-  console.log("back", back.length, "front", front.length);
+  console.log("back", back.length, "front", front.length, "ahead", ahead.length);
 }

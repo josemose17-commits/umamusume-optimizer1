@@ -2123,6 +2123,7 @@
   const ASSET_V = ((document.currentScript && document.currentScript.src.match(/v=([\w-]+)/)) || [])[1] || "1";
   const STYLES = [["Nige", "Front"], ["Senkou", "Pace"], ["Sasi", "Late"], ["Oikomi", "End"]];
   const STYLE_LABEL = Object.fromEntries(STYLES);
+  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer" };
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const PASTE_KEY = "uma-skillpaste-v1";
   let pasted = {};
@@ -2272,19 +2273,32 @@
   const skillInfo = (id) => (SV && SV.skills[id]) || [D.DATA.skills[id] || "#" + id, D.skillCost(id) || 0, 1, 1];
 
   // Skills ranked by median length gain for a preset and style. Your pasted Umalator results win.
-  // A race's skill values for a style. The Umalator runs one horse without a pack, so skills that
-  // need her in the other half of the field (Leap Forward for a Pace Chaser) are left out here,
-  // for every use: data/skill-positions.js, parent-relevance.js positionFits.
-  function skillRows(pid, style) {
-    const pos = positionsFor(presetById(pid));
-    const fits = (r) => window.UmaParentRelevance.positionFits(pos, r.id, style);
+  function chartRows(pid, style) {
     const mine = pasted[pid] && pasted[pid][style];
-    if (mine) {
-      return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).filter(fits).sort((a, b) => b.L - a.L);
-    }
+    if (mine) return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).sort((a, b) => b.L - a.L);
     const data = svCache[pid];
     if (!data || typeof data === "string" || !data[style]) return [];
-    return data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 })).filter(fits);
+    return data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
+  }
+  // A race's skill values for a style. The Umalator runs one horse without a pack, so skills that
+  // need her in the other half of the field (Leap Forward for a Pace Chaser), or a rival ahead of
+  // a Front Runner, who runs in 1st (No Stopping Me!), are left out here, for every use:
+  // data/skill-positions.js, parent-relevance.js positionFits.
+  function skillRows(pid, style) {
+    const pos = positionsFor(presetById(pid));
+    return chartRows(pid, style).filter((r) => window.UmaParentRelevance.positionFits(pos, r.id, style));
+  }
+  // The rows skillRows leaves out, by why: { ahead, back, front }, most valuable first.
+  function skillsLeftOut(pid, style) {
+    const pos = positionsFor(presetById(pid)), out = { ahead: [], back: [], front: [] };
+    chartRows(pid, style).forEach((r) => { const why = window.UmaParentRelevance.positionMiss(pos, r.id, style); if (why) out[why].push(r); });
+    return out;
+  }
+  // Why a skill can't fire for this style, in a few words, or "".
+  const MISS_SHORT = { ahead: "won't fire while she leads", back: "needs her in the back half", front: "needs her in the front half" };
+  function positionNote(pid, id, style) {
+    const why = window.UmaParentRelevance.positionMiss(positionsFor(presetById(pid)), id, style);
+    return why ? MISS_SHORT[why] : "";
   }
 
   function skillMap(pid, style) {
@@ -2779,7 +2793,9 @@
       ${c.must.length ? `<div class="row-wrap">${c.must.map((id) => {
         const n = (src[id] || []).length;
         const note = known.has(String(id)) ? "available to your trainee" : n ? n + (mine ? " of your cards" : " cards") : mine ? "none of your cards" : "no support card";
-        return `<span class="chip lockchip${n || known.has(String(id)) ? "" : " warnchip"}">${skillNameHTML(id)} <span class="mini">${note}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
+        // A must-have she can't fire in her place in the pack (No Stopping Me! for a Front Runner).
+        const miss = positionNote(c.preset, id, c.style);
+        return `<span class="chip lockchip${(n || known.has(String(id))) && !miss ? "" : " warnchip"}"${miss ? ` title="The skill values leave it out for ${/^[AEIOU]/.test(STYLE_NAME[c.style] || "") ? "an" : "a"} ${esc(STYLE_NAME[c.style] || c.style)}: ${esc(miss)}."` : ""}>${skillNameHTML(id)} <span class="mini">${note}${miss ? " · " + esc(miss) : ""}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
       }).join("")}</div>` : ""}
       <p class="mini">${c.goal === "race" ? "The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts." : "Parent must-haves prioritize cards with a direct hint/event source or a canonical gold prerequisite route. A gold route makes the white purchasable, without granting its hint discount."} Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
     </div>`;
@@ -3469,6 +3485,7 @@
           return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
+      ${leftOutHTML(p, c, cut)}
       <details class="paste" data-cmp-open="${host}-paste">
         <summary>Use your own Umalator results</summary>
         <p class="mini">In the Umalator's <b>Skill chart</b> tab, set up your own uma for this race and run it, then select the whole results table, copy it and paste it here. The coach reads each skill's median and uses it for this race and running style (${STYLE_LABEL[c.style]}). For purchase comparisons, use a chart with no purchased skills; the Umalator's learned-skill list is not imported.</p>
@@ -3476,6 +3493,22 @@
         <div class="row-wrap"><button type="button" class="btn small" id="cmPasteBtn">Use these values</button>${mine ? '<button type="button" class="btn ghost small" id="cmPasteReset">Go back to the built-in values</button>' : ""}</div>
       </details>
     </section>`;
+  }
+
+  // Under the skills table: what the values leave out for her running style, and why (the same
+  // release filter as the table).
+  function leftOutHTML(p, c, cut) {
+    const REL = window.UmaSkillRelease, out = skillsLeftOut(p.id, c.style);
+    const list = (k) => out[k].filter((r) => !c.globalSkills || REL.outBy(skillInfo(r.id), cut));
+    const names = (rows) => rows.slice(0, 3).map((r) => skillNameHTML(r.id)).join(", ") + (rows.length > 3 ? "…" : "");
+    const count = (rows) => rows.length + (rows.length === 1 ? " skill" : " skills");
+    const ahead = list("ahead"), back = list("back"), front = list("front"), parts = [];
+    if (ahead.length) parts.push(`${count(ahead)} that need a rival right ahead of her (${names(ahead)}), since the values have her leading, with nobody ahead`);
+    if (back.length) parts.push(`${count(back)} that need her in the back half of the pack (${names(back)})`);
+    if (front.length) parts.push(`${count(front)} that need her in the front half of the pack (${names(front)})`);
+    if (!parts.length) return "";
+    const style = STYLE_NAME[c.style] || c.style;
+    return `<p class="mini cm-leftout">Left out for ${/^[AEIOU]/.test(style) ? "an" : "a"} ${esc(style)}: ${parts.join("; ")}. The Umalator runs one uma alone, so it would count them.</p>`;
   }
 
   function parseUmalator(text) {

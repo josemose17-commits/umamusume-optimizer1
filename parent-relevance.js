@@ -62,26 +62,34 @@
   // Whether a skill can fire for this running style, by where in the pack it needs her
   // (data/skill-positions.js): back-half skills never fit Front Runners or Pace Chasers, and
   // front-half skills never fit End Closers; Late Surgers move through the pack, so both fit.
-  const BACK_NO = { Nige: 1, Senkou: 1 }, FRONT_NO = { Oikomi: 1 };
-  function positionFits(pos, id, style) {
-    if (!pos) return true;
-    if (!pos.sets) pos.sets = { back: new Set(pos.back.map(String)), front: new Set(pos.front.map(String)) };
-    return !(BACK_NO[style] && pos.sets.back.has(String(id))) && !(FRONT_NO[style] && pos.sets.front.has(String(id)));
+  // The charts run a Front Runner in 1st place, so skills that need a rival ahead of her (No
+  // Stopping Me!, Slipstream, passing skills) never fit her either.
+  const BACK_NO = { Nige: 1, Senkou: 1 }, FRONT_NO = { Oikomi: 1 }, AHEAD_NO = { Nige: 1 };
+  // Why a skill can't fire for this style: "back", "front", "ahead", or null when it can.
+  function positionMiss(pos, id, style) {
+    if (!pos) return null;
+    if (!pos.sets) pos.sets = { back: new Set(pos.back.map(String)), front: new Set(pos.front.map(String)), ahead: new Set((pos.ahead || []).map(String)) };
+    const k = String(id);
+    if (AHEAD_NO[style] && pos.sets.ahead.has(k)) return "ahead";
+    if (BACK_NO[style] && pos.sets.back.has(k)) return "back";
+    if (FRONT_NO[style] && pos.sets.front.has(k)) return "front";
+    return null;
   }
+  const positionFits = (pos, id, style) => !positionMiss(pos, id, style);
 
   // A cup's own positions: data/skill-positions.js (Global's skill versions) with a JP-dated cup's
-  // changes (data/skillvalues/index.js meta.variants[...].positions: { back|front: { add, del } }),
-  // for the conditions JP changed by then and the skills only JP has.
+  // changes (data/skillvalues/index.js meta.variants[...].positions: { back|front|ahead: { add,
+  // del } }), for the conditions JP changed by then and the skills only JP has.
   function positionsWith(base, changes) {
     if (!base || !changes) return base;
     const adj = (k) => {
       const d = changes[k] || {}, del = new Set((d.del || []).map(String));
-      return base[k].map(String).filter((id) => !del.has(id)).concat((d.add || []).map(String));
+      return (base[k] || []).map(String).filter((id) => !del.has(id)).concat((d.add || []).map(String));
     };
-    return { back: adj("back"), front: adj("front") };
+    return { back: adj("back"), front: adj("front"), ahead: adj("ahead") };
   }
 
-  const api = { raceFacts, fits, aceTargets, positionFits, positionsWith };
+  const api = { raceFacts, fits, aceTargets, positionFits, positionMiss, positionsWith };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaParentRelevance = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
