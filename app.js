@@ -2929,6 +2929,8 @@
       deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
       deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
       deckOffers: (opts, cards) => T.deckOffers(opts, cards),
+      // Out on Global today (rentals and the parent you train now can only have these).
+      outNow: (id) => !!(SV.skills[id] && SV.skills[id][3]),
       // Her Ace-parent deck as you built it in ③ (Find my best deck), or null.
       parentDeck: (tid) => { const c = state.pcm || {}; return c.cardsFrom === "optimizer" && +c.forTrainee === +tid && (c.cards || []).length ? c.cards.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed })) : null; },
       // These cards as an Ace-parent deck for that many extra races: { cards, offers }.
