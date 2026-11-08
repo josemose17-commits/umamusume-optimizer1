@@ -448,8 +448,14 @@ test("pink: an aptitude still below A comes first (start stars lift it for sure)
   const q = plan.rentalSearch(x, p1);
   assert.equal(q.pink.label, "Turf", "Turf B → A first");
   assert.equal(q.pink.target, "A");
-  assert.deepEqual(decode(q).p, [[CP.PINK_IDS[0], 3, 9]]);
-  assert.ok(plan.searchSummary(q).join(" · ").includes("to take the ace to A"));
+  assert.deepEqual(decode(q).p, [[CP.PINK_IDS[0], 1, 9]], "B → A: any 1★ in her family lifts it; more doesn't help");
+  assert.ok(plan.searchSummary(q).join(" · ").includes("1–9★ across her and her parents") && plan.searchSummary(q).join(" · ").includes("enough to lift the ace's Turf B to A"));
+  const aptC = ace.apt.slice(); aptC[0] = "C";
+  const xC = plan.context({ ace: { cid: ace.cid, tid: ace.id, apt: aptC }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build] });
+  assert.deepEqual(decode(plan.rentalSearch(xC, plan.rankVets(xC, [vet(uniq[0], [])])[0])).p, [[CP.PINK_IDS[0], 4, 9]], "C → A: two grades need 4★");
+  const some = vet(uniq[0], [], {}); some.self.pink = [0, 2];
+  const qSome = plan.rentalSearch(xC, plan.rankVets(xC, [some])[0]);
+  assert.deepEqual(decode(qSome).p, [[CP.PINK_IDS[0], 2, 9]], "her family's 2★ counts: 2 more make 4★");
   assert.equal(plan.pinkFocus(x, p1.s).label, "Turf");
   // her family already brings Turf pink: it lifts her to A, so pink goes to the S rule
   const lifted = plan.rankVets(x, [vet(uniq[0], [], { parents: [] })].map(v => (v.self.pink = [0, 2], v)))[0];
