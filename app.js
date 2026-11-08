@@ -3482,7 +3482,7 @@
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
           const must = c.must.indexOf(String(r.id)) !== -1;
-          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}${gateTag(r.id, c.style)}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       ${leftOutHTML(p, c, cut)}
@@ -3493,6 +3493,19 @@
         <div class="row-wrap"><button type="button" class="btn small" id="cmPasteBtn">Use these values</button>${mine ? '<button type="button" class="btn ghost small" id="cmPasteReset">Go back to the built-in values</button>' : ""}</div>
       </details>
     </section>`;
+  }
+
+  // Front Runners: skills worth more to her than their L. Concentration and Focus (a quicker gate
+  // start) count only the distance it saves, and greens only their stat boost, but they all fire
+  // at the gate: they help her take the lead, and they're among the 3 opening skills that set off
+  // Groundwork right away. The simulator can't put a number on either, so it's a tag.
+  const GATE_SKILLS = new Set(["200431", "200432"]); // Concentration, Focus: the only start-delay skills
+  function gateTag(id, style) {
+    if (style !== "Nige") return "";
+    const k = String(id), kind = window.UmaSkillKinds && window.UmaSkillKinds.skills[k];
+    if (GATE_SKILLS.has(k)) return ' <span class="pill" title="Its value here is only the distance a quicker start saves. For a Front Runner a quick start also helps her take the lead, and it fires at the gate, so it\'s one of the 3 skills that set off Groundwork right away. The simulator can\'t put a number on either.">helps her lead</span>';
+    if (kind && kind[0] === "green") return ' <span class="pill" title="Its value here is only its own stat boost. Greens fire at the gate, so with Concentration, Early Lead or other greens they make the 3 skills that set off Groundwork right away, which the values assume. The simulator can\'t put a number on that.">sets off Groundwork</span>';
+    return "";
   }
 
   // Under the skills table: what the values leave out for her running style, and why (the same
@@ -3506,9 +3519,10 @@
     if (ahead.length) parts.push(`${count(ahead)} that need a rival right ahead of her (${names(ahead)}), since the values have her leading, with nobody ahead`);
     if (back.length) parts.push(`${count(back)} that need her in the back half of the pack (${names(back)})`);
     if (front.length) parts.push(`${count(front)} that need her in the front half of the pack (${names(front)})`);
-    if (!parts.length) return "";
     const style = STYLE_NAME[c.style] || c.style;
-    return `<p class="mini cm-leftout">Left out for ${/^[AEIOU]/.test(style) ? "an" : "a"} ${esc(style)}: ${parts.join("; ")}. The Umalator runs one uma alone, so it would count them.</p>`;
+    const left = parts.length ? `<p class="mini cm-leftout">Left out for ${/^[AEIOU]/.test(style) ? "an" : "a"} ${esc(style)}: ${parts.join("; ")}. The Umalator runs one uma alone, so it would count them.</p>` : "";
+    const gate = c.style === "Nige" ? '<p class="mini cm-gate">Tagged <b>helps her lead</b> and <b>sets off Groundwork</b>: Concentration, Focus and greens are worth more to a Front Runner than their L. They fire at the gate, where they help her take the lead and, three together, set off Groundwork right away; the simulator can\'t put a number on either.</p>' : "";
+    return left + gate;
   }
 
   function parseUmalator(text) {
