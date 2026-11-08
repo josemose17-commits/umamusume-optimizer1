@@ -187,6 +187,15 @@ test("skills that wait for others to fire (Groundwork) have values, and count wh
   assert.ok(values(p, "Senkou")["201611"] > 0.1, "Tail Held High");
 });
 
+test("Groundwork fires at the gate, where greens and Concentration fire: worth the most to a Front Runner", () => {
+  const p = preset((x) => x.id === "cm22"), v = (st, id) => values(p, st)[id] || 0;
+  assert.ok(v("Nige", "201601") >= 0.6, "Groundwork, Front Runner");
+  assert.ok(v("Nige", "201602") > v("Nige", "201601") + 0.3, "Solid Preparation, its gold");
+  assert.ok(v("Nige", "201601") > v("Senkou", "201601") && v("Senkou", "201601") > 0.1, "a Pace Chaser gets some");
+  // Global's cups too (CM 21 runs on Global's simulator).
+  assert.ok(values(preset((x) => x.id === "cm21"), "Nige")["201601"] >= 0.6);
+});
+
 test("position skills (lane speed, vision) count by their condition; racecourse greens even off the charts", () => {
   const p = preset((x) => x.id === "cm21"), t = ace(p, "Senkou", values(p, "Senkou"));
   assert.strictEqual(t.why["200452"], "position", "Prudent Positioning");
