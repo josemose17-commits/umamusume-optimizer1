@@ -24,7 +24,7 @@
 
   function create(ctx) {
     const { D, P, A, F, PR, esc } = ctx;
-    const CP = root.UmaCmPlan.create({ A, F, skills: ctx.SB.DATA.skills, trainees: D.DATA.trainees, chars: ctx.chars(), saddles: ctx.saddles, SS: PR.SS, today: ctx.today });
+    const CP = root.UmaCmPlan.create({ A, F, skills: ctx.SB.DATA.skills, trainees: D.DATA.trainees, chars: ctx.chars(), saddles: ctx.saddles, SS: PR.SS, today: ctx.today, outNow: ctx.outNow });
     const VT = root.UmaVeterans ? root.UmaVeterans.create(ctx.SB.DATA.skills) : null;
     // A parent's blue spark: the stat is random (1 in 5); its stars by that stat's final value
     // (uma.guide; umareference gives 50/45/6 for the middle band): under 600 90/10/0,
@@ -601,7 +601,7 @@
         <div class="row-wrap">
           <label class="field"><span>Blue stat</span><select data-cmp-rental="blue" ${attr}>${options([["auto", "Her biggest gap (" + l.blue[0].label + ")"], ...F.STAT_LABELS.map((v, i) => [i, v])], prefs.blue == null ? "auto" : prefs.blue)}</select></label>
           <label class="field"><span>Blue stars</span><select data-cmp-rental="quality" ${attr}>${options([["recommended", "Own 3★ · lineage 7–9★"], ["broad", "Wider: own 2–3★ · lineage 6–9★"]], l.broad ? "broad" : "recommended")}</select></label>
-          <label class="field"><span>Pink</span><select data-cmp-rental="pink" ${attr}>${options([["auto", "Your rule" + (l.auto ? " (" + l.auto.label + " → " + l.auto.target + ")" : ": none needed")], ["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.mode)}</select></label>
+          <label class="field"><span>Pink</span><select data-cmp-rental="pink" ${attr}>${options([["auto", "Your rule" + (l.auto ? " (" + l.auto.label + " → " + l.auto.target + (l.pink2 ? ", " + l.pink2.label + " → " + l.pink2.target : "") + ")" : ": none needed")], ["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.mode)}</select></label>
           <label class="field"><span>Whites</span><select data-cmp-rental="sort" ${attr}>${options([["whites", "In the link as preferred (P0/P1/P2), then affinity"], ["affinity", "Not in the link: affinity only"]], l.sort)}</select></label>
         </div>
         <fieldset class="cmp-required"><legend class="mini">Require whites (each one you tick must be ${scope === "training" ? "on her" : "in her line"}; every tick cuts the results)</legend>${l.whites.length ? `<div class="row-wrap"><button type="button" class="btn ghost small" data-cmp-require="all" ${attr}>Require all</button><button type="button" class="btn ghost small" data-cmp-require="none" ${attr}>Clear</button></div>` : ""}<div class="row-wrap">${l.whites.map(w => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}" ${attr}${selected.has(w.id) ? " checked" : ""}>${esc(ctx.skillName(w.id))}</label>`).join("") || '<span class="mini">No race whites missing.</span>'}</div></fieldset>
@@ -698,7 +698,7 @@
       // Whites her family already gives the ace count for less on her (they're ranked lower);
       // her family's copies still raise her chance of sparking them.
       const wl = f.extra && f.extra.whites ? f.extra.whites.list : [];
-      const whites = wl.slice(0, 8).map((w) => esc(ctx.skillName(w.id))).join(", ");
+      const whites = wl.filter((w) => !ctx.outNow || ctx.outNow(w.id)).slice(0, 8).map((w) => esc(ctx.skillName(w.id))).join(", ");
       const had = wl.filter((w) => (w.cover || 0) >= 0.1).slice(0, 6).map((w) => `${esc(ctx.skillName(w.id))} (~${Math.round(w.cover * 100)}%)`).join(", ");
       const fp = need && f.s && f.s.pink ? f.s.pink.find((q) => q.i === need.i) : null;
       const famPink = fp && fp.stars ? ` Her family already brings ${fp.stars}★ ${need.label} pink: about ${Math.round(fp.p * 100)}% for the ace to reach ${need.target}; hers adds to it.` : need ? ` Her family has no ${need.label} pink yet, so hers matters more.` : "";

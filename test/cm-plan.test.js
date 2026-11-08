@@ -448,14 +448,19 @@ test("pink: an aptitude still below A comes first (start stars lift it for sure)
   const q = plan.rentalSearch(x, p1);
   assert.equal(q.pink.label, "Turf", "Turf B → A first");
   assert.equal(q.pink.target, "A");
-  assert.deepEqual(decode(q).p, [[CP.PINK_IDS[0], 1, 9]], "B → A: any 1★ in her family lifts it; more doesn't help");
+  const sI = plan.want(x).pink.find(p => p.target === "S").i;
+  assert.deepEqual(decode(q).p, [[CP.PINK_IDS[0], 1, 9], [CP.PINK_IDS[sI], 3, 9]], "B → A: any 1★ lifts it; and her line also carries the S-distance pink");
+  assert.ok(plan.searchSummary(q).join(" · ").includes("to take the ace to S"));
+  const gpq = plan.trainingRentalSearch(x, plan.rankFresh(x, [vet(uniq[3], [])], [uniq[2].id], {})[0]);
+  assert.equal(decode(gpq).mp.length, 1, "the grandparent is one uma: one pink");
   assert.ok(plan.searchSummary(q).join(" · ").includes("1–9★ across her and her parents") && plan.searchSummary(q).join(" · ").includes("enough to lift the ace's Turf B to A"));
   const aptC = ace.apt.slice(); aptC[0] = "C";
   const xC = plan.context({ ace: { cid: ace.cid, tid: ace.id, apt: aptC }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build] });
-  assert.deepEqual(decode(plan.rentalSearch(xC, plan.rankVets(xC, [vet(uniq[0], [])])[0])).p, [[CP.PINK_IDS[0], 4, 9]], "C → A: two grades need 4★");
+  assert.deepEqual(decode(plan.rentalSearch(xC, plan.rankVets(xC, [vet(uniq[0], [])])[0])).p[0], [CP.PINK_IDS[0], 4, 9], "C → A: two grades need 4★");
   const some = vet(uniq[0], [], {}); some.self.pink = [0, 2];
   const qSome = plan.rentalSearch(xC, plan.rankVets(xC, [some])[0]);
-  assert.deepEqual(decode(qSome).p, [[CP.PINK_IDS[0], 2, 9]], "her family's 2★ counts: 2 more make 4★");
+  assert.deepEqual(decode(qSome).p[0], [CP.PINK_IDS[0], 2, 9], "her family's 2★ counts: 2 more make 4★");
+  assert.equal(decode(plan.rentalSearch(xC, plan.rankVets(xC, [some])[0], { pink: "0" })).p.length, 1, "picking one aptitude yourself asks for just that one");
   assert.equal(plan.pinkFocus(x, p1.s).label, "Turf");
   // her family already brings Turf pink: it lifts her to A, so pink goes to the S rule
   const lifted = plan.rankVets(x, [vet(uniq[0], [], { parents: [] })].map(v => (v.self.pink = [0, 2], v)))[0];
@@ -475,4 +480,14 @@ test("a planned blue split: Parent 2's own stat on her, each stat's stars across
   assert.ok(text.includes("Stamina 3★ on the rental herself") && text.includes("Stamina 6–9★") && text.includes("Power 3–9★"));
   const gp = decode(plan.trainingRentalSearch(...(() => { const t = uniq[2], v = vet(uniq[3], []); const fr = plan.rankFresh(x, [v], [t.id], {})[0]; return [x, fr, { blueRows: { main: [3, 2], line: [] } }]; })()));
   assert.deepEqual(gp.mb, [[CP.BLUE_IDS[3], 2, 3]], "the grandparent's own blue at the planned stars"); assert.ok(!gp.b);
+});
+
+test("searches and the parent's skill list only use whites out on Global today", () => {
+  const out = (id) => !!(SV.skills[id] && SV.skills[id][3]);
+  const planNow = CP.create({ A, F, skills: SB.DATA.skills, trainees: G.trainees, chars, saddles, SS: 17500, outNow: out });
+  const x = planNow.context({ ace: { cid: ace.cid, tid: ace.id }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build] });
+  const q = planNow.rentalSearch(x, planNow.rankVets(x, [vet(uniq[0], [])])[0]);
+  assert.ok(q.whites.length && q.whites.every(w => out(w.id)), "only whites a rental can have now");
+  const offers = {}; planNow.want(x).white.forEach(w => { offers[w.id] = 0.5; });
+  assert.ok(planNow.itSkills(x, offers, 10).every(k => out(k.id) || out(k.white)));
 });
