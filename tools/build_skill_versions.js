@@ -177,12 +177,13 @@ for (const [name, v] of Object.entries(variants)) {
     if (!re.test(src)) throw new Error('could not find stamina showdown distance factor');
     src = src.replace(re, '$1<2401?1:$1<2601?1.5:1.8}');
   }
-  // Which half of the pack each skill needs, from this simulator's versions (JP-only skills and
-  // conditions JP changed included): kept as changes to data/skill-positions.js.
+  // Which half of the pack each skill needs, or whether it needs a rival ahead of her, from this
+  // simulator's versions (JP-only skills and conditions JP changed included): kept as changes to
+  // data/skill-positions.js.
   const pos = classify(skills), charted = new Set(pool);
   v.positions = {};
-  ['back', 'front'].forEach((k) => {
-    const base = new Set(POSITIONS[k].map(String)), mine = new Set(pos[k].map(String));
+  ['back', 'front', 'ahead'].forEach((k) => {
+    const base = new Set((POSITIONS[k] || []).map(String)), mine = new Set(pos[k].map(String));
     v.positions[k] = { add: [...mine].filter((id) => !base.has(id) && charted.has(id)), del: [...base].filter((id) => !mine.has(id) && charted.has(id)) };
   });
   const dir = path.join(outDir, name);
