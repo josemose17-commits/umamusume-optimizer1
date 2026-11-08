@@ -2489,6 +2489,8 @@
       save();
       j.wish = null;
       renderCM();
+      // Parents step 3 follows ③: her plan is redone with this deck (cm-tab.js followDeck).
+      if (host === "parents" && saved.cardsFrom === "optimizer" && cmPlan()) cmPlan().followDeck();
     };
     const fail = (err) => { flash(String(err.message || err)); j.optRun = null; renderCM(); };
     let link = null;
@@ -2516,6 +2518,8 @@
             if (j.optRun) j.optRun.f = search.progress();
             const bar = deckElement(host, "#cmProg i");
             if (bar) bar.style.width = Math.round(search.progress() * 100) + "%";
+            const step3 = host === "parents" && document.querySelector("#cmpImproveProg i");
+            if (step3) step3.style.width = Math.round(search.progress() * 100) + "%";
             if (more) { setTimeout(tick, 0); return; }
             const fit = search.result();
             done(T.describeDeck(opts, fit.cards, pool, bp), opts, fit);
@@ -3009,6 +3013,9 @@
         return g ? (teams[g] || []).filter((m) => m && m.id).map((m) => ({ tid: +m.id, style: m.style || null })) : [];
       },
       trainParent: (o, section) => trainParent(o, section),
+      // Parents step 3's "Improve this deck": ③'s deck optimizer for her, and how far it is (0-1, or null).
+      improveDeck: () => runOptimizer("parents"),
+      deckRun: () => { const j = deckJob("parents"); return j && j.optRun ? j.optRun.f || 0 : null; },
       rerender: () => { if (deckTab()) renderTab(); },
     });
     return cmTab;
@@ -3040,7 +3047,7 @@
     state.tab = "parents";
     state.cmp.open = Object.assign({}, state.cmp.open, { training: true });
     save();
-    flash(`${D.trainee(o.p1.tid).n} is ready to train here: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
+    if (!o.quiet) flash(`${D.trainee(o.p1.tid).n} is ready to train here: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
     renderTab();
     if (section) showSection(section);
   }

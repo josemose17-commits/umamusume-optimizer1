@@ -205,30 +205,9 @@
       if (useFresh && chosenFresh.vetOptions) chosenFresh.vetOptions.forEach((y) => { y.aff = CP.outlook(x, y.f, vetsAll); });
       let train = null;
       if (useFresh) {
-        let f = chosenFresh;
-        // In the order it depends on: her races → her deck → how many races keep SS with that deck
-        // → (the quick build only) the deck again for the races she keeps, and the count again.
-        const races = CP.racePlan(f, vetsAll), mine = ctx.parentDeck(f.t.id);
-        let her = mine ? Object.assign(ctx.deckWith(p, style, f.t.id, races.extraRaces, mine), { source: "yours" }) : Object.assign(ctx.deck(p, style, f.t.id, races.extraRaces), { source: "quick" });
-        f = Object.assign({}, f, { offers: her.offers });
-        await stage(`${who}: ${tName(f.t)}'s races at SS…`, 0.7);
-        const blueStart = CP.trainingStart(x, f);
-        let ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
-        if (!mine && ss.n < races.extraRaces) {
-          await stage(`${who}: her deck for the ${plural(ss.n, "race")} she keeps…`, 0.8);
-          const kept = Object.assign(ctx.deck(p, style, f.t.id, ss.n), { source: "quick" });
-          if (kept.cards.map((y) => y.id).join() !== her.cards.map((y) => y.id).join()) {
-            her = kept; f = Object.assign({}, f, { offers: her.offers });
-            ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
-          }
-        }
-        chosenFresh = f = CP.atRaceCount(x, f, races, ss.n);
-        f.aff = CP.outlook(x, f.f, vetsAll);
-        // The chosen veteran's line shows the same number as the headline: with her race plan at SS.
-        (f.vetOptions || []).forEach((y) => { if (y.v === f.parents[0]) y.aff = f.aff; });
-        const at = fresh.findIndex((y) => y.t.id === f.t.id); if (at !== -1) fresh[at] = f;
-        await stage(`${who}: Training Focus for ${tName(f.t)}…`, 0.9);
-        train = { f, races, deck: her, ss, agenda: CP.upTo(races, ss.n), focus: await focusPick(p, style, f.t, her.cards, ss.n, ss.blueStart) };
+        train = await trainPlan(p, style, x, chosenFresh, vetsAll, who, ctx.parentDeck(chosenFresh.t.id));
+        chosenFresh = train.f;
+        const at = fresh.findIndex((y) => y.t.id === chosenFresh.t.id); if (at !== -1) fresh[at] = chosenFresh;
       }
       const p1 = useFresh ? chosenFresh : chosenVet;
       if (p1 && !p1.aff) p1.aff = CP.outlook(x, p1.f, vetsAll);
@@ -238,7 +217,63 @@
         const plan = prefs.plan, vet = train.f.parents[0].cid;
         prefs.plan = { tid: train.f.t.id, vet, at: plan && +plan.tid === +train.f.t.id && +plan.vet === +vet && plan.at ? plan.at : new Date().toISOString() };
       }
-      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), fresh: fresh.slice(0, 6), useFresh, train, p1, trained: !!trained, made };
+      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), fresh: fresh.slice(0, 6), useFresh, train, p1, trained: !!trained, made, userChoice: !!(selected && selected.cid && !selected.planned) };
+    }
+
+    // Her part of the plan, for the new parent f0 and a deck: in the order it depends on, her
+    // races → her deck (mine: yours from ③, else the quick build) → how many races keep SS with
+    // that deck → (the quick build only) the deck again for the races she keeps, and the count
+    // again → Training Focus. train.base keeps f0, so the plan can be redone with another deck.
+    async function trainPlan(p, style, x, f0, vetsAll, who, mine) {
+      let f = f0;
+      const races = CP.racePlan(f, vetsAll);
+      let her = mine ? Object.assign(ctx.deckWith(p, style, f.t.id, races.extraRaces, mine), { source: "yours" }) : Object.assign(ctx.deck(p, style, f.t.id, races.extraRaces), { source: "quick" });
+      f = Object.assign({}, f, { offers: her.offers });
+      await stage(`${who}: ${tName(f.t)}'s races at SS…`, 0.7);
+      const blueStart = CP.trainingStart(x, f);
+      let ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
+      if (!mine && ss.n < races.extraRaces) {
+        await stage(`${who}: her deck for the ${plural(ss.n, "race")} she keeps…`, 0.8);
+        const kept = Object.assign(ctx.deck(p, style, f.t.id, ss.n), { source: "quick" });
+        if (kept.cards.map((y) => y.id).join() !== her.cards.map((y) => y.id).join()) {
+          her = kept; f = Object.assign({}, f, { offers: her.offers });
+          ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
+        }
+      }
+      f = CP.atRaceCount(x, f, races, ss.n);
+      f.aff = CP.outlook(x, f.f, vetsAll);
+      // The chosen veteran's line shows the same number as the headline: with her race plan at SS.
+      (f.vetOptions || []).forEach((y) => { if (y.v === f.parents[0]) y.aff = f.aff; });
+      await stage(`${who}: Training Focus for ${tName(f.t)}…`, 0.9);
+      return { f, base: f0, races, deck: her, ss, agenda: CP.upTo(races, ss.n), focus: await focusPick(p, style, f.t, her.cards, ss.n, ss.blueStart) };
+    }
+
+    const sameCards = (a, b) => JSON.stringify((a || []).map((y) => [+y.id, !!y.borrowed]).sort()) === JSON.stringify((b || []).map((y) => [+y.id, !!y.borrowed]).sort());
+    // The deck in ③ (Find my best deck) for the parent the plan trains, when the plan doesn't use it yet.
+    function otherDeck(r) {
+      if (!r || !r.useFresh || !r.train || r.trained) return null;
+      const mine = ctx.parentDeck(r.train.f.t.id);
+      return mine && !(r.train.deck.source === "yours" && sameCards(mine, r.train.deck.cards)) ? mine : null;
+    }
+    // Step 3 follows ③: redo her part of the plan with ③'s deck (her G1s at SS, Training Focus,
+    // the 10 skills, the sparks), without searching Parent 1 again. Her races in ② and the skills
+    // in ④ follow when she's set up below.
+    async function followDeck() {
+      const c = st(), a = current(c);
+      if (!a || job) return;
+      const r = found.get(keyOf(c, a)), mine = otherDeck(r);
+      if (!mine) return;
+      const wasSent = sentThere(r), p = cup(c);
+      await busy(`${tName(r.train.f.t)}: her plan with your deck…`, async () => {
+        await ready(p);
+        r.train = await trainPlan(p, r.style, r.x, r.train.base, ctx.veterans().list, tName(r.t), mine);
+        r.p1 = r.train.f;
+        const at = r.fresh.findIndex((y) => y.t.id === r.p1.t.id); if (at !== -1) r.fresh[at] = r.p1;
+        ctx.planFamily(r.p1, r.train, r.userChoice);
+        r.inputs = inputsKey(c);
+        ctx.save();
+      });
+      if (wasSent) sendTraining(r, null, true);
     }
 
     // The most extra races (her plan's order) that keep her at SS. Your veterans in the scenario
@@ -631,9 +666,8 @@
       const sims = ss.rows.map(x => `<tr><td>${x.n}</td>${x.stats.map(v => `<td>${v}</td>`).join("")}<td>${x.sp}</td><td>${fmtN(x.rating)}</td><td>${x.hit}/${x.of}</td></tr>`).join("");
       // Top to bottom in the order it's worked out: her deck → her races at SS → what to set in
       // Independent Training → the sparks to aim for → set her up.
-      const deckLine = tr.deck.source === "yours" ? "your deck from ③ (Find my best deck)" : "a quick build from your cards; build your own in ③ below, then Find again to plan with it";
       return `<ol class="cmp-order">
-        <li><b>Her Ace-parent deck</b> <span class="mini">(${deckLine})</span>: ${tr.deck.cards.map((x) => esc(cardName(x.id)) + (x.borrowed ? " (borrow)" : "")).join(", ")}.</li>
+        <li>${deckHTML(r)}</li>
         <li><b>${esc(tName(f.t))} at SS with ${plural(keep.length, "extra G1")}</b> with that deck: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). <span class="mini">${ssText(ss)}</span>
           <details data-cmp-open="races"><summary class="mini">Her race plan and the SS check</summary>
           <div class="table-wrap"><table class="plan cmp-races"><thead><tr><th>Turn</th><th>Race</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -645,6 +679,20 @@
         ${stepsHTML(r)}
         ${sentThere(r) ? ctx.trainingHTML() : ""}`;
     }
+    // Her Ace-parent deck: which one the plan uses (the quick pick or the deck optimizer's), a
+    // different one waiting in ③, and Improve this deck (③'s optimizer, then the plan follows).
+    function deckHTML(r) {
+      const tr = r.train, yours = tr.deck.source === "yours", other = otherDeck(r), run = ctx.deckRun();
+      const cards = (list) => list.map((x) => esc(cardName(x.id)) + (x.borrowed ? " (borrow)" : "")).join(", ");
+      const how = yours ? "from the deck optimizer (③ Find my best deck)" : "quick pick: chosen fast from your cards, without simulating careers";
+      const btn = `<button type="button" class="btn small" data-cmp-improve="1"${job || run != null ? " disabled" : ""}>${yours ? "Search again" : "Improve this deck"}</button>`;
+      const status = run != null ? `<span class="progress" id="cmpImproveProg"><i style="width:${Math.round(run * 100)}%"></i></span><span class="mini">Simulating careers for her best deck; the plan below updates when it's done.</span>`
+        : `<span class="mini">${yours ? "Runs ③'s deck optimizer again with its settings." : "Runs the deck optimizer (③ below, with its settings) from this deck; the plan below then updates to the deck it finds."}</span>`;
+      return `<b>Her Ace-parent deck</b> <span class="mini">(${how})</span>: ${cards(tr.deck.cards)}.
+        ${other && run == null ? `<p class="mini warn">③ has a different deck from Find my best deck: ${cards(other)}. <button type="button" class="linkish" data-cmp-follow="1"${job ? " disabled" : ""}>Plan with it</button></p>` : ""}
+        <div class="row-wrap">${btn}${status}</div>`;
+    }
+
     // The skills her deck's events give on every choice (umamusu.wiki's event data): they come
     // whatever is picked, in Independent Training too, so they need no priority slot.
     function eventsAnyway(cards) {
@@ -825,15 +873,32 @@
         prefs.required = req.dataset.cmpRequire === "all" ? [...box.querySelectorAll("[data-cmp-rental-white]")].map((x) => x.dataset.cmpRentalWhite) : [];
         ctx.save(); ctx.rerender(); return true;
       }
+      if (t.closest("[data-cmp-follow]")) { followDeck(); return true; }
+      if (t.closest("[data-cmp-improve]") && a) {
+        const r = found.get(keyOf(c, a));
+        if (!r || !r.train || job || ctx.deckRun() != null) return true;
+        // ③ has to hold her (her races, this deck) before its optimizer can run for her.
+        if (!sentThere(r)) sendTraining(r, null, true);
+        ctx.improveDeck();
+        ctx.rerender();
+        return true;
+      }
       const send = t.closest("[data-cmp-send]");
       if (send && a) {
         const r = found.get(keyOf(c, a));
         if (!r || !r.train) return true;
-        const f = r.train.f;
-        ctx.trainParent({ setup: trainingKey(r), cup: c.cup, style: r.style, rank: "SS", ace: { cid: r.t.cid, tid: r.t.id }, p1: { cid: f.t.cid, tid: f.t.id }, parents: f.parents, cards: r.train.deck.cards, races: r.train.agenda.filter((x) => !x.free).map((x) => x.name), wins: f.f.p1.wins.slice(), must: f.extra.whites.list.slice(0, 5).map((x) => x.id) }, send.dataset.cmpSend);
+        sendTraining(r, send.dataset.cmpSend);
         return true;
       }
       return false;
+    }
+    // Set her up below (① her, ② her races, ③ her deck, ④ the skills to buy) from the plan.
+    function sendTraining(r, section, quiet) {
+      const c = st(), f = r.train.f;
+      ctx.trainParent({ setup: trainingKey(r), cup: c.cup, style: r.style, rank: "SS", ace: { cid: r.t.cid, tid: r.t.id }, p1: { cid: f.t.cid, tid: f.t.id }, parents: f.parents, cards: r.train.deck.cards, cardsFrom: r.train.deck.source === "yours" ? "optimizer" : "planner", races: r.train.agenda.filter((x) => !x.free).map((x) => x.name), wins: f.f.p1.wins.slice(), must: f.extra.whites.list.slice(0, 5).map((x) => x.id), quiet }, section);
+      // Setting her up changes the family it was planned from: still the same plan, not a stale one.
+      r.inputs = inputsKey(c);
+      ctx.rerender();
     }
     function change(e) {
       const t = e.target, c = st(), ds = t.dataset, a = current(c);
@@ -883,7 +948,7 @@
       return false;
     }
 
-    return { teamHTML, renderParents, click, change, st, refreshStatus: () => {} };
+    return { teamHTML, renderParents, click, change, st, followDeck, refreshStatus: () => {} };
   }
 
   const api = { create, PLAN_RACES, MIN_AFFINITY };
