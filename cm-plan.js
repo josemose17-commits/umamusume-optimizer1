@@ -461,7 +461,10 @@
       }
       if (required.length) c[own ? "mw" : "w"] = required.map((id) => [id, 1, own ? 3 : 9]);
       // Her own pink: 2–3★ (1–3★ wider); across a whole line: 3–9★.
-      if (q.pink && PINK_IDS[q.pink.i]) c[own ? "mp" : "p"] = [[PINK_IDS[q.pink.i], own ? (broad ? 1 : 2) : 3, own ? 3 : 9]];
+      if (q.pink && PINK_IDS[q.pink.i]) {
+        const lift = q.pink.target === "A", m = q.pink.min || 3;
+        c[own ? "mp" : "p"] = [[PINK_IDS[q.pink.i], own ? (lift ? Math.min(3, m) : broad ? 1 : 2) : (lift ? m : 3), own ? 3 : 9]];
+      }
       if (q.green && q.green.length) c.mg = [...new Set(q.green)].map((tid, k) => k ? [+tid * 10, 1, 3, 1] : [+tid * 10, 1, 3]);
       const excluded = [...new Set([q.ace, q.p1 && q.p1.tid].filter(Boolean).map((id) => Math.floor(+id / 100)))];
       if (excluded.length) c.emp = excluded;
@@ -480,7 +483,16 @@
       const auto = choices.find((p) => p.needed && p.target === "A" && lifted(p.i) < 0.9) || choices.find((p) => p.needed && p.target === "S") || choices.find((p) => p.needed) || null;
       const mode = opts.pink == null || opts.pink === "auto" ? "auto" : opts.pink === "none" ? "none" : String(opts.pink);
       const focus = mode === "auto" ? auto : mode === "none" ? null : choices.find((p) => String(p.i) === mode);
-      const pink = focus ? Object.assign({}, focus, { min: 3, main: false }) : null;
+      // Below A: the start lift is certain, so ask for just the stars it needs on top of her known
+      // family's (1–3★ total lifts one grade, 4–6★ two, 7–9★ three; never past A); more don't
+      // help. A to S only comes from a pink firing, so more stars do: 3–9★.
+      let min = 3;
+      if (focus && focus.target === "A") {
+        const grades = "GFEDCBAS", steps = grades.indexOf("A") - grades.indexOf(focus.grade), have = (fam.find((y) => y.i === focus.i) || {}).stars || 0;
+        min = 1;
+        while (F.startSteps(have + min) < steps && min < 9) min++;
+      }
+      const pink = focus ? Object.assign({}, focus, { min, main: false }) : null;
       // The gap her known family (Parent 1 and her parents, with their real sparks) leaves: the
       // rental's blue goes to the biggest one still open.
       const given = opts.given || (p1.s && p1.s.blueStats), remaining = x.gaps ? x.gaps.map((g, i) => Math.max(0, Math.round(g - ((given && given[i]) || 0)))) : null;
@@ -509,7 +521,8 @@
       const aptName = (id) => MOE_STYLES[PINK_IDS.indexOf(id)] || F.APT_LABELS[PINK_IDS.indexOf(id)], toS = q.pink && q.pink.target ? " (to take the ace to " + q.pink.target + ")" : "";
       const statName = (id) => F.STAT_LABELS[BLUE_IDS.indexOf(id)];
       if (c.mb || c.b) lines.push("Blue: " + [c.mb ? statName(c.mb[0][0]) + " " + (c.mb[0][1] === 3 ? "3★" : "2–3★") + " on the rental herself" : ""].concat(c.b ? c.b.map((row) => statName(row[0]) + " " + row[1] + "–9★ across her and her parents") : []).filter(Boolean).join(" · ") + (c.b ? "" : " (her own sparks only: her parents don't reach the ace)"));
-      lines.push("Pink: " + (c.mp ? aptName(c.mp[0][0]) + " · " + c.mp[0][1] + "–3★ on the rental herself" + toS : c.p ? aptName(c.p[0][0]) + " · 3–9★ across her and her parents; none needed on her" + toS : "off"));
+      const liftNote = q.pink && q.pink.target === "A" ? ` (enough to lift the ace's ${q.pink.label} ${q.pink.grade} to A at the start; more doesn't help)` : toS;
+      lines.push("Pink: " + (c.mp ? aptName(c.mp[0][0]) + " · " + c.mp[0][1] + "–3★ on the rental herself" + liftNote : c.p ? aptName(c.p[0][0]) + " · " + c.p[0][1] + "–9★ across her and her parents; none needed on her" + liftNote : "off"));
       lines.push("Required whites: " + (q.required.length ? q.required.map(skillName).join(", ") + (c.mw ? " · on the rental herself, 1–3★ each" : " · 1–9★ each") + "; all required" : "none"));
       lines.push((q.sort === "whites" ? (q.own ? "Her own preferred whites (rank, don't filter): " : "Preferred whites (rank, don't filter): ") : "Whites to look for (not in the link): ") + (names.join(", ") || "none"));
       if (c.omw && c.ow) lines.push("Own preferred whites: " + q.whites.filter(w => w.priority === 0 && !required.has(meta[w.id][0])).map(w => skillName(w.id) + " (P0)").join(", "));
