@@ -1,4 +1,4 @@
-// Skills that wait for other skills to fire first (Groundwork: 3 at the start; Tail Held High: 3
+// Skills that wait for other skills to fire first (Groundwork: 3 in the opening leg; Tail Held High: 3
 // in the middle leg; Ignition: 13 in all; some inherited uniques) never fire in the Umalator's
 // skill chart, which tests one skill at a time, so the chart gives them no length. This reruns
 // just those skills with the skill-count clause taken as met (a parent built for the race fires
@@ -32,11 +32,15 @@ const COUNT = /activate_count_[a-z_]+(>=|>|==)\d+/g, HAS_COUNT = /activate_count
 const wanted = (id, d) => (/^20\d{4}$/.test(id) || /^9\d{5}$/.test(id)) && d.alternatives.some((a) => HAS_COUNT.test(a.condition + "&" + (a.precondition || "")));
 
 // When a skill-count clause is taken as met. Alone, it says when she'd have fired that many
-// skills: a random point of the opening leg (start), the middle leg (middle), the last leg
-// (end_after) or the second half (later_half, all). With other timing in the same branch
-// (a phase, a distance, the last straight), that timing decides and the clause just holds.
+// skills. The opening leg's (start: Groundwork, Solid Preparation) are met at the gate: greens,
+// Concentration and Early Lead / Taking the Lead all fire as the race starts, so the skill goes
+// off right away, while she's still speeding up (the Umalator does the same for its pace-setter
+// and in its own skill-count approximation). The others at a random point of the middle leg
+// (middle), the last leg (end_after) or the second half (later_half, all). With other timing in
+// the same branch (a phase, a distance, the last straight), that timing decides and the clause
+// just holds.
 const TIMING = /(^|&)(phase|distance_rate|remain_distance|is_last_straight|is_finalcorner|corner|straight|phase_random|phase_laterhalf_random)/;
-const WHEN = { start: "phase_random==0", middle: "phase_random==1", end_after: "phase_random==2", later_half: "phase_laterhalf_random==1", all: "phase_laterhalf_random==1" };
+const WHEN = { start: "phase==0", middle: "phase_random==1", end_after: "phase_random==2", later_half: "phase_laterhalf_random==1", all: "phase_laterhalf_random==1" };
 function taken(cond) {
   return cond.split("@").map((g) => {
     const rest = g.replace(COUNT, "").replace(/&&+/g, "&").replace(/^&|&$/g, "");

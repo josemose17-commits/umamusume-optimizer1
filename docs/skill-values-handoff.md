@@ -217,3 +217,21 @@ with a pattern that also matches your own shell.
   stronger over time, which shifts some skill values. Not changed in this work.
 - The 2024-10-29 long-race stamina showdown factors are players' measurements, not official.
 - Cards in the optimizer are still the ones out on Global today; only skills are date-aware.
+
+## 6. Later changes (2026-11-08): Front Runners
+
+- **Skills that need a rival ahead** (`tools/build_skill_positions.js` `classify()` → `ahead`):
+  every way to fire needs an uma ahead of her (in front in her lane, an overtake target or
+  passing one, blocked from the front, places gained, within a length of the uma ahead). The
+  charts run a Front Runner in 1st (`ORDER` in `tools/umalator_run.js`), so `parent-relevance.js`
+  `positionMiss()` drops them for her, like back-half skills. `data/skill-positions.js` has the
+  `ahead` list from Global's skill data; each variant's `positions.ahead` (`add`/`del`, from
+  `tools/build_skill_versions.js`) adds the JP-only ones (Blast a Hole Through! …). Rebuilding
+  the variants on 2026-11-08 reproduced every shipped variant name exactly.
+- **Groundwork and Solid Preparation fire at the gate** (`tools/build_count_skills.js`
+  `WHEN.start = "phase==0"`, was `phase_random==0`): greens, Concentration and Early Lead fire as
+  the race starts, so 3 opening-leg skills are met right away; the Umalator does the same for its
+  pace-setter (`useDefaultPacer`) and in `withActivateCountsAsRandom`. The count pass was rerun
+  for all 45 cups on the variants and, for the Global cups, on the Global build their other
+  values came from (uma-tools `42d8b7b`, 2026-10-26: `git show 42d8b7b:umalator-global/<file>`),
+  so only those two skills moved.
