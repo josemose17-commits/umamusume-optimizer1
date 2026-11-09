@@ -281,7 +281,7 @@
         r.inputs = inputsKey(c);
         ctx.save();
       });
-      if (wasSent) sendTraining(r, null, true);
+      if (wasSent) { sendTraining(r, null, true); ctx.keepDeckResult(); ctx.rerender(); }
     }
 
     // The most extra races (her plan's order) that keep her at SS. Your veterans in the scenario
