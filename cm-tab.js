@@ -19,6 +19,9 @@
   const PLAN_RACES = 10;
   const RANK = "GFEDCBAS";
   const fmt = (v) => v.toFixed(2);
+  // family.js's aptitude order: Front, Pace, Late, End are 6–9.
+  const STYLE_APT = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 };
+  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer" };
   const fmtN = (v) => Math.round(v).toLocaleString("en-US");
   const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
@@ -188,7 +191,9 @@
         // The grandparent you borrowed (entered under the grandparent search), per new parent.
         const gps = gpRentals(prefs), picks = {};
         Object.keys(prefs.picks).forEach((k) => { picks[k] = Object.assign({}, prefs.picks[k], gps[k] ? { rental: gps[k].friend } : {}); });
-        fresh = CP.rankFresh(x, vetsAll, umas, pdeck.offers, { parentMode: "rental", picks, rentals: Object.values(gps) });
+        // Optional: only umas A or better in the ace's running style (her pink can land there).
+        const pool = prefs.styleMatch ? umas.filter((id) => { const u = trainee(id); return u && ["S", "A"].includes((u.apt || [])[STYLE_APT[style]]); }) : umas;
+        fresh = CP.rankFresh(x, vetsAll, pool, pdeck.offers, { parentMode: "rental", picks, rentals: Object.values(gps) });
       }
       // The ace's family affinity each choice can reach once you borrow (cm-plan.js outlook).
       vets.concat(fresh).forEach((y) => { y.aff = CP.outlook(x, y.f, vetsAll); });
@@ -512,6 +517,7 @@
       const prefs = freshOf(d), v = view(c, a), has = d.cards && d.cards.length;
       const stale = r && ((v && r.sig !== v.sig) || r.inputs !== inputsKey(c));
       const setup = `<div class="row-wrap"><label class="field"><span>Parent 1</span><select data-cmp-setup><option value="B"${prefs.setup === "B" ? " selected" : ""}>Train a new one: my veteran + a borrowed grandparent</option><option value="A"${prefs.setup === "A" ? " selected" : ""}>My veteran is Parent 1</option></select></label>
+        ${prefs.setup === "B" ? `<label class="chip-toggle" title="Only suggest new parents with A or better in the ace's running style. Off: any of your umas, ranked by what she gives the ace."><input type="checkbox" data-cmp-stylematch${prefs.styleMatch ? " checked" : ""}> Only ${STYLE_NAME[styleOf(a)]}s (A or better)</label>` : ""}
         <button type="button" class="btn" id="cmpParents"${job || !has ? " disabled" : ""}>${r ? "Find again" : "Find Parent 1"}</button>${!has ? `<span class="mini">Build her deck in <button type="button" class="linkish" data-goto-tab="cm">CM &amp; decks</button> first.</span>` : ""}${stale ? `<span class="mini warn">Something changed; find again.</span>` : ""}</div>`;
       if (!r) return setup;
       const pick = r.p1;
@@ -535,6 +541,7 @@
         const rest = ctx.veterans().list.filter((x) => !seen.has(x.id) && +x.cid !== +pick.t.cid && +x.cid !== +r.t.cid).sort((a, b) => vetName(a).localeCompare(vetName(b)));
         const top = ranked[0];
         out += `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and ${pick.rental ? `your borrowed grandparent <b>${esc(pick.rental.names[0])}</b> (${sparks(pick.rental.parent) || "no sparks entered"})` : "a borrowed grandparent"} · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
+          ${whyHTML(r, pick)}
           <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her${top ? " (" + esc(vetName(top.v)) + ")" : ""}</option>${ranked.map((o, i) => `<option value="${o.v.id}"${String(chosen.veteran) === String(o.v.id) ? " selected" : ""}>${i + 1}. ${esc(vetName(o.v))} · score ${fmt(o.value)}${o.aff ? " · ~" + o.aff.total + " " + o.aff.symbol : ""} · ${sparks(o.v.self)}</option>`).join("")}${rest.length ? `<optgroup label="Not ranked (a stronger one of the same character is above)">${rest.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</optgroup>` : ""}</select></label>
           <p class="mini">Ranked by what the pair gives the ace and the new parent's own career, best first. The ace's own character isn't offered: as the ace's grandparent she'd have 0 affinity with her.</p>
           ${searchHTML("Grandparent search", grandparentSearch(r, prefs.rental), "training", prefs.rental, `the grandparent you borrow for ${tName(pick.t)}`)}
@@ -549,6 +556,27 @@
         return `<tr${x.aff.total >= MIN_AFFINITY ? "" : ' class="cmp-cut"'}><td>${fresh ? "Train " : "Veteran: "}<b>${esc(fresh ? tName(x.t) : vetName(x.v))}</b>${ps.length ? `<div class="mini">Parents: ${ps.map(esc).join(" + ")}</div>` : ""}</td><td class="num">${fresh ? "~" : ""}${fmt(x.value)}</td><td class="num">${affText(x)}</td><td><button type="button" class="linkish" data-cmp-p1="${fresh ? "fresh|" + x.t.id : "vet|" + x.v.id}">Use</button></td></tr>`;
       }).join("")}</tbody></table></div><p class="mini">Ranked by what she gives the ace: her expected sparks (whites boosted by copies her parents carry), the G1s she can share, and affinity. Faded: under ${MIN_AFFINITY}.</p></details>`;
       return setup + out;
+    }
+
+    // Why this new parent: what each part of her gives the ace (in L, expected), next to the
+    // runners-up. Her own running style only counts through her pink (it lands on one of her A/S
+    // aptitudes), her unique, and the rating the ace's skills give her (her SS race count).
+    function whyHTML(r, pick) {
+      const style = r.style, i = STYLE_APT[style], apt = (t) => t.apt || [];
+      const parts = (y) => {
+        const green = (y.s.green || []).filter((g) => g.slot === "p1").reduce((n, g) => n + g.p * g.L, 0);
+        return { white: y.extra.whites.value, green, pink: y.extra.pink, blue: y.extra.blue, family: y.s.value - green };
+      };
+      const list = [pick].concat(r.fresh.filter((y) => y !== pick).sort((a, b) => b.value - a.value).slice(0, 3));
+      const tops = (t) => F.APT_LABELS.filter((_, k) => ["S", "A"].includes(apt(t)[k]));
+      const rows = list.map((y) => {
+        const q = parts(y), g = apt(y.t)[i] || "?";
+        return `<tr${y === pick ? ' class="cmp-pick"' : ""}><td><b>${esc(tName(y.t))}</b><div class="mini">${STYLE_NAME[style]} ${g} · pink lands on ${esc(tops(y.t).join(", ") || "none")}</div></td><td class="num">~${y.aff.total} ${y.aff.symbol}</td>${[q.white, q.green, q.pink, q.blue, q.family].map((v) => `<td class="num">${fmt(v)}</td>`).join("")}<td class="num"><b>${fmt(y.value)}</b></td></tr>`;
+      }).join("");
+      const off = !["S", "A"].includes(apt(pick.t)[i]);
+      return `<details data-cmp-open="p1-why"><summary class="mini">Why ${esc(tName(pick.t))}${off ? ` (she's ${apt(pick.t)[i] || "?"} as a ${STYLE_NAME[style]})` : ""}</summary>
+        <div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th class="num">Affinity</th><th class="num">Her whites</th><th class="num">Her unique</th><th class="num">Her pink</th><th class="num">Her blue</th><th class="num">Her family's sparks</th><th class="num">For the ace</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <p class="mini">Each part is what the ace can expect from it, in L. Her whites: the ace's ${STYLE_NAME[style]} skills her deck can hint, which she learns and passes on whatever her own style. Her family's sparks: her veteran parent, the grandparent and Parent 2's side, through her. Affinity raises every chance. Her own running style only counts in three places: her pink (it lands on one of her A/S aptitudes, so a ${STYLE_NAME[style]} pink needs her A there), her unique (one built for another style is worth little to the ace), and reaching SS (the ace's skills rate lower on her if her ${STYLE_NAME[style]} is low, which can cost extra G1s).</p></details>`;
     }
 
     // ---------- the grandparent you borrowed ----------
@@ -917,6 +945,7 @@
         ctx.save(); ctx.rerender();
         return true;
       }
+      if (a && ds.cmpStylematch != null) { freshOf(deckOf(c, a)).styleMatch = t.checked; ctx.save(); findParents(); return true; }
       if (a && ds.cmpSetup != null) { freshOf(deckOf(c, a)).setup = t.value; ctx.save(); findParents(); return true; }
       if (a && ds.cmpGp != null && (ds.cmpGpField != null || ds.cmpGpWhite != null || ds.cmpGpWhiteStars != null || ds.cmpGpWin != null)) {
         const prefs = freshOf(deckOf(c, a)), pick = prefs.picks[ds.cmpGp] = prefs.picks[ds.cmpGp] || {};
