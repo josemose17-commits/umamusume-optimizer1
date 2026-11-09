@@ -250,7 +250,10 @@
       // The chosen veteran's line shows the same number as the headline: with her race plan at SS.
       (f.vetOptions || []).forEach((y) => { if (y.v === f.parents[0]) y.aff = f.aff; });
       await stage(`${who}: Training Focus for ${tName(f.t)}…`, 0.9);
-      return { f, base: f0, races, deck: her, ss, agenda: CP.upTo(races, ss.n), focus: await focusPick(p, style, f.t, her.cards, ss.n, ss.blueStart) };
+      // Do the ace's gaps close without her blue (step 1's whole plan)? Then her blue is a bonus
+      // and Training Focus goes for SS and her skills; else for her blue's stars too.
+      const covered = blueCovered({ p1: f, gaps: x.gaps, useFresh: true, train: { f } });
+      return { f, base: f0, races, deck: her, ss, agenda: CP.upTo(races, ss.n), focus: await focusPick(p, style, f.t, her.cards, ss.n, ss.blueStart, covered) };
     }
 
     const sameCards = (a, b) => JSON.stringify((a || []).map((y) => [+y.id, !!y.borrowed]).sort()) === JSON.stringify((b || []).map((y) => [+y.id, !!y.borrowed]).sort());
@@ -330,7 +333,7 @@
     // leaves out inheritance, so it often reaches SS in none: rating is the closest measure), then
     // the better chance her blue spark comes out 2★ or more.
     const FOCUS = [["balanced", "Balanced"], ["stamina", "Stamina"], ["sprint", "Sprint"]];
-    async function focusPick(p, style, t, cards, n, blueStart) {
+    async function focusPick(p, style, t, cards, n, blueStart, covered = true) {
       const rate = ctx.spRate(p, style, t.apt), uniq = PR.uniqueBonus(t.r, t.r), minimum = PR.rankThreshold("SS");
       const rating = (x) => PR.statsScore(x.stats) + Math.round((x.sp || 0) * rate) + uniq;
       const rows = [];
@@ -341,8 +344,10 @@
         const over = fin.length ? fin.reduce((m, y) => m + blue2(y.stats), 0) / fin.length : blue2(x.stats);
         rows.push({ k, label, stats: x.stats, sp: x.sp, rating: rating(x), hit: fin.filter((y) => rating(y) >= minimum).length, of: fin.length, over });
       }
-      const best = rows.slice().sort((a, b) => b.hit - a.hit || b.rating - a.rating || b.over - a.over)[0];
-      return { rows, best };
+      // Gaps covered: the most SS runs, then the highest rating (skills). A gap left: her blue's
+      // 2★+ chance comes before rating, since it's the only part of her that could still help it.
+      const best = rows.slice().sort((a, b) => b.hit - a.hit || (covered ? b.rating - a.rating || b.over - a.over : b.over - a.over || b.rating - a.rating))[0];
+      return { rows, best, covered };
     }
 
     // The uma.moe search for the ace's Parent 2, with this Parent 1 (her G1s as the legacy).
@@ -498,6 +503,13 @@
     function planFor(r) {
       const give = (r.p1.s && r.p1.s.blueStats) || [0, 0, 0, 0, 0];
       return r.gaps ? bluePlan(r, r.gaps.map((g, i) => Math.max(0, Math.round(g - (give[i] || 0))))) : null;
+    }
+    // True when the ace's gaps close without Parent 1's own (random) blue: her family's blues
+    // plus the ones step 1 plans for the grandparent and Parent 2's line, within one roll.
+    function blueCovered(r) {
+      if (!r.gaps || !r.gaps.some(Boolean)) return true;
+      const plan = planFor(r);
+      return !!(plan && plan.closed);
     }
 
     // The members whose sparks are known (or planned), in words.
@@ -750,7 +762,7 @@
       }).join("");
       const races = tr.agenda.filter((x) => !x.free).map((x) => x.name);
       const anySS = fo && fo.rows.some((y) => y.hit > 0);
-      const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${Math.round(y.over * 100)}% blue 2★+`).join(" · ")} (16 careers each, before inheritance). Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
+      const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${Math.round(y.over * 100)}% blue 2★+`).join(" · ")} (16 careers each, before inheritance). ${fo.covered === false ? "A gap is left, so her blue's 2★ chance comes before rating." : "The ace's gaps are covered, so the most SS runs and the highest rating (her skills) decide, not her blue."} Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
       return `<div class="cmp-it"><h4>Independent Training settings</h4><p class="mini">For this deck and these ${plural(races.length, "extra G1")}.</p>${focus}
         <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it picks the event choice that gives them):</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
         ${list.anyway.length ? `<p class="mini"><b>Come anyway, no slot needed</b> (every choice of the event gives them, when it happens): ${list.anyway.map((k) => esc(ctx.skillName(k.id)) + (k.gold ? " (gold)" : "")).join(", ")}.</p>` : ""}
@@ -778,14 +790,26 @@
       const had = wl.filter((w) => (w.cover || 0) >= 0.1).slice(0, 6).map((w) => `${esc(ctx.skillName(w.id))} (~${Math.round(w.cover * 100)}%)`).join(", ");
       const fp = need && f.s && f.s.pink ? f.s.pink.find((q) => q.i === need.i) : null;
       const famPink = fp && fp.stars ? ` Her family already brings ${fp.stars}★ ${need.label} pink: about ${Math.round(fp.p * 100)}% for the ace to reach ${need.target}; hers adds to it.` : need ? ` Her family has no ${need.label} pink yet, so hers matters more.` : "";
-      const give = f.s && f.s.blueStats, gaps = r.gaps;
-      const leftBlue = gaps && give ? gaps.map((g, i) => [Math.max(0, Math.round(g - (give[i] || 0))), i]).filter(([g]) => g > 0).sort((x, y) => y[0] - x[0]).map(([g, i]) => `${F.STAT_LABELS[i]} −${g}`).join(", ") : "";
       return `<div class="cmp-aim"><h4>Sparks to aim for on ${esc(tName(t))}</h4><ul class="mini">
         <li><b>Whites</b> (the ones you control): learn ${whites || "the race's skills"}. A learned skill becomes a spark about 20% of the time, 40% if you learn its gold version; at SS they come out 2★ 70% of the time (3★ 10%, luck).${had ? ` Her family already gives the ace ${had} (the chance one of their sparks fires for her), so those rank a little lower on her; their copies do raise her chance to spark them.` : ""}</li>
         <li><b>Green:</b> her unique ${uL >= 0.1 ? `is worth about ${uL.toFixed(2)} L here, so it counts for the ace` : "is weak on this race; it won't count much"}.</li>
         <li><b>Pink:</b> ${pink}${famPink}</li>
-        <li><b>Blue:</b> the stat is random (1 in 5), so you can't pick it. Aim for 2★: its stars depend on that stat, 2★ or better about 55% from 600 and 80% over 1,100 (3★ is luck: 5–10%). Get every stat past 600 first. Her predicted run, chance of 2★+ if it lands there: ${stats}; about ${row ? Math.round(blue2(row.stats) * 100) : "?"}% overall.${gaps ? ` ${leftBlue ? `After her family's blues the ace is still short in ${leftBlue}: a blue there would help most.` : "Her family's blues already cover the ace's gaps."}` : ""}</li>
+        <li><b>Blue:</b> ${blueAim(r, stats, row)}</li>
       </ul></div>`;
+    }
+
+    // Parent 1's blue: its stat is random, so the advice is whether the ace needs it at all. Step
+    // 1's whole plan (her family's blues and the ones you choose for the grandparent and Parent
+    // 2's line) either closes the gaps, and her blue is a bonus, or leaves some short.
+    function blueAim(r, stats, row) {
+      const odds = `Her predicted run, chance of 2★+ if it lands there: ${stats}; about ${row ? Math.round(blue2(row.stats) * 100) : "?"}% overall.`;
+      if (!r.gaps) return `the stat is random (1 in 5), so you can't pick it; its stars depend on that stat (2★+ about 55% from 600, 80% over 1,100). ${odds} Build her racing deck in CM &amp; decks to see whether the ace needs it.`;
+      if (!r.gaps.some(Boolean)) return `<b>✓ Not needed:</b> the ace has no stat gaps. Her blue (a random stat) is a bonus, so put her career into the white skills and SS.`;
+      const plan = planFor(r);
+      const chosen = plan && plan.picks.length ? ` and the ones step 1 plans for the umas you borrow (${plan.text})` : "";
+      if (plan && plan.closed) return `<b>✓ Covered:</b> her family's blues${chosen} close the ace's gaps${plan.exact ? "" : " (≈: within one inspiration roll)"}. Her blue (a random stat) is a bonus, so put her career into the white skills and SS; Training Focus is picked that way.`;
+      const left = plan ? plan.after.map((v, i) => [v, i]).filter(([v]) => v > ROLL).sort((a, b) => b[0] - a[0]).map(([v, i]) => `${F.STAT_LABELS[i]} −${v}`).join(", ") : "";
+      return `<b>Still short in ${left}</b> even with her family's blues${chosen}. Hers lands on a random stat (1 in 5 for any one), so she can't be counted on for it: a stronger racing deck in CM &amp; decks or lower targets close the rest. If her blue does land there, 2★+ helps: get every stat past 600 (2★+ about 55% from 600, 80% over 1,100), and Training Focus leans to that. ${odds}`;
     }
 
     // Is she set up below (for this ace and cup)?
