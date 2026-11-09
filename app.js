@@ -2446,8 +2446,9 @@
   }
   const borrowPool = () => D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r === 3).map((x) => ({ id: x.id, lb: 4 }));
 
-  function optKey(host = deckHost()) {
-    const c = cm(host);
+  // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
+  function optKey(host = deckHost(), over) {
+    const c = Object.assign({}, cm(host), over || {});
     return [c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
@@ -2478,7 +2479,7 @@
         } catch (err) { est = null; }
       }
       if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills;
-      const result = Object.assign(r, { key, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      const result = Object.assign(r, { key, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
       if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
@@ -3015,6 +3016,9 @@
       trainParent: (o, section) => trainParent(o, section),
       // Parents step 3's "Improve this deck": ③'s deck optimizer for her, and how far it is (0-1, or null).
       improveDeck: () => runOptimizer("parents"),
+      // The Parents plan just redid her race count for ③'s deck: when that's all that changed, the
+      // search still stands (searching again for the new count could move the count again).
+      keepDeckResult: () => { const j = deckJob("parents"), r = j && j.optResult; if (r && r.key !== optKey("parents") && r.key === optKey("parents", { itRaces: r.itRaces })) { r.key = optKey("parents"); r.racesFollowed = true; } },
       deckRun: () => { const j = deckJob("parents"); return j && j.optRun ? j.optRun.f || 0 : null; },
       rerender: () => { if (deckTab()) renderTab(); },
     });
@@ -3300,6 +3304,7 @@
     return `<div class="opt-result">
       <h4>${r.goal === "ace" ? "Best ace parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
       ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
+      ${!stale && r.racesFollowed && r.itRaces !== c.itRaces ? `<p class="mini">Searched for ${r.itRaces} extra G1${r.itRaces === 1 ? "" : "s"}; her plan (Parents step 3) now runs ${c.itRaces} with this deck, since that's how many keep her at SS with it. Searching again would aim the deck at ${c.itRaces}, which can move the count again, so this deck stays.</p>` : ""}
       <div class="opt-cards">${r.cards.map((x) => {
         const card = D.card(x.id);
         return `<div class="opt-card ty-${card.ty}">
