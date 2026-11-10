@@ -48,3 +48,13 @@ test('related hints from one card share an access roll without inflating the whi
  const both=A.build({cards:[{id:1,name:'A',offers:{200332:1}},{id:2,name:'B',offers:{200332:1}}]});
  assert.equal(A.sample(both,1).hints['200332'],2,'independent card hints can add');
 });
+test('career hints cannot bypass a rejected source, including golds and ordinary upgrades',()=>{
+ const graph=A.build({cards:[{id:1,name:'Card',offers:{200332:1,200282:1}}]});
+ const shop=A.restrict(graph,['200332','200282','200512'],{200332:1,200282:1,200331:5,200512:5});
+ assert.deepEqual(shop.available,['200332','200282']);
+ assert.deepEqual(shop.hints,{'200282':1,'200332':1});
+ const purchase=B.create({available:shop.available,skills:{200331:100,200512:100,200332:1,200281:2}}).solve(shop.hints,1000);
+ assert.ok(!purchase.selected.some(x=>['200331','200512'].includes(x.id)));
+ assert.ok(purchase.selected.some(x=>x.id==='200281'),'the sourced white permits its ordinary upgrade');
+ assert.ok(purchase.selected.every(x=>graph.byId[x.id]),'every actual purchase has a source row');
+});
