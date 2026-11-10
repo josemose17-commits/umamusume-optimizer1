@@ -45,6 +45,8 @@
     const { A, F } = o, meta = o.skills;
     if (!o.SS) o = Object.assign({}, o, { SS: 17500 });
     const fam = F.create({ A, skills: meta });
+    const Access = root.UmaSkillAccess || (typeof require!=="undefined" ? require("./skill-access.js") : null);
+    const access = Access && Access.create(meta);
     const byTid = new Map(o.trainees.map((t) => [t.id, t]));
     const trainee = (id) => byTid.get(+id) || null;
     // Her inherited unique (green spark): the unique's 9… id.
@@ -71,10 +73,11 @@
     // rel (her relevant skills with every charted skill's L), offers (her deck's), build, chars.
     function context(c) {
       const t = trainee(c.ace.tid);
-      const L = (c.rel && c.rel.L) || {};
+      const rel = access ? access.parentRel(c.rel,c.skillPlan) : c.rel;
+      const L = (rel && rel.L) || {};
       const uniques = Object.keys(L).filter((id) => /^9\d+$/.test(id) && owners.has(id)).map((id) => ({ id, L: L[id], owners: owners.get(id) }));
       // gaps: the ace's shortfall per stat (CM & decks' prediction against her targets), or null.
-      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel: c.rel, raceL: L, offers: c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, gaps: c.gaps || null, chars: [], mine: [], uniques, fam: {} };
+      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel, raceL: L, offers: c.skillPlan && c.skillPlan.deckCoverage || c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, gaps: c.gaps || null, chars: [], mine: [], uniques, fam: {}, skillPlan:c.skillPlan || null };
     }
     const wantMemo = new WeakMap();
     const want = (x) => { if (!wantMemo.has(x)) wantMemo.set(x, fam.lookFor(x)); return wantMemo.get(x); };
@@ -140,20 +143,21 @@
     // 22.5% → 25%…; the parenting guide has ×1.1 per copy instead, about the same for 1–3).
     // cover: how likely the ace already gets each white from the rest of her family
     // (familyCover); a white she'd get anyway is worth that much less on this parent.
-    function freshWhites(x, offers, aff, r, copies, cover) {
+    function freshWhites(x, offers, aff, r, copies, cover, learning) {
       const fams = fam.families(x.rel), eff = fam.worthOf(x), cv = (f) => (cover && cover[f]) || 0;
       const fire = r.stars.reduce((n, d, k) => n + d * F.twice(F.WHITE, k + 1, aff), 0);
-      const got = Object.keys(fams).map((f) => ({ f, p: Math.min(1, Math.max(0, ...fams[f].ids.map((id) => (offers && offers[id]) || 0))) }))
+      const got = Object.keys(fams).map((f) => ({ f, p: learning ? (learning.families[f] || {}).learn || 0 : Math.min(1, Math.max(0, ...fams[f].ids.map((id) => (offers && offers[id]) || 0))) }))
         .filter((a) => a.p > 0).sort((a, b) => eff[b.f] * (1 - cv(b.f)) - eff[a.f] * (1 - cv(a.f)) || b.p - a.p);
       let room = r.learn, value = 0;
       const list = [];
       got.forEach((a) => {
-        const p = Math.min(a.p, room);
+        const p = learning ? a.p : Math.min(a.p, room);
         if (p <= 0) return;
         room -= p;
         const chance = Math.min(1, r.spark + LINEAGE_WHITE * ((copies && copies[a.f]) || 0));
-        value += p * chance * fire * eff[a.f] * (1 - cv(a.f));
-        list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: p * chance, L: eff[a.f], copies: (copies && copies[a.f]) || 0, cover: cv(a.f) });
+        const generated = learning ? Math.min(p,(learning.families[a.f].spark || 0)+p*LINEAGE_WHITE*((copies && copies[a.f]) || 0)) : p*chance;
+        value += generated * fire * eff[a.f] * (1 - cv(a.f));
+        list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: generated, L: eff[a.f], copies: (copies && copies[a.f]) || 0, cover: cv(a.f), budgeted:!!learning });
       });
       return { value, list, fire };
     }
@@ -177,13 +181,13 @@
         if (!(eff[f] > 0)) return;
         if (o.outNow && !fams[f].ids.concat(famMembers[f] || []).some((id) => o.outNow(id))) return; // she can only learn what's out now
         const all = famMembers[f] || fams[f].ids, p = Math.min(1, Math.max(0, ...all.map((id) => o2[id] || 0)));
-        const gold = all.filter((id) => meta[id] && meta[id][2] && o2[id] > 0).sort((a, b) => o2[b] - o2[a])[0];
+        const gold = all.filter((id) => meta[id] && meta[id][3] === 2 && o2[id] > 0).sort((a, b) => o2[b] - o2[a])[0];
         const white = fam.baseWhite(fams[f].ids[0]), id = String(gold || white);
         const c = cover[f] || 0;
         rows.push({ family: f, id, white: String(white), gold: !!gold, p, L: eff[f], cover: c, score: eff[f] * p * (1 - c), gamble: !(p > 0), anyway: anyway.has(id) || (gold && anyway.has(String(gold))) || false });
       });
       const offered = rows.filter((r) => !r.gamble && !r.anyway).sort((a, b) => b.score - a.score || b.L - a.L);
-      const rest = rows.filter((r) => r.gamble).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
+      const rest = x.skillPlan ? [] : rows.filter((r) => r.gamble).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
       return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L) });
     }
     // Her blue spark's stat is random (1 in 5 each), its stars 20/70/10% (her stats at SS are 1100+):
@@ -226,8 +230,9 @@
       Object.keys(miss).forEach((f) => { out[f] = 1 - miss[f]; });
       return out;
     }
-    function freshExtra(x, t, s, offers, r, parents) {
-      const aff = s.own.p1 || 0, w = freshWhites(x, offers, aff, r, lineageCopies(x, parents), familyCover(s));
+    function freshExtra(x, t, s, offers, r, parents, learning) {
+      if(learning && learning.ssShare < SS_SHARE) return {value:0,whites:{value:0,list:[],fire:0,blocked:true},blue:0,pink:0,unready:true};
+      const aff = s.own.p1 || 0, w = freshWhites(x, offers, aff, r, lineageCopies(x, parents), familyCover(s), learning);
       const blue = blueExpected(x, aff), pink = pinkExpected(x, t, aff, s);
       return { value: w.value + blue + pink, whites: w, blue, pink };
     }
@@ -265,10 +270,11 @@
     // parent deck that offers offers: one veteran plus a rental, or two veterans, sharing
     // their G1s. The veteran is chosen for both the ace and her own career. Each { kind: "fresh", t, parents, f, s, extra, value, plan }.
     function rankFresh(x, vets, umas, offers, opts = {}) {
-      const ace = x.ace.cid, out = [], seen = new Set(), r = rates(vets);
+      const ace = x.ace.cid, out = [], seen = new Set(), r = rates(vets), baseOffers=offers;
       (umas || []).map(trainee).filter(Boolean).forEach((t) => {
         if (+t.cid === +ace || seen.has(t.cid) || (o.chars && o.chars.indexOf(t.cid) === -1)) return;
         seen.add(t.cid);
+        const projection=opts.plans && opts.plans[t.id], offers=projection?projection.offers:baseOffers, learning=projection && projection.learning;
         const base = freshMember(t), fit = fitsAll(t);
         const rent = rentalFor(ace, t.cid), p2 = rent ? charMember(rent.cid) : null;
         const rentalMode = opts.parentMode !== "veterans", pick = (opts.picks || {})[t.id] || {};
@@ -280,7 +286,7 @@
         const chosenVet = rentalMode && selectedVet != null && selectedVet !== "" ? String(selectedVet) : null;
         const pool = eligible;
         const tx = trainingContext(x, t, offers);
-        const total = (f, ps) => { const s = fam.score(familyOf(f), x); return { s, extra: freshExtra(x, t, s, offers, r, ps) }; };
+        const total = (f, ps) => { const s = fam.score(familyOf(f), x); return { s, extra: freshExtra(x, t, s, offers, r, ps,learning) }; };
         // Each veteran alone as her parent (sharing the G1s she can run), the best per character.
         const solo = new Map();
         pool.forEach((v) => {
@@ -297,7 +303,7 @@
           const tf = trainingFamily(ps), ts = fam.score(familyOf(tf), tx);
           const training = contribution(tf, ts, tx, F.SLOTS, true);
           return y.s.problems.length || ts.problems.length ? null : { kind: "fresh", t, parents: ps, f, s: y.s, extra: y.extra, value: y.s.value + y.extra.value,
-            selectionValue: y.s.value + y.extra.value + training.value, rent, plan: pl, rates: r, offers, parentMode: rentalMode ? "rental" : "veterans", rental: rentalMode ? selectedRental || null : null };
+            selectionValue: y.s.value + y.extra.value + training.value, rent, plan: pl, rates: r, offers, learning, parentMode: rentalMode ? "rental" : "veterans", rental: rentalMode ? selectedRental || null : null };
         };
         let best = null;
         if (rentalMode) {
@@ -322,7 +328,7 @@
         }
         if (best) out.push(best);
       });
-      return out.sort((a, b) => b.value - a.value);
+      return out.sort((a, b) => (+(b.learning && b.learning.ssShare>=SS_SHARE)-+(a.learning && a.learning.ssShare>=SS_SHARE)) || b.value - a.value);
     }
     // The new parent you planned (plan: { tid, vet: her veteran's character, at: when planned }),
     // once you've trained her and imported her: a veteran of that version made after the plan,
@@ -555,7 +561,7 @@
     function atRaceCount(x, fresh, races, n) {
       const out = Object.assign({}, fresh, { f: Object.assign({}, fresh.f, { p1: Object.assign({}, fresh.f.p1, { wins: raceWins(races, n) }) }) });
       out.s = fam.score(familyOf(out.f), x);
-      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates, out.parents);
+      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates, out.parents,out.learning);
       out.value = out.s.value + out.extra.value;
       return out;
     }
@@ -568,7 +574,7 @@
       const races = racePlan(out, vets || []), wins = raceWins(races, maxRaces);
       out.f = Object.assign({}, fresh.f, { p1: Object.assign({}, fresh.f.p1, { wins }), g11: member(parents[0].self, parents[0].tid), g12: member(rental.parent) });
       out.s = fam.score(familyOf(out.f), x);
-      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates, out.parents);
+      out.extra = freshExtra(x, out.t, out.s, out.offers, out.rates, out.parents,out.learning);
       out.value = out.s.value + out.extra.value;
       return out;
     }
@@ -598,7 +604,7 @@
         const f = Object.assign({}, p1.f, { p2: member(r.parent), g21: member(r.parents[0]), g22: member(r.parents[1]) });
         const s = fam.score(familyOf(f), x);
         // A fresh Parent 1's expected sparks are scored at her affinity with this rental.
-        const extra = p1.kind === "fresh" ? freshExtra(x, p1.t, s, p1.offers, p1.rates, p1.parents).value : 0;
+        const extra = p1.kind === "fresh" ? freshExtra(x, p1.t, s, p1.offers, p1.rates, p1.parents,p1.learning).value : 0;
         if (s.problems.length) hidden.push({ r, why: s.problems[0] }); else rows.push({ r, f, s, value: s.value + extra });
       });
       rows.sort((a, b) => b.value - a.value || b.s.total - a.s.total);

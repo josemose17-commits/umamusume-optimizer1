@@ -145,7 +145,7 @@
       const d = deckOf(c, a);
       if (!d.cards || !d.cards.length) return null;
       const p = cup(c), style = styleOf(a), cards = cardsNow(d);
-      const sig = JSON.stringify([p.id, a.tid, style, cards.map((x) => [x.id, x.lb, !!x.borrowed]), d.skillW, d.must, d.comp, d.borrow, d.exclude, d.targets, d.rankGoal, ctx.scenario().id, ctx.ownedCode()]);
+      const sig = JSON.stringify([p.id, a.tid, style, cards.map((x) => [x.id, x.lb, !!x.borrowed]), d.skillW, d.must, d.comp, d.borrow, d.exclude, d.targets, d.rankGoal,ctx.skillPlan?ctx.skillPlan():null, ctx.scenario().id, ctx.ownedCode()]);
       const k = keyOf(c, a), had = views.get(k);
       if (had && had.sig === sig) return had;
       if (!ctx.euReady() || !ctx.aceSkills({ preset: p, style })) return null;
@@ -163,10 +163,18 @@
       if (!d.cards || !d.cards.length) { ctx.flash("Build her deck in CM & decks first."); return; }
       await busy("Loading the card data…", async () => {
         await ready(p);
+        if(ctx.refreshAceSkills) {await stage("Checking the ace's skill sources…",0.05);await ctx.refreshAceSkills();}
         const v = view(c, a);
         if (!v) throw new Error("The race's skill values didn't load. Try again.");
-        const r = await planParents(c, p, a, v);
-        found.set(keyOf(c, a), Object.assign(r, { sig: v.sig, inputs: inputsKey(c) }));
+        let r = await planParents(c, p, a, v);
+        if(ctx.refreshAceSkills && r.x.skillPlan) {
+          await stage("Checking purchases with the chosen family…",0.94);await ctx.refreshAceSkills();
+          const next=view(c,a);if(next && next.sig!==v.sig)r=await planParents(c,p,a,next);
+          await ctx.refreshAceSkills();r.jointPasses=2;
+          const final=ctx.skillPlan();r.jointConverged=!!final && JSON.stringify(final.parentValues)===JSON.stringify(r.x.skillPlan.parentValues);
+        }
+        const finalView=view(c,a)||v;
+        found.set(keyOf(c, a), Object.assign(r, { sig: finalView.sig, inputs: inputsKey(c) }));
         d.parentSummary = r.p1 ? { tid: r.useFresh ? r.p1.t.id : r.p1.v.tid, fresh: r.useFresh, total: r.p1.s.total } : null;
         ctx.save();
       });
@@ -178,7 +186,8 @@
       const rel = ctx.aceSkills({ preset: p, style });
       if (!rel) throw new Error("The race's skill values didn't load. Try again.");
       const vetsAll = ctx.veterans().list, umas = [...ctx.myUmas()];
-      const x = CP.context({ ace: { cid: t.cid, tid: t.id }, race: { preset: p, style }, rel, offers: v.offers, build: ctx.build(p), gaps: gapsOf(d) });
+      const skillPlan=ctx.skillPlan?ctx.skillPlan():null;
+      const x = CP.context({ ace: { cid: t.cid, tid: t.id }, race: { preset: p, style }, rel, offers: v.offers, build: ctx.build(p), gaps: gapsOf(d),skillPlan });
       await stage(`${who}: your veterans as Parent 1…`, 0.2);
       const vets = CP.rankVets(x, vetsAll);
       // The new parent you planned, trained and imported: she's Parent 1 now, with her real sparks.
@@ -187,13 +196,24 @@
       let fresh = [];
       if (prefs.setup === "B" && !trained) {
         await stage(`${who}: the best new Parent 1 from My umas…`, 0.4);
-        const pdeck = ctx.deck(p, style, null, PLAN_RACES);
+        const pdeck = ctx.deck(p, style, null, PLAN_RACES,{parentTargets:x.rel.targets});
         // The grandparent you borrowed (entered under the grandparent search), per new parent.
         const gps = gpRentals(prefs), picks = {};
         Object.keys(prefs.picks).forEach((k) => { picks[k] = Object.assign({}, prefs.picks[k], gps[k] ? { rental: gps[k].friend } : {}); });
         // Optional: only umas A or better in the ace's running style (her pink can land there).
         const pool = prefs.styleMatch ? umas.filter((id) => { const u = trainee(id); return u && ["S", "A"].includes((u.apt || [])[STYLE_APT[style]]); }) : umas;
         fresh = CP.rankFresh(x, vetsAll, pool, pdeck.offers, { parentMode: "rental", picks, rentals: Object.values(gps) });
+        if(skillPlan && ctx.parentLearning) {
+          const shortlist=fresh.slice(0,4);const chosen=fresh.find(f=>+f.t.id===+prefs.tid);if(chosen && !shortlist.includes(chosen))shortlist.push(chosen);
+          const plans={},checkedPicks=Object.assign({},picks);
+          for(const f of shortlist) {
+            await stage(`Checking ${tName(f.t)}'s skill budget at SS…`,0.5);
+            const deck=ctx.deck(p,style,f.t.id,0,{parentTargets:x.rel.targets}),start=CP.trainingStart(x,f),prediction=ctx.simulate(p,f.t.id,deck.cards,0,start);
+            plans[f.t.id]={offers:deck.offers,learning:ctx.parentLearning(p,f.t,deck,0,CP.trainingFamily(f.parents),prediction,x.rel.targets)};
+            checkedPicks[f.t.id]=Object.assign({},picks[f.t.id],{veteran:f.parents[0].id});
+          }
+          fresh=CP.rankFresh(x,vetsAll,shortlist.map(f=>f.t.id),pdeck.offers,{parentMode:"rental",picks:checkedPicks,rentals:Object.values(gps),plans});
+        }
       }
       // The ace's family affinity each choice can reach once you borrow (cm-plan.js outlook).
       vets.concat(fresh).forEach((y) => { y.aff = CP.outlook(x, y.f, vetsAll); });
@@ -232,19 +252,20 @@
     async function trainPlan(p, style, x, f0, vetsAll, who, mine) {
       let f = f0;
       const races = CP.racePlan(f, vetsAll);
-      let her = mine ? Object.assign(ctx.deckWith(p, style, f.t.id, races.extraRaces, mine), { source: "yours" }) : Object.assign(ctx.deck(p, style, f.t.id, races.extraRaces), { source: "quick" });
+      let her = mine ? Object.assign(ctx.deckWith(p, style, f.t.id, races.extraRaces, mine), { source: "yours" }) : Object.assign(ctx.deck(p, style, f.t.id, races.extraRaces,{parentTargets:x.rel.targets}), { source: "quick" });
       f = Object.assign({}, f, { offers: her.offers });
       await stage(`${who}: ${tName(f.t)}'s races at SS…`, 0.7);
       const blueStart = CP.trainingStart(x, f);
-      let ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
+      let ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart,x.skillPlan?{x,f,deck:her}:null);
       if (!mine && ss.n < races.extraRaces) {
         await stage(`${who}: her deck for the ${plural(ss.n, "race")} she keeps…`, 0.8);
-        const kept = Object.assign(ctx.deck(p, style, f.t.id, ss.n), { source: "quick" });
+        const kept = Object.assign(ctx.deck(p, style, f.t.id, ss.n,{parentTargets:x.rel.targets}), { source: "quick" });
         if (kept.cards.map((y) => y.id).join() !== her.cards.map((y) => y.id).join()) {
           her = kept; f = Object.assign({}, f, { offers: her.offers });
-          ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart);
+          ss = await ssCut(p, style, f.t, her.cards, races.extraRaces, "SS", vetsAll, blueStart,x.skillPlan?{x,f,deck:her}:null);
         }
       }
+      const checked=ss.rows.find(row=>row.n===ss.n);if(checked && checked.learning)f=Object.assign({},f,{learning:checked.learning});
       f = CP.atRaceCount(x, f, races, ss.n);
       f.aff = CP.outlook(x, f.f, vetsAll);
       // The chosen veteran's line shows the same number as the headline: with her race plan at SS.
@@ -253,7 +274,9 @@
       // Do the ace's gaps close without her blue (step 1's whole plan)? Then her blue is a bonus
       // and Training Focus goes for SS and her skills; else for her blue's stars too.
       const covered = blueCovered({ p1: f, gaps: x.gaps, useFresh: true, train: { f } });
-      return { f, base: f0, races, deck: her, ss, agenda: CP.upTo(races, ss.n), focus: await focusPick(p, style, f.t, her.cards, ss.n, ss.blueStart, covered) };
+      const focus=await focusPick(p, style, f.t, her.cards, ss.n, ss.blueStart, covered,x.skillPlan?{x,f,deck:her}:null);
+      if(focus.best.learning){f=CP.atRaceCount(x,Object.assign({},f,{learning:focus.best.learning}),races,ss.n);ss.none=f.learning.ssShare<root.UmaCmPlan.SS_SHARE;const row=ss.rows.find(y=>y.n===ss.n);if(row)Object.assign(row,{learning:f.learning,rating:f.learning.rating,hit:f.learning.ss,of:f.learning.of,stats:focus.best.stats,sp:focus.best.sp});}
+      return { f, base: f0, races, deck: her, ss, agenda: CP.upTo(races, ss.n), focus };
     }
 
     const sameCards = (a, b) => JSON.stringify((a || []).map((y) => [+y.id, !!y.borrowed]).sort()) === JSON.stringify((b || []).map((y) => [+y.id, !!y.borrowed]).sort());
@@ -289,7 +312,7 @@
     // simulation (her deck, Independent Training, 16 careers) gives what each race costs her; a
     // count keeps her at SS when SS_SHARE of those ratings, less that cost, still reach it.
     // Too few such veterans: the simulation alone (it leaves out inheritance, so it runs low).
-    async function ssCut(p, style, t, cards, max, rank, vets, blueStart) {
+    async function ssCut(p, style, t, cards, max, rank, vets, blueStart, access) {
       const rate = ctx.spRate(p, style, t.apt), uniq = PR.uniqueBonus(t.r, t.r), share = root.UmaCmPlan.SS_SHARE;
       const minimum = PR.rankThreshold(rank);
       const rating = (x) => PR.statsScore(x.stats) + Math.round((x.sp || 0) * rate) + uniq;
@@ -298,7 +321,8 @@
         if (!memo.has(k)) {
           await tick();
           const x = ctx.simulate(p, t.id, cards, k, blueStart), fin = x.finals || [];
-          memo.set(k, { n: k, stats: x.stats, sp: x.sp, rating: rating(x), hit: fin.filter((y) => rating(y) >= minimum).length, of: fin.length });
+          const learning=access?ctx.parentLearning(p,t,access.deck,k,CP.trainingFamily(access.f.parents),x,access.x.rel.targets):null;
+          memo.set(k, { n: k, stats: x.stats, sp: x.sp, rating: learning?learning.rating:rating(x), hit: learning?learning.ss:fin.filter((y) => rating(y) >= minimum).length, of: learning?learning.of:fin.length,learning });
         }
         return memo.get(k);
       };
@@ -312,7 +336,7 @@
         if (last && last.scenario !== sc.id) { base = CP.baseline(vets, last.scenario, minimum); if (base) scen = { id: last.scenario, name: ctx.scenarioName(last.scenario) }; }
       }
       let cut;
-      if (base) cut = Object.assign(CP.ssLimit(base, perRace, max, minimum), { from: "veterans", base, scen });
+      if (base && !access) cut = Object.assign(CP.ssLimit(base, perRace, max, minimum), { from: "veterans", base, scen });
       else {
         const ok = (y) => (y.of ? y.hit / y.of >= share : y.rating >= minimum);
         if (ok(top)) cut = { n: max };
@@ -333,7 +357,7 @@
     // leaves out inheritance, so it often reaches SS in none: rating is the closest measure), then
     // the better chance her blue spark comes out 2★ or more.
     const FOCUS = [["balanced", "Balanced"], ["stamina", "Stamina"], ["sprint", "Sprint"]];
-    async function focusPick(p, style, t, cards, n, blueStart, covered = true) {
+    async function focusPick(p, style, t, cards, n, blueStart, covered = true,access) {
       const rate = ctx.spRate(p, style, t.apt), uniq = PR.uniqueBonus(t.r, t.r), minimum = PR.rankThreshold("SS");
       const rating = (x) => PR.statsScore(x.stats) + Math.round((x.sp || 0) * rate) + uniq;
       const rows = [];
@@ -342,7 +366,8 @@
         const x = ctx.simulate(p, t.id, cards, n, blueStart, k), fin = x.finals || [];
         // Her blue's chance of 2★ or better (the stat is random; stars by that stat's value).
         const over = fin.length ? fin.reduce((m, y) => m + blue2(y.stats), 0) / fin.length : blue2(x.stats);
-        rows.push({ k, label, stats: x.stats, sp: x.sp, rating: rating(x), hit: fin.filter((y) => rating(y) >= minimum).length, of: fin.length, over });
+        const learning=access?ctx.parentLearning(p,t,access.deck,n,CP.trainingFamily(access.f.parents),x,access.x.rel.targets):null;
+        rows.push({ k, label, stats: x.stats, sp: x.sp, rating: learning?learning.rating:rating(x), hit: learning?learning.ss:fin.filter((y) => rating(y) >= minimum).length, of: learning?learning.of:fin.length, over,learning });
       }
       // Gaps covered: the most SS runs, then the highest rating (skills). A gap left: her blue's
       // 2★+ chance comes before rating, since it's the only part of her that could still help it.
@@ -410,6 +435,7 @@
       body.innerHTML = `<div class="cm cmp">
         <section class="panel"><h2>Parents${a ? " for " + esc(tName(trainee(a.tid))) : ""}</h2>
           <p class="mini">${esc(p.name)} · ${a ? STYLE_LABEL[styleOf(a)] : "no ace yet"}. Fill her gaps with blue sparks, make Parent 1 with a borrowed grandparent, borrow Parent 2, reach ${MIN_AFFINITY}+ affinity.</p>
+          <p class="mini">${r && r.x.skillPlan ? `White targets follow the ace's source-checked purchases · ${r.x.skillPlan.model}${r.jointPasses ? ` · ${r.jointPasses} planning passes` : ""}. ${r.jointConverged===false ? "Targets shifted in the final check; find them again to compare another pass." : ""}` : "Find parents checks the ace's skill sources, then plans the white hints her purchases need."}</p>
           <div class="row-wrap cmp-chips" aria-label="Your team">${aces(c).filter((x) => trainee(x.tid)).map((x) => `<button type="button" class="chip${a && x.tid === a.tid ? " active" : ""}" data-cmp-sel="${x.tid}" aria-pressed="${!!a && x.tid === a.tid}">${esc(tName(trainee(x.tid)))}</button>`).join("")}<button type="button" class="linkish" data-goto-tab="cm">${a ? "Team and decks in CM & decks" : "Pick your team in CM & decks"} →</button></div>
         </section>
         ${steps}
@@ -708,17 +734,19 @@
       // Independent Training → the sparks to aim for → set her up.
       return `<ol class="cmp-order">
         <li>${deckHTML(r)}</li>
-        <li><b>${esc(tName(f.t))} at SS with ${plural(keep.length, "extra G1")}</b> with that deck: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). <span class="mini">${ssText(ss)}</span>
+        <li><b>${esc(tName(f.t))}${f.learning && f.learning.ssShare < root.UmaCmPlan.SS_SHARE ? " · SS not yet supported by this shop" : " at SS"} with ${plural(keep.length, "extra G1")}</b> with that deck: as many as keep her at SS, your veteran's G1s first (each one shared adds affinity). <span class="mini">${ssText(ss)}</span>
           <details data-cmp-open="races"><summary class="mini">Her race plan and the SS check</summary>
           <div class="table-wrap"><table class="plan cmp-races"><thead><tr><th>Turn</th><th>Race</th><th>Why</th></tr></thead><tbody>${rows}</tbody></table></div>
           <div class="table-wrap"><table class="plan pp-cost"><thead><tr><th>Extra</th>${F.STAT_LABELS.map(l => `<th>${l.slice(0, 3)}</th>`).join("")}<th>SP</th><th>Rating</th><th>SS</th></tr></thead><tbody>${sims}</tbody></table></div>
-          <p class="mini">16 careers each, with known blue start bonuses · about ${fmtN(ss.perRace)} rating per extra race.</p></details></li>
+          <p class="mini">16 careers each, with known blue start bonuses${f.learning ? "; the kept count uses the chosen Training Focus" : ""} · about ${fmtN(ss.perRace)} rating per extra race.</p></details></li>
         <li>${itHTML(r)}</li>
         <li>${aimHTML(r)}</li>
       </ol>
         ${stepsHTML(r)}
         ${sentThere(r) ? ctx.trainingHTML() : ""}`;
     }
+    const fLearningHTML = learning => learning ? `<p class="mini${learning.ssShare < root.UmaCmPlan.SS_SHARE ? " warn" : ""}">Learnable-shop estimate: SS in ${learning.ss}/${learning.of} careers; mean ${fmtN(learning.spent)} SP spent, rating ${fmtN(learning.rating)}. ${learning.ssShare < root.UmaCmPlan.SS_SHARE ? "Improve the parent deck or enter actual stats before treating this as an SS plan." : "White projections count only affordable purchases."}</p>` : "";
+
     // Her Ace-parent deck: which one the plan uses (the quick pick or the deck optimizer's), a
     // different one waiting in ③, and Improve this deck (③'s optimizer, then the plan follows).
     function deckHTML(r) {
@@ -728,7 +756,7 @@
       const btn = `<button type="button" class="btn small" data-cmp-improve="1"${job || run != null ? " disabled" : ""}>${yours ? "Search again" : "Improve this deck"}</button>`;
       const status = run != null ? `<span class="progress" id="cmpImproveProg"><i style="width:${Math.round(run * 100)}%"></i></span><span class="mini">Simulating careers for her best deck; the plan below updates when it's done.</span>`
         : `<span class="mini">${yours ? "Runs ③'s deck optimizer again with its settings." : "Runs the deck optimizer (③ below, with its settings) from this deck; the plan below then updates to the deck it finds."}</span>`;
-      return `<b>Her Ace-parent deck</b> <span class="mini">(${how})</span>: ${cards(tr.deck.cards)}.
+      return `${fLearningHTML(tr.f.learning)}<b>Her Ace-parent deck</b> <span class="mini">(${how})</span>: ${cards(tr.deck.cards)}.
         ${other && run == null ? `<p class="mini warn">③ has a different deck from Find my best deck: ${cards(other)}. <button type="button" class="linkish" data-cmp-follow="1"${job ? " disabled" : ""}>Plan with it</button></p>` : ""}
         <div class="row-wrap">${btn}${status}</div>`;
     }
@@ -755,10 +783,10 @@
       const tr = r.train, f = tr.f, fo = tr.focus;
       const cards = tr.deck.cards.map((x) => D.card(x.id)).filter(Boolean);
       const from = (id) => cards.map((cd) => (cd.es || []).map(String).includes(id) ? cd.n + " (event)" : (cd.hs || []).map(String).includes(id) ? cd.n + " (hint)" : "").filter(Boolean);
-      const list = CP.itSkills(r.x, f.offers || tr.deck.offers, 10, eventsAnyway(tr.deck.cards), CP.familyCover(f.s));
+      const list = CP.itSkills(r.x, f.learning ? f.learning.skills : f.offers || tr.deck.offers, 10, eventsAnyway(tr.deck.cards), CP.familyCover(f.s));
       const skills = list.map((k) => {
         const src = from(k.id).concat(k.gold && k.id !== k.white ? from(k.white) : []);
-        return `<li><b>${esc(ctx.skillName(k.id))}</b>${k.gold ? " (gold)" : ""} <span class="mini">${k.gamble ? "· no card of hers gives it: only if a random event offers it" : `· ${Math.round(k.p * 100)}% offered · ${esc([...new Set(src)].join(", ") || "her deck")}${k.cover >= 0.1 ? ` · her family already gives it ~${Math.round(k.cover * 100)}%` : ""}`}</span></li>`;
+        return `<li><b>${esc(ctx.skillName(k.id))}</b>${k.gold ? " (gold)" : ""} <span class="mini">${k.gamble ? "· no card of hers gives it: only if a random event offers it" : `· ${Math.round(k.p * 100)}% ${f.learning ? "estimated learned within SP" : "offered"} · ${esc([...new Set(src)].join(", ") || (f.learning ? "trainee, deck or inherited hint" : "her deck"))}${k.cover >= 0.1 ? ` · her family already gives it ~${Math.round(k.cover * 100)}%` : ""}`}</span></li>`;
       }).join("");
       const races = tr.agenda.filter((x) => !x.free).map((x) => x.name);
       const anySS = fo && fo.rows.some((y) => y.hit > 0);

@@ -12,7 +12,7 @@
   }
   function supported(p, variant, catalog) {
     if (!catalog.courses[p.course.id]) return "This course is missing from the pinned race simulator.";
-    if (variant && (variant.syoubu || Object.keys(variant.changed || {}).length)) return "This cup needs a later race-engine or skill version. Its existing chart remains available; build comparisons are unavailable for that version.";
+    if (variant && (variant.syoubu || Object.keys(variant.changed || {}).length)) return "This cup needs a later race-engine or skill version; only its existing course chart can be used.";
     return null;
   }
   function horse(input, skills, catalog) {
@@ -58,10 +58,10 @@
   async function optimize(o) {
     const learned = ids(o.learned), values = Object.assign({}, o.values), excluded = [];
     const available = ids(o.available).filter(id => {
-      if (o.catalog.skills[id] && o.catalog.meta[id]) { if (!Number.isFinite(values[id])) values[id] = 0; return true; }
+      if (o.catalog.skills[id] && o.catalog.meta[id] || o.allowChartOnly && B.DATA.skills[id] && Number.isFinite(values[id])) { if (!Number.isFinite(values[id])) values[id] = 0; return true; }
       excluded.push(id); return false;
     });
-    const missing = learned.filter(id => !o.catalog.skills[id] || !o.catalog.meta[id]);
+    const missing = o.allowChartOnly?[]:learned.filter(id => !o.catalog.skills[id] || !o.catalog.meta[id]);
     if (missing.length) throw new Error("Equipped skills lack race data: " + missing.join(", "));
     try { await o.compare(learned,learned,24,271828); }
     catch(error) {

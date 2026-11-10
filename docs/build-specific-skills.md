@@ -13,10 +13,19 @@ Only explicitly added available skills can be bought in finished mode.
 
 Planning uses a complete sampled career's hint levels and SP when the training simulator
 provides them. Otherwise it makes one deterministic sample of the deck's estimated offer
-probabilities and assumes Lv1 hints; this fallback is labeled. Trainee innate/awakening
-skills are available in planning. User-added skills supplement those offers; this does not
-verify that a support, parent or scenario will provide them. Equipped purchases consume
-projected SP before other purchases. Inheritance stats are excluded unless entered.
+probabilities and assumes Lv1 hints; this fallback is labeled. `skill-access.js` checks each
+source: innate skills, assumed-unlocked awakenings, each eligible support card and the six
+entered family slots. Unowned preview cards and untrained parents are labeled conditional.
+Typing a planning target never creates a source. A typed equipped target conditions on
+getting it from a verified route and consumes projected SP first. A finished uma's entered
+shop/equipped skills are treated as observed. Inheritance stats are excluded unless entered.
+
+Family white hints are sampled at each member's existing affinity-based inspiration chance;
+unknown hint levels conservatively use Lv1. Direct parents' inherited uniques are available
+at the start; grandparent uniques use the existing inspiration estimate. Great-grandparents
+are ignored. A white spark cannot unlock gold. A gold source unlocks its prerequisite but
+does not give the white a hint discount. Related routes from one card share an access roll,
+so aliases do not create independent extra chances.
 
 `skill-budget.js` supplies legal purchase options: prerequisite chains, actual hint discounts,
 one final tier per skill family and only incremental upgrade costs for learned lower tiers.
@@ -42,7 +51,28 @@ After career refinement, the final deck and its initial deck are eligible for th
 The sampled set's joint race gain replaces the additive skill component for that final
 shortlist, retaining the career score and rating-goal constraint. This is a limited deck
 comparison, not a joint exhaustive search of every deck, every career and every skill set.
-Parent searches retain their existing spark/rating objective.
+
+## Parent and deck feedback
+
+A separate conditional purchase search adds at most twelve relevant base-white hints plus
+explicitly entered white targets. It supplies priorities to parent ranking and both rental
+searches; those hypothetical routes never enter the actual purchase list. Existing deck
+coverage reduces a spark's value to its hint discount. Duplicate family routes combine
+their access chances rather than granting the skill twice.
+
+Find Parent 1 checks up to four fresh versions (plus the manually selected version), builds
+each one's training deck and samples sixteen legal skill shops against her predicted careers.
+It seeks SS first, then useful white-spark value within SP, with a bounded two-pass purchase
+exchange search. Inherited hints and trainee skills count as routes too. The chosen parent's
+race cap and Training Focus use these budgeted ratings. Below 75% SS careers, fresh-parent
+spark credit is withheld and the UI warns. This is not a rank filter on existing rentals.
+
+Learning probability is the share of sampled shops that buy the skill. Spark generation
+uses the existing white/upgrade/gold rates and lineage-copy bonus; inheritance then applies
+the existing star/affinity estimate. These are forecasts, not guaranteed sparks. Independent
+Training lists only sourced, budgeted targets once this plan exists. The ace's purchases
+are rechecked with the selected family in two planning passes. If targets shift on the final
+check, the UI says so; this is not a convergence guarantee or an exhaustive joint optimum.
 
 ## Model limits
 
@@ -54,9 +84,10 @@ Neither CM win probability nor expected LoH points can be inferred from these le
 Practice races remain necessary to validate the whole build.
 
 The pinned Global worker is used only for a course it knows and a compatible rules version.
-Cups requiring stamina showdown or changed Global skills are rejected rather than silently
-using earlier physics. A skill absent from this worker is excluded and named; an equipped
-skill with missing data stops the comparison. Existing per-cup charts remain available.
+Cups requiring stamina showdown or changed Global skills use an explicit course-chart
+fallback. It keeps source checks and SP legality but measures no new interactions or
+full-spurt frequency. For supported versions, a skill absent from the worker is excluded
+and named; an equipped skill with missing data stops the comparison.
 
 ## Verification
 
@@ -65,3 +96,6 @@ baselines, held-out validation, format inputs and version guards. A VM test runs
 pinned worker, checking nonzero skill gain and a zero identical-build comparison.
 Browser checks exercise finished inputs, equipping a lower tier, automatic recalculation,
 saved settings, automatic deck predictions, future version guards and the 390px layout.
+`test/skill-access.test.js`, `test/cm-plan.test.js` and `test/family.test.js` cover typed
+wishes without sources, gold/white routes, six-slot inheritance, affordable SS purchases,
+purchase-driven parent ranking and decoded rental links, and duplicate access.

@@ -347,7 +347,7 @@
     const ctx = makeCtx(opts);
     ctx.spWeight = 1;
     ctx.speedWeight = 1;
-    ctx.races = 0;
+    ctx.races = opts.offerRaces || 0;
     const out = {};
     skillValue(deck, ctx).offers.forEach((x) => { if (x.p > 0) out[String(x.id)] = Math.min(1, x.p); });
     return out;
