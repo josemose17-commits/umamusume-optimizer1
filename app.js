@@ -3659,7 +3659,7 @@
 
   // ---- Tier list: Euophrys' ranking plus skills ----
   const TIER_NAMES = ["S", "A", "B", "C", "D", "E", "F"];
-  const TIER_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend and Group"]];
+  const TIER_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]];
   const TIER_SHOW = [
     ["", "Nothing"], ["score", "Score (Euophrys + skills)"], ["skills", "Best skills (L)"], ["evbond", "Event bond"], ["bond", "Initial bond"], ["race", "Race bonus"],
     ["fs", "Friendship bonus"], ["te", "Training effectiveness"], ["spec", "Specialty priority"], ["mood", "Mood effect"], ["hint", "Hint frequency"], ["it", "Independent Training strengths"]
@@ -3677,7 +3677,7 @@
   }
 
   function tierCandidates(t) {
-    const types = t.type === "friend" ? ["friend", "group"] : [t.type];
+    const types = [t.type];
     let cards = D.DATA.supports.filter((c) => (!t.global || D.onGlobal(c, TODAY) || owned[c.id] != null) && types.indexOf(c.ty) !== -1 && c.r >= +t.rarity);
     if (t.ownedOnly) cards = cards.filter((c) => owned[c.id] != null);
     const out = [];
@@ -3763,7 +3763,7 @@
     const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${esc(l)}</option>`).join("");
     const presetOpts = P.list.filter((x) => x.global.end >= TODAY || x.kind === "loh").concat(P.list.filter((x) => x.global.end < TODAY).reverse())
       .map((x) => `<option value="${x.id}" ${x.id === p.id ? "selected" : ""}>${esc(presetLabel(x))}</option>`).join("");
-    const types = t.type === "friend" ? ["friend", "group"] : [t.type];
+    const types = [t.type];
     const nType = t.deck.filter((x) => types.indexOf(D.card(x.id).ty) !== -1).length;
     const ord = ["1st", "2nd", "3rd", "4th", "5th", "6th"][Math.min(5, nType)];
     const typeName = TIER_TYPES.find((x) => x[0] === t.type)[1];
