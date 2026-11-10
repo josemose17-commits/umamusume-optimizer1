@@ -32,7 +32,8 @@
     const course = JSON.parse(JSON.stringify(catalog.courses[preset.course.id]));
     course.slopes.sort((a, b) => a.start - b.start);
     const count = preset.kind === "loh" ? 12 : 9;
-    const range = input.orderRange || ({ Nige: [1, 1], Senkou: [2, 4], Sasi: [5, count], Oikomi: [5, count] })[input.strategy];
+    const half = Math.floor(count / 2);
+    const range = input.orderRange || ({ Nige: [1, 1], Senkou: [2, half], Sasi: [half + 1, count], Oikomi: [half + 1, count] })[input.strategy];
     const { ground, weather, season, time } = preset.racedef;
     return { msg: "compare", data: { nsamples: samples, course,
       racedef: { groundCondition: ground, weather, season, time, grade: 100, skillId: "", orderRange: range, numUmas: count },
@@ -44,13 +45,13 @@
     let pending = null;
     worker.onmessage = ({ data }) => {
       if (!pending) return;
-      if (data.type === "error") { const p = pending; pending = null; p.reject(new Error(data.error)); }
-      else if (data.type === "done") { const p = pending; pending = null; p.resolve(p.last); }
+      if (data.type === "error") { const p = pending; pending = null; clearTimeout(p.timer); p.reject(new Error(data.error)); }
+      else if (data.type === "done") { const p = pending; pending = null; clearTimeout(p.timer); p.resolve(p.last); }
       else pending.last = data;
     };
-    worker.onerror = event => { if (pending) { const p = pending; pending = null; p.reject(new Error(event.message || "Race worker failed to load.")); } };
-    return { run: message => new Promise((resolve, reject) => { if (pending) { reject(new Error("Race worker is busy.")); return; } pending = { resolve, reject }; worker.postMessage(message); }),
-      close: () => { worker.terminate(); if (pending) { pending.reject(new Error("Comparison cancelled.")); pending = null; } } };
+    worker.onerror = event => { if (pending) { const p = pending; pending = null; clearTimeout(p.timer); p.reject(new Error(event.message || "Race worker failed to load.")); } };
+    return { run: message => new Promise((resolve, reject) => { if (pending) { reject(new Error("Race worker is busy.")); return; } const timer=setTimeout(()=>{worker.terminate();pending=null;reject(new Error("The race comparison took too long. Reduce the skill list and try again."));},20000);pending = { resolve, reject, timer }; worker.postMessage(message); }),
+      close: () => { worker.terminate(); if (pending) { clearTimeout(pending.timer); pending.reject(new Error("Comparison cancelled.")); pending = null; } } };
   }
   let catalogPromise;
   const load = () => catalogPromise || (catalogPromise = fetch("data/race-skills.json" + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { catalogPromise = null; throw e; }));
@@ -62,11 +63,31 @@
     });
     const missing = learned.filter(id => !o.catalog.skills[id] || !o.catalog.meta[id]);
     if (missing.length) throw new Error("Equipped skills lack race data: " + missing.join(", "));
-    const budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true });
-    const groups = budget.options(o.hints || {}), options = groups.flat();
+    try { await o.compare(learned,learned,24,271828); }
+    catch(error) {
+      if (/cancelled|too long|load|busy/i.test(error.message)) throw error;
+      throw new Error("The equipped baseline has conditions this engine cannot simulate. Change the comparison's equipped list or use the course chart.");
+    }
+    let budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true });
+    const preflight = new Map();
+    // A catalog entry does not guarantee that this engine parses its conditions. Test each
+    // addition and keep unsupported routes out of the search, with their IDs disclosed.
+    for (const x of budget.options(o.hints || {}).flat()) {
+      try { preflight.set(x.id, await o.compare(learned,ids(learned.concat(x.id)),24,271828)); }
+      catch(error) {
+        if (/cancelled|too long|load|busy/i.test(error.message)) throw error;
+        excluded.push(x.id); delete values[x.id];
+      }
+    }
+    budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true });
+    // Unvalued must-haves are normally retained by the purchase solver; an unsupported
+    // race effect cannot be restored that way.
+    const groups = budget.options(o.hints || {}).map(g=>g.filter(x=>!excluded.includes(x.id))).filter(g=>g.length), options = groups.flat();
     const seed = budget.solve(o.hints || {}, o.sp);
+    seed.selected=seed.selected.filter(x=>!excluded.includes(x.id));
+    excluded.push(...seed.unsupported.filter(id=>!excluded.includes(id)));
     const limit = o.maxEvaluations || 96, cache = new Map();
-    let calls = 0;
+    let calls = 0, failedSets = 0;
     const evaluate = async selected => {
       const key = ids(selected.map(s => s.id)).join(".");
       if (cache.has(key)) return cache.get(key);
@@ -74,7 +95,9 @@
       if (spent > o.sp) return null;
       const set = ids(learned.concat(selected.map(s => s.id))), satisfied = new Set(learned.concat(selected.flatMap(x => x.required)));
       const required = (o.must || []).map(String).filter(id => satisfied.has(id)).length;
-      const result = selected.length ? await o.compare(learned, set, 24, 271828) : summary([0]);
+      let result;
+      try { result = selected.length ? await o.compare(learned, set, 24, 271828) : summary([0]); }
+      catch(error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error;cache.set(key,null);calls++;failedSets++;return null; }
       const v = { selected: selected.slice(), spent, required, result };
       cache.set(key, v); calls++; if (o.progress) o.progress(Math.min(0.95, calls / limit)); return v;
     };
@@ -83,7 +106,7 @@
     if (better(empty, best)) best = empty;
     // Grow from empty too, so a standalone ordering cannot fix the answer before interaction
     // tests begin. Retain the additive purchase set as a second starting point.
-    const starts = [empty, best];
+    const starts = [empty, best].filter(Boolean);
     // Test small pairs as well: an enabling skill can be worthless alone. This also
     // supplies starts beyond the additive solution without claiming an exhaustive search.
     const short = groups.slice().sort((a,b) => Math.max(...b.map(x=>x.L)) - Math.max(...a.map(x=>x.L))).slice(0,8).map(g=>g.slice().sort((a,b)=>b.L/Math.max(1,b.cost)-a.L/Math.max(1,a.cost))[0]);
@@ -112,11 +135,11 @@
       if (pass && !moved) break;
     }
     // Report on a separate seed and a larger sample; a noisy search win can lose this check.
-    const finalists = [...cache.values()].sort((a, b) => b.required - a.required || b.result.mean - a.result.mean || a.spent - b.spent).slice(0, 3);
+    const finalists = [...cache.values()].filter(Boolean).sort((a, b) => b.required - a.required || b.result.mean - a.result.mean || a.spent - b.spent).slice(0, 3);
     if (!finalists.includes(cache.get(ids(seed.selected.map(s=>s.id)).join(".")))) finalists.push(cache.get(ids(seed.selected.map(s=>s.id)).join(".")));
     best = null;
     for (const x of finalists.filter(Boolean)) {
-      const r = x.selected.length ? await o.compare(learned, ids(learned.concat(x.selected.map(s=>s.id))), 96, 314159) : summary([0]);
+      const r = await o.compare(learned, ids(learned.concat(x.selected.map(s=>s.id))), 96, 314159);
       const v = Object.assign({}, x, { result: r }); if (better(v, best)) best = v;
     }
     const rows = [];
@@ -126,9 +149,16 @@
       rows.push(Object.assign({}, x, { marginal, per100: x.cost ? marginal.mean * 100 / x.cost : null }));
     }
     rows.sort((a,b) => (b.per100 || 0) - (a.per100 || 0));
-    return { selected: rows, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
+    const ranking = [];
+    for (const x of options) {
+      const k=ids([x.id]).join("."), cached=cache.get(k);
+      const result=cached ? cached.result : preflight.get(x.id);
+      ranking.push(Object.assign({},x,{result,per100:x.cost?result.mean*100/x.cost:null}));
+    }
+    ranking.sort((a,b)=>(b.per100||0)-(a.per100||0));
+    return { selected: rows, ranking, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
-      evaluations: calls, method: "bounded paired race comparisons", learned };
+      evaluations: calls, failedSets, method: "bounded paired race comparisons", learned };
   }
   const api = { summary, supported, horse, request, runner, load, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;
