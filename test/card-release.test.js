@@ -4,6 +4,8 @@ const R = require("../card-release.js");
 const D = require("../deck.js");
 const B = require("../data/banners.js");
 const T = require("../tiers.js");
+const PS = require("../parent-skills.js");
+const SV = require("../data/skillvalues/index.js");
 const today = "2026-11-10";
 const cup = start => ({ global: { start } });
 const cards = [{ id: 1, en: "2026-11-12", r: 3 }, { id: 2, en: null, r: 3 }, { id: 3, en: null, r: 2 }, { id: 4, en: null, r: 3 }];
@@ -71,4 +73,37 @@ test("GameTora's Ramonu and Group forecasts are usable in real future deck searc
   assert.ok(result.cards.some(c => c.id === ramonu.id));
   assert.ok(result.cards.some(c => c.id === group.id));
   assert.ok(result.cards.every(c => r.available(D.card(c.id), p)));
+});
+
+test("a future parent deck counts the card's hints in scoring and its skill inventory", () => {
+  const c = D.card(30134);
+  // A fixed forecast keeps this about the future-card gate even after Global releases Ramonu.
+  const futureCard = Object.assign({}, c, { en: null });
+  const release = R.create({ release: { cards: { [c.id]: "2026-11-29" } } }, today);
+  const targets = Object.fromEntries(c.hs.map(id => [id, 1]));
+  const base = { globalOnly: true, today, skillsBy: "2025-12-31", targets };
+  const future = Object.assign({}, base, { cardAvailable: card => release.available(Object.assign({}, card, { en: null }), cup("2026-11-29")) });
+  const now = Object.assign({}, base, { cardAvailable: () => false });
+  const opts = { skills: SV.skills, purchases: {}, events: { cards: {}, events: {} } };
+  assert.equal(PS.build([futureCard], Object.assign({}, opts, now)).skills.length, 0);
+  const inventory = PS.build([futureCard], Object.assign({}, opts, future));
+  assert.ok(inventory.skills.some(s => s.id === String(c.hs[0])));
+  assert.deepEqual(inventory.unavailableCards, []);
+  const cards = [{ id: c.id, lb: 4 }];
+  assert.deepEqual(Object.keys(T.deckOffers({ scenario: "GM", parent: now }, cards)), []);
+  const offers = T.deckOffers({ scenario: "GM", parent: future }, cards);
+  assert.ok(offers[c.hs[0]] > 0, "future card hints count toward the parent's targets");
+});
+
+test("a required future borrow survives deck building without adding it to your own pool", () => {
+  const r = R.create(B, today), p = cup("2029-01-01");
+  const owned = { 30002: 4, 30003: 4, 30004: 4, 30005: 4, 30006: 4, 30010: 4, 30014: 4 };
+  const pools = r.pools(D.DATA.supports, owned, { ownedOnly: true }, p, T.entry);
+  const opts = { scenario: "URA", skillWeight: 0, borrow: true, locked: [30134] };
+  const result = T.buildDeck(opts, pools.pool, pools.borrow);
+  assert.equal(result.cards.length, 6);
+  assert.deepEqual(result.cards.filter(c => c.borrowed).map(c => c.id), [30134]);
+  assert.ok(result.cards.filter(c => !c.borrowed).every(c => owned[c.id] === c.lb));
+  assert.equal(owned[30134], undefined);
+  assert.throws(() => T.buildDeck(Object.assign({}, opts, { locked: [30134, 30137] }), pools.pool, pools.borrow), /Only one must-include card can be borrowed/);
 });

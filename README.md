@@ -73,6 +73,8 @@ Mark the support cards you own and their limit break, with the **Owned** picker 
 
 Cards reach Global in the data when GameTora lists their Global date (refreshed daily). If a card is out on Global but the data doesn't know yet, open it in **Support cards** (untick **Global only** to find it) and press **Mark as out on Global**: it then counts as a Global card everywhere (deck picker, optimizer, tier list), in this browser. A date from the data takes over once it arrives, and **Unmark** undoes it.
 
+No manual update is needed on release day: the date activates the card automatically. A forecast passing its date never marks a card as released; GameTora must confirm it. Reload the page to pick up the daily data.
+
 ## CM & decks
 
 Your team and each ace's racing deck. Older **CM/LoH** and **CM/LoH planner** saves open here with their settings.
@@ -82,6 +84,8 @@ Your team and each ace's racing deck. Older **CM/LoH** and **CM/LoH planner** sa
 3. **Her gaps:** under the predicted stats, each stat's target (yours, or the race build's when blank), the prediction (16 careers, before inheritance) and how far short. **Fill them in Parents** goes to the next step. The skills table for the race stays at the bottom.
 
 Each ace keeps her deck by cup. Racing and parent decks keep separate results.
+
+**Future cups:** deck searches, borrowed cards, must-include cards, skill sources and upgrade suggestions use cards expected by the cup's start. Forecast dates come from GameTora's calendar (also used by Pull planner); **Expected ~date** marks estimates. Untick **Only cards I own** to try future cards at LB4, or leave it on to use your cards plus one future borrow. This never adds cards to your collection. Parents' deck builder uses the same cup date. Training still uses the scenario you select, and cards without scoring data stay out of searches. Current and past cups use cards released on Global today.
 
 **The skills table** ranks every skill by its median length gain (L) on the cup's course for her running style, from alpha123's Umalator. The Umalator runs one uma alone, so the values place her in the pack by style (a Front Runner in 1st, a Pace Chaser 2nd–4th, Late Surgers and End Closers 5th–9th of 9) and leave out the skills she can't fire from there: ones that need her in the back half of the pack (for Front Runners and Pace Chasers) or the front half (for End Closers), and, for a Front Runner, ones that need a rival right ahead of her (No Stopping Me!, Blast a Hole Through!, Slipstream, passing skills), since nobody is ahead of a leader. The line under the table says what was left out, and a must-have she can't fire is marked. This applies everywhere the values count: the deck optimizer, must-haves and Parents. Skills that wait for other skills to fire are valued as if those had fired: Groundwork and Solid Preparation (3 skills in the opening leg) go off at the gate, where greens, Concentration and Early Lead fire, so the extra acceleration lands while she's still speeding up (worth most to a Front Runner); Tail Held High and the others at a random moment of their leg. For a Front Runner, Concentration, Focus and greens are tagged (**helps her lead**, **sets off Groundwork**): their L is only the distance a quicker start saves or their own stat boost, but they fire at the gate, where they help her take the lead and, three together, set off Groundwork. The simulator can't put a number on that.
 

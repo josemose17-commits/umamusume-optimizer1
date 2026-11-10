@@ -11,6 +11,7 @@
   const R = window.UmaRunReport;
   const HAS_DATA = !!(D && D.DATA);
   const TODAY = new Date().toISOString().slice(0, 10);
+  const CARD_RELEASE = window.UmaCardRelease.create(window.UmaBanners, TODAY);
   const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const FX_SHORT = { 1: "Friendship", 8: "Training", 2: "Mood", 15: "Race", 19: "Specialty", 14: "Init. bond", 30: "SP bonus", 3: "Spd bonus", 4: "Sta bonus", 5: "Pow bonus", 6: "Gut bonus", 7: "Wit bonus", 27: "Fail prot.", 28: "Energy cut", 31: "Wit recovery", 41: "All stats", 18: "Hint rate", 17: "Hint Lv" };
   const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 });
@@ -2311,11 +2312,11 @@
   // Which cards can give each skill (hint or event), among the cards the optimizer may use.
   function skillSources(c) {
     const out = {};
-    const ids = c.ownedOnly && ownedIds().length ? ownedIds() : D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).map((x) => x.id);
+    const ids = optPool(c).map(x => x.id);
     if (c.goal !== "race") {
-      const inventory = window.UmaParentSkills.build(ids.map(id => D.card(id)).filter(card => D.onGlobal(card, TODAY)), {
+      const inventory = window.UmaParentSkills.build(ids.map(id => D.card(id)), {
         skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
-        globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(presetById(c.preset))
+        globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(presetById(c.preset)), cardAvailable: card => cardAvailable(card, c)
       });
       inventory.skills.forEach(skill => { out[skill.id] = skill.sources.map(source => D.card(source.card)); });
     } else {
@@ -2355,7 +2356,7 @@
     const sv = skillMap(p.id, c.style);
     const o = { scenario: euScen(), overrides: euOver(), trainee: tid, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +c.itManual, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace") {
-      o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(p) };
+      o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(p), cardAvailable: card => CARD_RELEASE.available(card, p) };
       if (c.globalSkills) o.must = o.must.filter((id) => released(id, p));
       // Reach SS / S: keep the deck whose careers reach the selected rating most often.
       if (c.reachSS && window.UmaRating) {
@@ -2440,11 +2441,14 @@
     save();
   }
 
-  function optPool(c) {
-    if (c.ownedOnly && ownedIds().length) return ownedIds().filter(id => c.goal === "race" || D.onGlobal(D.card(id), TODAY)).filter((id) => !T.entry || window.EuophrysCards ? T.entry(id, owned[id]) : true).map((id) => ({ id, lb: owned[id] }));
-    return D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r >= 2).map((x) => ({ id: x.id, lb: 4 }));
+  const cardAvailable = (card, c) => CARD_RELEASE.available(card, presetById(c.preset));
+  const cardPools = c => CARD_RELEASE.pools(D.DATA.supports, owned, c, presetById(c.preset), (id, lb) => !!T.entry(id, lb));
+  const optPool = c => cardPools(c).pool;
+  const borrowPool = c => cardPools(c).borrow;
+  function cardReleaseHTML(card) {
+    const r = CARD_RELEASE.info(card);
+    return r.estimated ? ` <span class="mini" title="GameTora's estimated Global release; the date can move.">· Expected ~${esc(fmtDate(r.date))}</span>` : "";
   }
-  const borrowPool = () => D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r === 3).map((x) => ({ id: x.id, lb: 4 }));
 
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over) {
@@ -2497,7 +2501,7 @@
     let link = null;
     setTimeout(() => {
       try {
-        let bp = c.borrow ? borrowPool() : [];
+        let bp = c.borrow ? borrowPool(c) : [];
         const locked = c.locked.slice();
         link = itLink(c, pool, bp);
         if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
@@ -2613,7 +2617,7 @@
       deck.forEach((cur, i) => {
         if (cur.borrowed || c.locked.includes(cur.id)) return;
         const rest = deck.filter((_, j) => j !== i), ty = D.card(cur.id).ty;
-        const candidates = D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r >= 2 && x.ty === ty && (owned[x.id] == null || owned[x.id] < 4)).map((x) => ({ id: x.id, lb: 4 }));
+        const candidates = D.DATA.supports.filter((x) => cardAvailable(x, c) && T.entry(x.id, 4) && x.r >= 2 && x.ty === ty && (owned[x.id] == null || owned[x.id] < 4)).map((x) => ({ id: x.id, lb: 4 }));
         T.rank(opts, ty, rest, candidates).slice(0, 3).forEach((candidate) => {
           const cards = deck.map((x, j) => j === i ? { id: candidate.id, lb: candidate.lb, borrowed: false } : x);
           const covered = new Set(T.deckSkills(opts, cards).must.filter((m) => m.p > 0).map((m) => String(m.id)));
@@ -2649,7 +2653,7 @@
       if (cur.borrowed || c.locked.indexOf(cur.id) !== -1) return;
       const ty = D.card(cur.id).ty;
       const rest = deck.filter((_, j) => j !== i);
-      const cands = D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r >= 2 && x.ty === ty && (owned[x.id] == null || owned[x.id] < 4)).map((x) => ({ id: x.id, lb: 4 }));
+      const cands = D.DATA.supports.filter((x) => cardAvailable(x, c) && T.entry(x.id, 4) && x.r >= 2 && x.ty === ty && (owned[x.id] == null || owned[x.id] < 4)).map((x) => ({ id: x.id, lb: 4 }));
       T.rank(opts, ty, rest, cands).slice(0, 3).forEach((x) => { if (x.score > cur.score) out.push({ id: x.id, gain: x.score - cur.score, share: (x.score - cur.score) / Math.max(1, cur.score), replaces: cur.id }); });
     });
     const seen = new Set();
@@ -2711,11 +2715,15 @@
     const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${l}</option>`).join("");
     const nSkills = Object.keys(skillMap(p.id, c.style).map).length;
     const goal = c.goal || "race";
+    const by = CARD_RELEASE.cutoff(p), future = by > TODAY;
+    const available = D.DATA.supports.filter(x => cardAvailable(x, c));
+    const missingScores = available.filter(x => x.r >= 2 && !T.entry(x.id, 4)).length;
     // In the Parents tab the long explanations go into one closed box, to keep ③ short.
     const notes = [];
     const note = (html) => (host === "parents" ? (notes.push(html), "") : html);
     return `<section class="panel cm-opt" data-deck-host="${host}">
       <h3>Deck optimizer</h3>
+      <p class="mini" data-card-availability>${future ? `Cards expected by ${esc(fmtDate(by))}; ~ releases are estimates. Untick “Only cards I own” to try future cards at LB4.` : "Cards released on Global today; updated daily from GameTora."}${missingScores ? ` ${missingScores} card${missingScores === 1 ? " lacks" : "s lack"} scoring data and ${missingScores === 1 ? "is" : "are"} left out of searches.` : ""}</p>
 
       ${host === "parents" ? `<p class="mini">Finds relevant white skills for the ace, with the parent rating goal set above.</p>` : ""}
       ${goal === "ace" ? note(`<p class="mini"><b>Ace parent:</b> picks the cards that give your parent the most white skills relevant on this race: worth more than 0.1 L (median) for the running style and weighted by it, the greens whose condition fits the race, and for Mile and longer the recoveries that fit it (never debuffs), so she can learn them and pass them down as skill sparks. Gold hints count through their white: a spark is always the base white skill's, and learning the gold raises its chance to 40% (20% for a white). Every skill counts, not just the best 8, and stats only count as much as you choose.</p>`) : ""}
@@ -2737,12 +2745,13 @@
       ${targetsHTML(p, c, host)}
       ${euSettingsHTML("speed", host)}
       <div class="row-wrap">
-        <label class="field grow"><span>Must include (optional)</span><input id="cmLock" list="cardListAll" placeholder="A card that must be in the deck" autocomplete="off"></label>
+        <label class="field grow"><span>Must include (optional)</span><input id="cmLock" list="cmCardList" placeholder="A card that must be in the deck" autocomplete="off"></label>
         <button type="button" class="btn ghost small" id="cmLockAdd">Add</button>
       </div>
-      ${c.locked.length ? `<div class="row-wrap">${c.locked.map((id) => `<span class="chip lockchip">${esc(D.card(id).n)} <button type="button" class="linkish" data-cm-unlock="${id}" aria-label="Remove ${esc(D.card(id).n)}">✕</button></span>`).join("")}</div>` : ""}
+      <datalist id="cmCardList">${available.filter(x => T.entry(x.id, owned[x.id] != null ? +owned[x.id] : 4)).sort((a, b) => b.r - a.r || a.n.localeCompare(b.n)).map(card => { const r = CARD_RELEASE.info(card); return `<option value="${esc(D.label(card))}"${r.estimated ? ` label="Expected ~${esc(fmtDate(r.date))}"` : ""}></option>`; }).join("")}</datalist>
+      ${c.locked.length ? `<div class="row-wrap">${c.locked.map((id) => `<span class="chip lockchip">${esc(D.card(id).n)}${cardReleaseHTML(D.card(id))} <button type="button" class="linkish" data-cm-unlock="${id}" aria-label="Remove ${esc(D.card(id).n)}">✕</button></span>`).join("")}</div>` : ""}
       ${mustHTML(c)}
-      ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to search every Global SSR and SR at max limit break.</p>` : ""}
+      ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to try every SSR and SR available ${future ? "by this cup" : "on Global today"} at max limit break.</p>` : ""}
       ${notes.length ? `<details class="pred-help"><summary>How the deck builder works</summary>${notes.join("")}</details>` : ""}
       <div class="row-wrap run-row">
         <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? (cmTargets(c) || state.scenario === "grandlive" && goal === "race" ? "Simulating careers…" : "Building…") : "Find my best deck"}</button>
@@ -2779,7 +2788,7 @@
     const src = skillSources(c);
     const tid = deckTrainee(c.goal === "ace" ? "parents" : "cm"), trn = tid ? D.trainee(tid) : null;
     const known = new Set(trn ? trn.us.concat(trn.is, trn.as).map(String) : []);
-    let sourceIds = [...new Set(D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).flatMap((x) => (x.hs || []).concat(x.es || [])))];
+    let sourceIds = [...new Set(D.DATA.supports.filter((x) => cardAvailable(x, c) && T.entry(x.id, 4)).flatMap((x) => (x.hs || []).concat(x.es || [])))];
     if (c.goal !== "race") {
       sourceIds = sourceIds.map(String);
       if (c.globalSkills) sourceIds = sourceIds.filter(id => released(id, presetById(c.preset)));
@@ -2904,12 +2913,12 @@
     if (s) Object.assign(c, { comp: Object.assign({}, s.comp || {}), borrow: s.borrow !== false, skillW: s.skillW != null ? s.skillW : c.skillW, must: (s.must || []).slice() });
     const out = new Set((s && s.exclude) || []);
     const pool = optPool(c).filter((x) => !out.has(x.id));
-    let bp = c.borrow ? borrowPool().filter((x) => !out.has(x.id)) : [];
+    let bp = c.borrow ? borrowPool(c).filter((x) => !out.has(x.id)) : [];
     const locked = ((s && s.locked) || []).filter((id) => pool.some((x) => x.id === id));
     const link = itLink(c, pool, bp);
     if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
     if (link && link.borrow) bp = [link.borrow];
-    if (s && s.friend && c.borrow) bp = [{ id: s.friend, lb: 4 }];
+    if (s && s.friend && c.borrow && cardAvailable(D.card(s.friend), c) && T.entry(s.friend, 4)) bp = [{ id: s.friend, lb: 4 }];
     const opts = Object.assign(euOpts(c, p, tid), { borrow: c.borrow, locked, comp: c.comp, trainee: tid || null });
     if (opts.parent) delete opts.parent.reachSS;
     if (!parent && s && s.rankGoal) opts.rankGoal = raceRankGoal(p, style, tid, s.rankGoal);
@@ -3160,7 +3169,7 @@
         const r = deckJob("parents").optResult;
         if (!r || !r.cards || !r.parentConfig) return null;
         const pool = window.UmaParentSkills.build(r.cards.map((x) => D.card(x.id)), { skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
-          targets: r.parentConfig.targets, must: r.parentConfig.must, globalOnly: r.parentConfig.globalOnly, today: TODAY, skillsBy: r.parentConfig.skillsBy || null });
+          targets: r.parentConfig.targets, must: r.parentConfig.must, globalOnly: r.parentConfig.globalOnly, today: TODAY, skillsBy: r.parentConfig.skillsBy || null, cardAvailable: card => CARD_RELEASE.available(card, presetById(r.preset)) });
         return pool.skills.filter((x) => x.target && x.spark).map((x) => x.id);
       },
       setTrainee: (id) => {
@@ -3265,7 +3274,7 @@
     const config = r.parentConfig;
     const pool = window.UmaParentSkills.build(r.cards.map(x => D.card(x.id)), {
       skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
-      targets: config.targets, must: config.must, globalOnly: config.globalOnly, today: TODAY, skillsBy: config.skillsBy || null
+      targets: config.targets, must: config.must, globalOnly: config.globalOnly, today: TODAY, skillsBy: config.skillsBy || null, cardAvailable: card => CARD_RELEASE.available(card, presetById(r.preset))
     });
     const name = id => skillNameHTML(id);
     const modeledAvailability = id => {
@@ -3309,11 +3318,11 @@
         const card = D.card(x.id);
         return `<div class="opt-card ty-${card.ty}">
         <span class="tydot" aria-hidden="true"></span>
-        <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>
+        <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>${cardReleaseHTML(card)}
           <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
           ${x.it ? `<div class="mini">${itPartsText(x.it)}</div>` : ""}
           ${r.goal === "race" && x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => skillNameHTML(id)).join(", ")}</div>` : ""}
-          ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? (r.goal === "race" ? ", but no must-have" : ", lower modeled must-have coverage") : ""})</div>` : ""}</div>
+          ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)}${cardReleaseHTML(D.card(x.alt.id))} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? (r.goal === "race" ? ", but no must-have" : ", lower modeled must-have coverage") : ""})</div>` : ""}</div>
         <div class="num" title="Euophrys score with the other five cards fixed, plus skills">${Math.round(x.score)}<div class="mini">${Math.round(x.base)} + ${Math.round(x.skill)} skills</div></div>
       </div>`;
       }).join("")}</div>
@@ -3336,7 +3345,7 @@
       ${Array.isArray(w) ? (w.length ? `<div class="wish"><h4>Cards worth getting</h4><ol>${w.map((x) => {
         const cd = D.card(x.id);
         const have = owned[x.id] != null;
-        return `<li><b>${esc(cd.n)}</b> <span class="mini">[${esc(cd.t)}] ${D.RARITY[cd.r]} ${D.typeLabel(cd.ty)}</span> ${have ? "from LB" + owned[x.id] + " to LB4" : "at LB4"}: <b>+${Math.round(x.gain)}</b>, replacing ${esc(D.card(x.replaces).n)}</li>`;
+        return `<li><b>${esc(cd.n)}</b> <span class="mini">[${esc(cd.t)}] ${D.RARITY[cd.r]} ${D.typeLabel(cd.ty)}</span>${cardReleaseHTML(cd)} ${have ? "from LB" + owned[x.id] + " to LB4" : "at LB4"}: <b>+${Math.round(x.gain)}</b>, replacing ${esc(D.card(x.replaces).n)}</li>`;
       }).join("")}</ol><p class="mini">Each card is tried in the slot of the same type, with the other five cards fixed.</p></div>` : `<p class="mini">${r.wishMeta ? "No shortlisted LB4 replacement improves the simulated score in this check." : "No card at LB4 beats your current picks for their slots."}</p>`) : ""}
     </div>`;
   }
@@ -3441,14 +3450,14 @@
   function mustResultHTML(r, c) {
     if (!r.must || !r.must.length) return "";
     const all = {};
-    D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).forEach((x) => (x.hs || []).concat(x.es || []).forEach((id) => { (all[id] = all[id] || []).push(x); }));
+    D.DATA.supports.filter((x) => cardAvailable(x, c)).forEach((x) => (x.hs || []).concat(x.es || []).forEach((id) => { (all[id] = all[id] || []).push(x); }));
     return `<div class="must-result"><b>Must-have skills</b><ul>${r.must.map((m) => {
       const name = skillNameHTML(m.id);
       if (m.p > 0) {
         const from = m.src.map((id) => { const cd = D.card(id); return esc(cd.n) + ((cd.es || []).map(String).indexOf(String(m.id)) !== -1 ? " (event)" : " (hint)"); }).join(", ");
         return `<li class="ok"><b>${name}</b>: about ${Math.round(m.p * 100)}% to be offered, from ${from}.</li>`;
       }
-      if (!all[m.id]) return `<li class="miss"><b>${name}</b>: no support card on Global gives it (it comes from trainees or the scenario), so it can't shape the deck.</li>`;
+      if (!all[m.id]) return `<li class="miss"><b>${name}</b>: no support card available by this cup gives it (it comes from trainees or the scenario), so it can't shape the deck.</li>`;
       const others = all[m.id].filter((x) => !r.cards.some((y) => y.id === x.id)).sort((a, b) => b.r - a.r).slice(0, 4);
       return `<li class="miss"><b>${name}</b>: no card ${c.ownedOnly && ownedIds().length ? "you own" : "the optimizer could use"} gives it${Object.keys(c.comp).length ? " with this deck makeup" : ""}.${others.length ? " Cards that do: " + others.map((x) => esc(x.n) + " [" + esc(x.t) + "]").join(", ") + "." : ""}</li>`;
     }).join("")}</ul></div>`;
@@ -3598,6 +3607,8 @@
     if (hit("#cmLockAdd")) {
       const card = cardByLabel.get(q("#cmLock").value.trim());
       if (!card) { flash("Pick a card from the list first."); return true; }
+      if (!cardAvailable(card, c)) { flash("That card isn't expected on Global by this cup."); return true; }
+      if (!T.entry(card.id, owned[card.id] != null ? +owned[card.id] : 4)) { flash("That card has no scoring data yet."); return true; }
       if (c.locked.indexOf(card.id) === -1) c.locked.push(card.id);
       if (host === "cm") (c.cards || []).filter(x => x.id === card.id).forEach(x => { x.locked = true; });
       if (c.ownedOnly && owned[card.id] == null) flash(card.n + " isn't marked as owned, so it can only come in as the borrowed card.");
