@@ -65,7 +65,7 @@
         const L = values[id] - (base.length ? values[base[base.length - 1]] || 0 : 0);
         const required = c.filter((p) => must.has(p) && !learned.has(p));
         const value = L * lengthValue;
-        if (!(L > 0) && !required.length) return;
+        if (!(L > 0) && !required.length && !opts.includeZero) return;
         const fullCost = tiers.reduce((n, p) => n + (Number.isFinite(costs[p.id]) && costs[p.id] > 0 ? costs[p.id] : metadata[p.id][1]), 0);
         const option = { id, family, L, cost, value, hintSaving: fullCost - cost, required, tiers };
         if (!groups.has(family)) groups.set(family, []);
