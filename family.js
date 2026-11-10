@@ -102,7 +102,7 @@
       const white = Object.keys(fams).map((f) => {
         const F = fams[f], id = baseWhite(F.ids[0]), deck = x.offers ? famOffer(f) : null, own = F.ids.some((i) => innate.has(i));
         // A spark matters most for skills her deck rarely offers and she can't buy on her own.
-        return { id, family: f, L: F.L, why: F.why, deck, own, priority: F.L * (1 - (deck || 0)) * (own ? 0.5 : 1) };
+        return { id, family: f, L: F.L, why: F.why, deck, own, priority: x.skillPlan ? worth(F,x) : F.L * (1 - (deck || 0)) * (own ? 0.5 : 1) };
       }).sort((a, b) => b.priority - a.priority || b.L - a.L);
       const w = (x.build && x.build.w) || {};
       // Blue fills her gaps (x.gaps: how far her deck's predicted stats end short of her targets),
@@ -182,7 +182,7 @@
           out.hints += p; out.whiteL += p * worthL;
         });
         if (m.green && m.unique) {
-          const p = twice(GREEN, m.green, aff, scale), gl = raceL[m.unique] || 0;
+          const p = x.skillPlan && !PARENT_OF[k] ? 1 : twice(GREEN, m.green, aff, scale), gl = raceL[m.unique] || 0;
           out.green.push({ slot: k, id: String(m.unique), stars: m.green, p, L: gl });
           out.greenL += p * gl;
         }
@@ -204,6 +204,10 @@
         x.miss *= 1 - w.p; x.from.push(w.slot); by.set(w.id, x);
       });
       out.skills = [...by.values()].map((x) => ({ id: x.id, L: x.L, p: 1 - x.miss, from: x.from })).sort((a, b) => b.p * b.L - a.p * a.L);
+      if(x.skillPlan) {
+        const union=(rows,key)=>{const map=new Map();rows.forEach(w=>{const k=key(w),r=map.get(k)||{miss:1,worth:w.worth==null?w.L:w.worth};r.miss*=1-w.p;map.set(k,r);});return [...map.values()].reduce((n,r)=>n+(1-r.miss)*r.worth,0);};
+        out.whiteL=union(out.white,w=>family(w.id));out.greenL=union(out.green,w=>w.id);
+      }
       out.value = out.whiteL + out.greenL + out.blueFill / STAT_PER_L + out.pink.reduce((n, p) => n + p.p * APT_L, 0);
       return out;
     }

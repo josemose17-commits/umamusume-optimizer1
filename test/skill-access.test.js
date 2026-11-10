@@ -39,3 +39,12 @@ test('purchase-driven parent targets use canonical white families and retain rac
  const rel=A.parentRel({targets:{200512:3},why:{200512:'L'},L:{900011:2}}, {parentValues:{200331:0.8,900011:10}});
  assert.deepEqual(rel.targets,{'200332':0.8});assert.equal(rel.L[900011],2);
 });
+test('related hints from one card share an access roll without inflating the white hint',()=>{
+ const g=A.build({cards:[{id:1,name:'Card',offers:{200331:0.5,200332:0.5}}]});
+ assert.equal(g.byId['200332'].p,0.5,'a prerequisite is not an independent extra source');
+ const hit=Array.from({length:100},(_,i)=>A.sample(g,i+1)).find(s=>s.available.includes('200331'));
+ assert.ok(hit);assert.equal(hit.hints['200332'],1,'a real white offer keeps its own discount');
+ assert.equal(hit.hints['200331'],1);
+ const both=A.build({cards:[{id:1,name:'A',offers:{200332:1}},{id:2,name:'B',offers:{200332:1}}]});
+ assert.equal(A.sample(both,1).hints['200332'],2,'independent card hints can add');
+});

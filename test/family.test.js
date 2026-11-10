@@ -21,6 +21,17 @@ const spe = G.trainees.find((t) => t.n === "Special Week");
 const chars = [...new Set(G.trainees.filter((t) => t.cid !== spe.cid).map((t) => t.cid))].slice(0, 30);
 const base = { ace: { cid: spe.cid, apt: spe.apt }, race: { preset, style: "Senkou" }, rel, raceL: L, build: E.BUILDS[preset.build], chars, fam: {} };
 
+test('purchase-aware family value combines duplicate access and guarantees direct inherited uniques',()=>{
+  const id=fam.lookFor(base).white[0].id,unique='900011';
+  const member=cid=>({cid,white:[[id,3]],blue:[0,0],pink:[0,0],green:2,unique,wins:[]});
+  const x={...base,skillPlan:{},raceL:{...L,[unique]:2}};
+  const s=fam.score({p1:member(chars[0]),g11:member(chars[1])},x);
+  const expected=1-s.white.reduce((miss,w)=>miss*(1-w.p),1);
+  assert.ok(Math.abs(s.whiteL-expected*s.white[0].worth)<1e-12);
+  assert.equal(s.green.find(w=>w.slot==='p1').p,1);
+  assert.equal(s.greenL,2,'a second route to the same unique does not grant a second skill');
+});
+
 test("a spark's chance: base by stars × (1 + affinity / 100), at two inspirations", () => {
   // uma.guide: a 3★ white skill spark is 9%; at affinity 30 it's 11.7% per inspiration.
   assert.ok(Math.abs(F.twice(F.WHITE, 3, 30) - (1 - 0.883 * 0.883)) < 1e-9);

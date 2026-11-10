@@ -12,6 +12,7 @@
   const HAS_DATA = !!(D && D.DATA);
   const TODAY = new Date().toISOString().slice(0, 10);
   const CARD_RELEASE = window.UmaCardRelease.create(window.UmaBanners, TODAY);
+  const ACCESS = window.UmaSkillAccess.create();
   const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const FX_SHORT = { 1: "Friendship", 8: "Training", 2: "Mood", 15: "Race", 19: "Specialty", 14: "Init. bond", 30: "SP bonus", 3: "Spd bonus", 4: "Sta bonus", 5: "Pow bonus", 6: "Gut bonus", 7: "Wit bonus", 27: "Fail prot.", 28: "Energy cut", 31: "Wit recovery", 41: "All stats", 18: "Hint rate", 17: "Hint Lv" };
   const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 });
@@ -2377,7 +2378,11 @@
     const sv = skillMap(p.id, c.style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
     const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(p) });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id, p)) { delete out.targets[id]; delete out.why[id]; } });
-    return out;
+    const training=state.cmp && state.cmp.training, decks=state.cmp && state.cmp.decks || {};
+    const ace=training && decks[training.cup+"|"+training.tid] || state.cm;
+    if(c.parentTargets) return {targets:Object.assign({},c.parentTargets),why:Object.fromEntries(Object.keys(c.parentTargets).map(id=>[id,"purchase"]))};
+    const need=ace && ace.preset===p.id && ace.style===c.style ? currentSkillPlan(ace) : null;
+    return need && need.mode === "plan" ? ACCESS.parentRel(out,need) : out;
   }
   // Rating per skill point when the parent buys her relevant skills: the median of their rating
   // (at the trainee's aptitudes) ÷ full cost. Falls back to the planner's typical value.
@@ -2913,7 +2918,7 @@
     const parent = races != null;
     const base = Object.assign({ statsW: "0.1", comp: {}, ownedOnly: true, borrow: true, skillW: "1", itManual: "0.5", eventSuccessRate: "0.5", globalSkills: true }, parent ? state.pcm || {} : state.cm || {});
     const c = Object.assign({}, base, { goal: parent ? "ace" : "race", preset: p.id, style, independent: parent || !!base.independent, itRaces: parent ? races : null, locked: [], must: [], reachSS: false, rankGoal: "", comp: Object.assign({}, base.comp || {}) });
-    if (s) Object.assign(c, { comp: Object.assign({}, s.comp || {}), borrow: s.borrow !== false, skillW: s.skillW != null ? s.skillW : c.skillW, must: (s.must || []).slice() });
+    if (s) Object.assign(c, { comp: Object.assign({}, s.comp || {}), borrow: s.borrow !== false, skillW: s.skillW != null ? s.skillW : c.skillW, must: (s.must || []).slice(),parentTargets:s.parentTargets });
     const out = new Set((s && s.exclude) || []);
     const pool = optPool(c).filter((x) => !out.has(x.id));
     let bp = c.borrow ? borrowPool(c).filter((x) => !out.has(x.id)) : [];
@@ -2961,6 +2966,9 @@
       build: (p) => E.BUILDS[p.build] || null,
       deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
       deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
+      skillPlan: () => {const c=cm("cm"),plan=currentSkillPlan(c);return plan && plan.mode==="plan"?plan:null;},
+      refreshAceSkills: async () => {const plan=await runRaceSkills(false,true);if(!plan)throw new Error(deckJob("cm").raceError || "Compare the ace's skills first.");return plan;},
+      parentLearning: (p,t,deck,n,f,prediction,weights) => parentLearning(p,t,deck,n,f,prediction,weights),
       deckOffers: (opts, cards) => T.deckOffers(opts, cards),
       // Out on Global today (rentals and the parent you train now can only have these).
       outNow: (id) => !!(SV.skills[id] && SV.skills[id][3]),
@@ -2981,6 +2989,7 @@
         ["p1", "g11", "g12"].forEach(k => { f[k] = p1.f[k] ? JSON.parse(JSON.stringify(p1.f[k])) : blank(); });
         f.p1.planned = !userChoice;
         if (p1.kind === "vet") f.p1.vet = p1.v.id; else f.p1.fresh = true;
+        if(p1.kind === "fresh" && p1.learning && p1.learning.ssShare>=window.UmaCmPlan.SS_SHARE)f.p1.projectedWhite=(p1.extra.whites.list||[]).map(w=>({id:w.id,learn:w.learn,spark:w.spark,stars:p1.rates.stars}));
         if (train) f.p1.wins = train.f.f.p1.wins.slice();
       },
       useRental: (friend) => {
@@ -3558,11 +3567,51 @@
   }
 
   const raceMemo = new Map();
+  const skillPlanKey=c=>JSON.stringify([
+    c.preset,c.style,(c.cards||[]).map(x=>[x.id,x.lb,!!x.borrowed]),
+    c.raceSkills?Object.assign({},c.raceSkills,{open:undefined}):null,
+    ["targets","must","skillW","statsW","globalSkills","ownedOnly","borrow","independent","itRaces","itManual","eventSuccessRate","eventSongBoost","helloProcRate","helloUnlockRate","rankGoal"].map(k=>c[k]),
+    c.family||{},c.predicted,ownedCode(),state.scenario,state.caps,state.sparks,euOver(),pasted[c.preset] && pasted[c.preset][c.style],D.DATA.meta.built
+  ]);
+  const currentSkillPlan=c=>c.skillPlan && c.skillPlan.key===skillPlanKey(c)?c.skillPlan:null;
+  function accessFamily(raw) {
+    const family={};window.UmaFamily.SLOTS.forEach(slot=>{
+      const m=raw && raw[slot];if(!m || !m.cid)return;
+      const t=m.tid && D.trainee(m.tid);
+      family[slot]=Object.assign({},m,{name:t?t.n:"Unknown version",unique:t && t.us && t.us[0]?"9"+String(t.us[0]).slice(1):m.unique});
+    });return family;
+  }
+  function affinityFor(t,family) {
+    const links={trainee:t.cid},wins={};window.UmaFamily.SLOTS.forEach(slot=>{links[slot]=family[slot] && family[slot].cid;if(family[slot])wins[slot]=family[slot].wins||[];});
+    return window.UmaAffinity.individual(links,wins);
+  }
+  function skillSourcesFor(c,cards,t,entered,mode) {
+    if(mode==="finished")return ACCESS.build({mode,entered});
+    const opts=euOpts(c,presetById(c.preset)),family=accessFamily(c.family);
+    const sourceCards=(cards||[]).filter(x=>cardAvailable(D.card(x.id),c)).map(x=>{
+      const card=D.card(x.id),ownedHere=owned[x.id]!=null && +owned[x.id]>=+x.lb;
+      if(c.ownedOnly && ownedIds().length && !x.borrowed && !ownedHere)return null;
+      return {id:x.id,name:card.n+" ["+card.t+"] LB"+x.lb,borrowed:!!x.borrowed,planned:!ownedHere && !x.borrowed,offers:T.deckOffers(opts,[x])};
+    }).filter(Boolean);
+    return ACCESS.build({trainee:t,cards:sourceCards,family,affinity:affinityFor(t,family),entered});
+  }
+  function parentLearning(p,t,deck,n,parents,prediction,weights) {
+    const family=accessFamily(parents),c=state.pcm||{};
+    const direct=T.deckOffers({scenario:euScen(),trainee:t.id,independent:[n,0,0],offerRaces:n,itManual:+(c.itManual||0.5),eventSuccessRate:+(c.eventSuccessRate||0.5),skills:{}},deck.cards);
+    return ACCESS.project({trainee:t,offers:direct,family,affinity:affinityFor(t,family),weights,stats:prediction.stats,sp:prediction.sp,finals:prediction.finals,minimum:window.UmaRating.SS});
+  }
+  function sourceRowsHTML(r) {
+    const ids=[...new Set(r.plan.selected.map(x=>x.id).concat((r.requested||[]).map(x=>x.id)))];
+    return `${r.access.missing.length ? `<p class="mini warn">Missing sources: ${r.access.missing.map(id=>skillNameHTML(id)).join(", ")}. These requests are excluded from purchases.</p>` : ""}<details><summary>Where these skills come from</summary><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Source</th><th>Estimated access</th></tr></thead><tbody>${ids.map(id=>{
+      const row=r.access.byId[id],sources=row?row.sources:[];
+      return `<tr><th>${skillNameHTML(id)}</th><td>${sources.length?[...new Set(sources.map(s=>esc(s.name)))].join("; "):"No source in this deck or entered family"}</td><td>${row?`${Math.round(row.p*100)}%${sources.some(s=>s.conditional)?" · conditional":" · available"}`:"Not included in purchases"}</td></tr>`;
+    }).join("")}</tbody></table></div><p class="mini">Access means an opportunity to buy a skill, not a purchase or an activation. Card offers and inspiration are uncertain. Awakening availability is assumed. Planned cards and parents must be obtained or trained first.</p></details>`;
+  }
   function raceState(c) {
     return c.raceSkills || (c.raceSkills = { mode: "plan", stats: {}, apt: {}, skills: [], sp: "", uniqueLv: "1" });
   }
   function raceSkillsHTML(c) {
-    const q = raceState(c), j = deckJob("cm"), r = j.raceResult, p = presetById(c.preset);
+    const q = raceState(c), j = deckJob("cm"), r = currentSkillPlan(c) ? j.raceResult : null, p = presetById(c.preset);
     const pairs = [["distanceAptitude", "Distance"], ["surfaceAptitude", "Surface"], ["strategyAptitude", "Style"]];
     const num = x => Number.isFinite(x) ? x.toFixed(2) : "–";
     const dependency = id => {const condition=r && r.conditions[id] || "";return positionNote(c.preset,id,c.style) || (/activate_count_start>=3/.test(condition) ? "Needs 3 opening activations" : /order|overtake|blocked|bashin|distance_diff|compete|activate_count|temptation/.test(condition) ? "Depends on race conditions" : /random/.test(condition) ? "Random activation timing" : "");};
@@ -3572,35 +3621,38 @@
       <div class="row-wrap"><label class="field"><span>Inputs</span><select data-race-field="mode"><option value="plan"${q.mode === "plan" ? " selected" : ""}>Plan from this deck</option><option value="finished"${q.mode === "finished" ? " selected" : ""}>Finished uma: enter stats and SP left</option></select></label><label class="field"><span>Unique level</span><select data-race-field="uniqueLv">${[1,2,3,4,5,6].map(n=>`<option value="${n}"${+(q.uniqueLv || 1)===n?" selected":""}>${n}</option>`).join("")}</select></label><label class="field"><span>SP left (finished uma)</span><input type="number" min="0" max="20000" data-race-field="sp" value="${esc(q.sp)}"></label></div>
       <div class="tg-row">${E.STATS.map(s=>`<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" min="1" max="3000" data-race-stat="${s}" value="${q.stats[s] || ""}" placeholder="${((j.optResult || {}).est || {}).stats ? j.optResult.est.stats[E.STATS.indexOf(s)] : "Final stat"}"></label>`).join("")}</div>
       <div class="row-wrap">${pairs.map(([k,label])=>`<label class="field"><span>${label} aptitude</span><select data-race-apt="${k}"><option value="">Trainee's starting grade</option>${["G","F","E","D","C","B","A","S"].map(v=>`<option value="${v}"${q.apt[k]===v?" selected":""}>${v}</option>`).join("")}</select></label>`).join("")}</div>
-      <div class="row-wrap"><label class="field grow"><span>Add an available or equipped skill (including inherited uniques)</span><input id="cmRaceSkill" list="cmRaceSkillList" autocomplete="off" placeholder="Skill name"></label><button type="button" class="btn ghost small" id="cmRaceAdd">Add</button></div>
+      <div class="row-wrap"><label class="field grow"><span>Add a shop skill or planning target (including inherited uniques)</span><input id="cmRaceSkill" list="cmRaceSkillList" autocomplete="off" placeholder="Skill name"></label><button type="button" class="btn ghost small" id="cmRaceAdd">Add</button></div>
       <datalist id="cmRaceSkillList">${Object.keys(SV.skills).filter(id=>released(id,p)).map(id=>`<option value="${esc(skillInfo(id)[0])}"></option>`).join("")}</datalist>
       ${q.skills.map((x,i)=>`<div class="row-wrap"><b>${skillNameHTML(x.id)}</b><label class="chip-toggle"><input type="checkbox" data-race-equipped="${i}"${x.learned?" checked":""}> Equipped</label><label class="field"><span>Hint</span><select data-race-hint="${i}">${[0,1,2,3,4,5].map(n=>`<option value="${n}"${+x.hint===n?" selected":""}>Lv${n}</option>`).join("")}</select></label><button type="button" class="linkish" data-race-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></div>`).join("")}
-      <p class="mini">Her own unique is equipped automatically. In planning, equipped purchases are charged before other skills. For a finished uma, enter SP remaining after those purchases. Edits update an existing comparison automatically.</p>
+      <p class="mini">Her own unique is equipped automatically. Planning targets need a card, trainee or parent source; equipped purchases are charged first. For a finished uma, enter SP remaining after those purchases. Edits update an existing comparison automatically.</p>
       <button type="button" class="btn ghost small" id="cmRaceRun">${j.raceRunning ? "Restart skill comparison" : "Compare skills"}</button>
-      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. Mean +${num(r.plan.result.mean)} L against equipped skills. Lower 10% result: ${num(r.plan.result.low)} L.</p><p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. Normal mood.</p>
-      ${table(r.plan.selected,false)}
+      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini warn">Course-chart fallback: ${esc(r.staticReason)} This uses the chart and SP costs, without a new race simulation.</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. Mean +${num(r.plan.result.mean)} L against equipped skills. Lower 10% result: ${num(r.plan.result.low)} L.</p><p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. Normal mood.</p>
+      ${sourceRowsHTML(r)}${table(r.plan.selected,false)}
+      ${r.goals && r.goals.length ? `<p class="mini"><b>Parent targets:</b> ${[...new Set(r.goals.map(x=>ACCESS.white(x.id)).filter(Boolean))].map(id=>skillNameHTML(id)).join(", ")}. Targets to search or train for; these are not guaranteed purchases. <button type="button" class="linkish" data-goto-tab="parents">Plan their sources in Parents →</button></p>` : ""}
       <details><summary>Next skills from the equipped baseline</summary><p class="mini">Each is tested against equipped skills alone. The purchase list above tests combinations. Added L for its rows measures removing that purchase from the final set, so those rows do not add up.</p>${table(r.plan.ranking,true)}</details>
       ${r.plan.excluded.length ? `<p class="mini warn">Race or purchase effects unavailable; excluded: ${r.plan.excluded.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${r.plan.failedSets ? `<p class="mini warn">${r.plan.failedSets} skill sets could not be simulated and were excluded.</p>` : ""}${r.plan.unmetMust.length ? `<p class="mini warn">Must-haves not purchased: ${r.plan.unmetMust.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}
-      <details><summary>How these comparisons work</summary><p class="mini">${r.plan.evaluations} sets checked in a bounded search, 24 paired races each. Finalists and purchase contributions use another seed and 96 races. Full spurt in ${Math.round((r.plan.result.fullSpurt || 0)*100)}% of the 96 validation races. Mean gain ${num(r.plan.result.mean)} L; 10th percentile ${num(r.plan.result.low)} L; range ${num(r.plan.result.min)} to ${num(r.plan.result.max)} L. These are simulated race-gain estimates, not CM win rates or LoH points. Stamina affects spurt timing through the race engine. Wit activation checks are on. Opponents, overtaking and positions remain simplified; condition-dependent skills need practice-race checks. CM uses nine runners, LoH twelve, with assumed position ranges. The pinned Global engine is used only for compatible versions. Fast Learner and scenario-specific price discounts are not modeled. No claim of a globally optimal purchase set.</p><p class="mini">Planning uses one complete sampled career's offers and SP where available, otherwise explicitly sampled offers from the deck's source estimates. User-added skills supplement those offers. Predictions exclude inheritance stats unless entered above. All listed innate and awakening skills are assumed unlocked; unavailable awakenings must be excluded by using finished-uma inputs.</p></details>` : ""}</div>
+      <details><summary>How these comparisons work</summary><p class="mini">${r.staticReason ? "Existing course-chart gains and legal SP costs are used. This mode does not measure new skill interactions or full-spurt frequency." : `${r.plan.evaluations} sets checked in a bounded search, 24 paired races each. Finalists and purchase contributions use another seed and 96 races. Full spurt in ${Math.round((r.plan.result.fullSpurt||0)*100)}% of validation races. Wit checks are on. Positions, overtaking and opponents remain simplified.`} Mean gain ${num(r.plan.result.mean)} L; 10th percentile ${num(r.plan.result.low)} L. These are estimates, not CM win rates or LoH points.</p><p class="mini">Planning includes only sourced skills. Card offers and inheritance are sampled, with unknown spark hint levels conservatively taken as Lv1. Equipped planning targets condition on getting those sourced skills, and their SP is charged first. User-entered shop skills are accepted as observed only in finished-uma mode. Parent targets come from a separate conditional purchase plan; they do not grant skills to the ace. Predicted stats exclude inheritance unless entered. Fast Learner and scenario-specific price discounts are not modeled. The deck/parent search is bounded, not proof of a global optimum.</p></details>` : ""}</div>
     </details>`;
   }
-  async function runRaceSkills(refineDeck = false) {
+  async function runRaceSkills(refineDeck = false, fromParents = false) {
     const host = "cm", c = cm(host), j = deckJob(host), p = presetById(c.preset), q = JSON.parse(JSON.stringify(raceState(c)));
-    if (!refineDeck) raceState(c).open = true;
+    if (!refineDeck && !fromParents) raceState(c).open = true;
     if (j.raceWorker) j.raceWorker.close();
     const token = {}; j.raceToken = token; j.raceTouched = true; j.raceRunning = true; j.raceError = null; j.raceProgress = 0;
     const same = () => j.raceToken === token && cm("cm") === c;
-    const initialKey = optKey(host);
+    let initialKey = optKey(host), initialSourceKey=skillPlanKey(c);
     renderCM();
     let worker;
     try {
       const RS = window.UmaRaceSkills, catalog = await RS.load();
-      const unsupported = RS.supported(p, simVariant(p), catalog); if (unsupported) throw new Error(unsupported);
+      const unsupported = RS.supported(p, simVariant(p), catalog);
       await ensureSkills([p.id]);
-      worker = RS.runner(); j.raceWorker = worker;
+      if(!same())return;initialKey=optKey(host);initialSourceKey=skillPlanKey(c);
+      worker = unsupported ? null : RS.runner(); j.raceWorker = worker;
       const t = D.trainee(deckTrainee(host)), idx = { Sprint:2,Mile:3,Medium:4,Long:5 }[p.course.dist], si = STYLES.findIndex(x=>x[0]===c.style);
       const apt = [q.apt.distanceAptitude || t.apt[idx],q.apt.surfaceAptitude || t.apt[p.course.surface==="Dirt"?1:0],q.apt.strategyAptitude || t.apt[6+si]];
-      const learned = [...new Set((t.us || []).map(String).concat(q.skills.filter(x=>x.learned).map(x=>String(x.id))))];
+      const ownUnique=(t.us||[]).map(String);
+      let learned=ownUnique.slice();
       const baseValues = skillMap(p.id,c.style).map;
       const candidates = refineDeck && q.mode === "plan" && j.optResult && j.optResult.fit ? [{cards:j.optResult.cards,est:j.optResult.est}, {cards:j.optResult.fit.startCards,est:j.optResult.fit.before}] : [{cards:c.cards || [],est:j.optResult && j.optResult.est}];
       let chosen = null, chosenScore = -Infinity, compared = 0;
@@ -3611,6 +3663,8 @@
         if (ci && est.ssShare != null && est.ssShare < candidates[0].est.ssShare) continue;
         const stats = E.STATS.map((s,i)=>+(q.stats[s] || (est && est.stats[i]) || 0));
         if (q.mode === "finished" && E.STATS.some(s=>!(+q.stats[s]>0)) || stats.some(x=>!Number.isFinite(x)||x<=0)) throw new Error("Enter all five final stats, or build a deck first for its prediction.");
+        const access=skillSourcesFor(c,candidate.cards,t,q.skills,q.mode);
+        learned=[...new Set(ownUnique.concat(q.skills.filter(x=>x.learned && access.byId[x.id]).map(x=>String(x.id))))];
         let hints = {}, available = [], source, sp, baselineCost = 0;
         if(q.mode === "finished") { sp=+q.sp; if(q.sp==="" || !Number.isFinite(sp) || sp<0 || sp>20000)throw new Error("Enter SP left, from 0 to 20,000.");source="Your entered stats, skills and remaining SP."; }
         else {
@@ -3624,9 +3678,14 @@
             source="One sample of the deck's estimated skill offers; predicted mean SP. Hint levels without career records are assumed Lv1.";
           }
         }
-        q.skills.forEach(x=>{hints[x.id]=+x.hint;available.push(String(x.id));});
         if(q.mode === "plan") {
-          const fixed=q.skills.filter(x=>x.learned).map(x=>String(x.id));
+          available=available.filter(id=>access.byId[id]);
+          const inherited=ACCESS.sample(access,517931,["parent"]);
+          available.push(...inherited.available);Object.entries(inherited.hints).forEach(([id,lv])=>hints[id]=Math.min(5,(hints[id]||0)+lv));
+        }
+        q.skills.forEach(x=>{if(q.mode==="finished" || access.byId[x.id] && (available.includes(String(x.id)) || x.learned)){hints[x.id]=+x.hint;available.push(String(x.id));}});
+        if(q.mode === "plan") {
+          const fixed=q.skills.filter(x=>x.learned && access.byId[x.id]).map(x=>String(x.id));
           const charged=window.UmaSkillBudget.create({available:fixed,must:fixed,skills:Object.fromEntries(fixed.map(id=>[id,0]))}).solve(hints,20000);
           if(charged.unmetMust.length)throw new Error("An equipped purchase lacks cost data.");
           baselineCost=charged.spent;sp-=baselineCost;if(sp<0)throw new Error("Equipped purchases exceed the projected SP budget.");
@@ -3635,15 +3694,32 @@
         const compare = async(before,after,n,seed)=>{
           if(!same())throw new Error("Comparison cancelled.");
           const key=JSON.stringify([p.id,input,before,after,n,seed]);
+          if(unsupported) {
+            const value=skills=>{const by={};skills.forEach(id=>{const f=window.UmaSkillBudget.DATA.skills[id] && window.UmaSkillBudget.DATA.skills[id][0] || id;by[f]=Math.max(by[f]||0,baseValues[id]||0);});return Object.values(by).reduce((a,b)=>a+b,0);};
+            return RS.summary([value(after)-value(before)]);
+          }
           if(!raceMemo.has(key)) {const answer=await worker.run(RS.request(p,input,before,after,catalog,n,seed));raceMemo.set(key,Object.assign(RS.summary(answer.results.results),{fullSpurt:answer.results.runData.nspurt[1]/n}));if(raceMemo.size>2500)raceMemo.delete(raceMemo.keys().next().value);}
           return raceMemo.get(key);
         };
-        const plan=await RS.optimize({catalog,available,learned,hints,sp,values:baseValues,must:c.must,compare,maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
+        const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,compare,maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
+        // A separate, explicitly conditional purchase plan asks which white hints would be
+        // worth seeking. These never enter the actual purchase list without a source.
+        const rel=aceSkillsFor({preset:p,style:c.style}), potential=[...new Set(Object.keys(rel?rel.targets:{}).map(id=>ACCESS.white(id)).filter(Boolean))]
+          .filter(id=>released(id,p) && (unsupported || catalog.skills[id])).sort((a,b)=>(baseValues[b]||0)-(baseValues[a]||0)).slice(0,12);
+        q.skills.forEach(x=>{const id=ACCESS.white(x.id);if(id && String(x.id)===id && !potential.includes(id))potential.push(id);});
+        const goalHints=Object.assign({},hints);potential.forEach(id=>goalHints[id]=Math.max(1,goalHints[id]||0));
+        const goalPlan=q.mode==="plan"?await RS.optimize({catalog,allowChartOnly:!!unsupported,available:[...new Set(available.concat(potential))],learned,hints:goalHints,sp,values:baseValues,must:c.must,compare,maxEvaluations:24}):plan;
+        const parentValues={};goalPlan.selected.forEach(row=>{
+          const id=ACCESS.white(row.id);if(!id)return;
+          const own=goalPlan.ranking.find(x=>x.id===id), gain=own?own.result.mean:baseValues[id]||0;
+          parentValues[id]=Math.max(0,gain,Math.min(window.UmaFamily.HINT_L,Math.max(0,row.marginal.mean)));
+        });
+        const baselineGain=learned.length>ownUnique.length?(await compare(ownUnique,learned,96,314159)).mean:0;
         compared++;
-        const score=(est && est.value || 0) - (est && est.skill || est && est.skillValue || 0) * +c.skillW + plan.result.mean*60*+c.skillW;
-        if(!chosen || score>chosenScore+1e-6) {chosenScore=score;chosen={plan,source,stats,apt,baselineCost,candidate,conditions:Object.fromEntries(plan.ranking.map(x=>[x.id,(catalog.skills[x.id].alternatives||[]).map(a=>(a.condition || "")+" "+(a.precondition || "")).join(" ")]))};}
+        const score=(est && est.value || 0) - (est && est.skill || est && est.skillValue || 0) * +c.skillW + (plan.result.mean+baselineGain)*60*+c.skillW;
+        if(!chosen || score>chosenScore+1e-6) {chosenScore=score;chosen={plan,goalPlan,access,requested:q.skills,goals:goalPlan.selected.filter(x=>potential.includes(ACCESS.white(x.id))),parentValues,staticReason:unsupported,source,stats,apt,baselineCost,candidate,conditions:Object.fromEntries(plan.ranking.map(x=>[x.id,((catalog.skills[x.id]||{}).alternatives||[]).map(a=>(a.condition || "")+" "+(a.precondition || "")).join(" ")]))};}
       }
-      if(same() && initialKey===optKey(host)) {
+      if(same() && initialKey===optKey(host) && initialSourceKey===skillPlanKey(c)) {
         if(refineDeck && chosen && j.optResult && chosen.candidate.cards !== j.optResult.cards && candidates.length>1) {
           const r=j.optResult,setup=planSetup(p,c.style,t.id,null,{...c,locked:c.locked});
           const description=T.describeDeck(setup.opts,chosen.candidate.cards,setup.pool,setup.bp);
@@ -3653,9 +3729,12 @@
         }
         if(refineDeck && j.optResult)j.optResult.skillSetCheck={decks:compared};
         j.raceResult=chosen;
+        const coverage=Object.fromEntries(Object.entries(chosen.access.byId).map(([id,row])=>[id,row.deck]));
+        c.skillPlan={key:skillPlanKey(c),mode:q.mode,parentValues:chosen.parentValues,deckCoverage:coverage,selected:chosen.plan.selected.map(x=>x.id),goals:chosen.goals.map(x=>x.id),raceL:Object.fromEntries(chosen.goalPlan.ranking.map(x=>[x.id,x.result.mean])),model:unsupported?"source-checked course chart":"source-checked paired races",missing:chosen.access.missing};save();
       }
     } catch(error) {if(same())j.raceError=error.message || String(error);}
     finally {if(worker)worker.close();if(j.raceToken===token){j.raceRunning=false;j.raceWorker=null;if(cm("cm")===c)renderCM();}}
+    return currentSkillPlan(c);
   }
   function raceEdited() {const j=deckJob("cm");raceState(cm("cm")).open=true;save();if(j.raceTouched)runRaceSkills();else renderCM();}
   document.addEventListener("toggle",e=>{if(e.target.id==="cmRaceInputs" && e.target.isConnected){raceState(cm("cm")).open=e.target.open;save();}},true);

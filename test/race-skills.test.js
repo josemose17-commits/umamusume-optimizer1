@@ -3,6 +3,13 @@ const R=require('../race-skills.js'),B=require('../skill-budget.js'),C=require('
 const meta={1:['a',100,null],2:['b',100,null],3:['c',100,null]};
 // Synthetic purchase families use real public skill IDs, with a controlled comparison oracle.
 const available=['200332','200512','200732'];
+test('explicit course-chart fallback retains source and purchase restrictions',async()=>{
+ const Access=require('../skill-access.js').create();
+ const graph=Access.build({family:{p1:{cid:1,white:[['200332',3]]}}});
+ const out=await R.optimize({catalog:{skills:{},meta:{}},allowChartOnly:true,available:Object.keys(graph.byId),learned:[],hints:{200332:1},sp:500,values:{200332:1,200331:10},compare:async(before,after)=>R.summary([after.includes('200332')?1:0])});
+ assert.deepEqual(out.selected.map(x=>x.id),['200332']);
+ assert.ok(out.spent<=500);assert.ok(!out.selected.some(x=>x.id==='200331'),'a parent white does not supply a gold');
+});
 test('joint set search can select a synergy missed by standalone L/SP',async()=>{
  const [a,b,c]=available;
  const out=await R.optimize({catalog:C,available,learned:[],hints:{},sp:500,values:{[a]:0,[b]:0,[c]:1},maxEvaluations:80,

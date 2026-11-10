@@ -29,6 +29,7 @@ const ace = byName("Special Week");
 const x0 = () => plan.context({ ace: { cid: ace.cid, tid: ace.id }, race: { preset, style: "Senkou" }, rel, offers: null, build: E.BUILDS[preset.build] });
 const want = plan.want(x0());
 const top = want.white.slice(0, 6).map((w) => w.id);
+const purchaseContext = values => plan.context({ace:{cid:ace.cid,tid:ace.id},race:{preset,style:'Senkou'},rel,build:E.BUILDS[preset.build],skillPlan:{parentValues:values,deckCoverage:{},raceL:L}});
 
 // A veteran in veterans.js's shape: her sparks, wins, and her two parents.
 let next = 1;
@@ -74,6 +75,42 @@ test("Parent 1 given the deck: sparks for skills her deck already offers count o
   assert.equal(plain[0].v.id, a.id, "with no deck, the top whites win");
   assert.equal(deck[0].v.id, b.id, "once her deck offers those skills, the other veteran's sparks matter more");
   assert.ok(deck.find((y) => y.v.id === a.id).value < plain.find((y) => y.v.id === a.id).value);
+});
+
+test('purchase targets change parent ranking and both decoded rental searches',()=>{
+  const a=vet(uniq[0],[[top[0],3]]),b=vet(uniq[0],[[top[1],3]]);
+  const x=purchaseContext({[top[0]]:4}),y=purchaseContext({[top[1]]:4});
+  assert.equal(plan.rankVets(x,[a,b])[0].v.id,a.id);
+  assert.equal(plan.rankVets(y,[a,b])[0].v.id,b.id);
+  const p1=plan.rankVets(x,[vet(uniq[0],[])])[0];
+  const q=plan.rentalSearch(x,p1,{sort:'whites',pink:'none'}),f=decode(q);
+  assert.deepEqual(q.whites.map(w=>w.id),[top[0]]);
+  assert.deepEqual(f.ow,[+SB.DATA.skills[top[0]][0]*10]);
+  assert.ok(!f.w && !f.pr,'targets never become required whites or a rental rank filter');
+  const fresh=plan.rankFresh(x,[vet(uniq[3],[])],[uniq[2].id],{})[0];
+  const gp=plan.trainingRentalSearch(x,fresh,{sort:'whites',pink:'none'}),gf=decode(gp);
+  assert.deepEqual(gp.whites.map(w=>w.id),[top[0]]);
+  assert.deepEqual(gf.omw,[+SB.DATA.skills[top[0]][0]*10]);
+  assert.ok(!gf.mw && !gf.pr);
+  assert.equal(gf.t[0],fresh.t.id);assert.equal(gf.p2c,fresh.parents[0].tid);
+});
+
+test('fresh whites require an affordable purchase and sufficient SS careers',()=>{
+  const x=purchaseContext({[top[0]]:4,[top[1]]:3}),t=uniq[2],v=vet(uniq[3],[]);
+  const f=SB.DATA.skills[top[0]][0],offers={[top[0]]:1,[top[1]]:1};
+  const learning={ssShare:1,ss:16,of:16,skills:{[top[0]]:0.5},families:{[f]:{learn:0.5,spark:0.1}}};
+  const fresh=plan.rankFresh(x,[v],[t.id],offers,{plans:{[t.id]:{offers,learning}}})[0];
+  assert.deepEqual(fresh.extra.whites.list.map(w=>w.id),[top[0]],'offered but unpurchased skills give no projected spark');
+  assert.equal(fresh.extra.whites.list[0].learn,0.5);
+  assert.equal(fresh.extra.whites.list[0].spark,0.1);
+  assert.equal(fresh.extra.whites.list[0].budgeted,true);
+  const weak={...learning,ssShare:0.5,ss:8};
+  const blocked=plan.rankFresh(x,[v],[t.id],offers,{plans:{[t.id]:{offers,learning:weak}}})[0];
+  assert.equal(blocked.extra.value,0);assert.equal(blocked.extra.unready,true);
+  const rental={friend:'checked',parent:m(uniq[4],[]),parents:[null,null]};
+  const row=plan.rankRentals(x,blocked,[rental])[0];
+  assert.equal(row.value,row.s.value,'a new rental cannot restore unbudgeted fresh-parent credit');
+  assert.ok(plan.itSkills(x,{}).length===0,'no random-event wishes fill Independent Training slots');
 });
 
 test("a fresh Parent 1: one of your umas, two veterans as her parents, the G1s she shares with them", () => {
@@ -401,7 +438,7 @@ test("Independent Training's prioritized skills: offered race whites by value ×
   const x = x0();
   const w = plan.want(x).white;
   const offers = {}; offers[w[0].id] = 0.3; offers[w[1].id] = 0.9; offers[w[2].id] = 0.9;
-  const gold = Object.keys(SB.DATA.skills).find(id => SB.DATA.skills[id][2] && SB.DATA.skills[id][0] === SB.DATA.skills[w[2].id][0]);
+  const gold = Object.keys(SB.DATA.skills).find(id => SB.DATA.skills[id][3] === 2 && SB.DATA.skills[id][0] === SB.DATA.skills[w[2].id][0]);
   if (gold) offers[gold] = 0.5;
   const list = plan.itSkills(x, offers, 10);
   assert.equal(list.length, Math.min(10, list.length)); assert.ok(list.length <= 10);

@@ -15,7 +15,7 @@
         const unlocked=routes.unlocks(id);
         (unlocked.length ? unlocked : [String(id)]).forEach(to=>{
           const row=byId[to] || (byId[to]={id:to,sources:[]});
-          const key=s.key+":"+(family(to)||to), old=row.sources.find(x=>x.key===key);
+          const key=s.key+":"+(family(to)||to), old=row.sources.find(x=>x.key===key && x.via===String(id));
           const value=Object.assign({},s,{key,via:String(id),hint:String(to)===String(id)?s.hint:0});
           if(!old)row.sources.push(value);else if(value.p>old.p)Object.assign(old,value);
         });
@@ -32,19 +32,20 @@
         const m=f[slot];if(!m || !m.cid)return;
         const label=(F.PARENT_OF[slot]?"Grandparent ":"Parent ")+slot+" · "+(m.name||m.tid||m.cid), scale=F.slotScale(slot);
         (m.white||[]).forEach(([id,stars])=>{const base=white(id);if(base)source(base,{key:"spark:"+slot+":"+family(base),kind:"parent",slot,name:label+" white spark",p:F.twice(F.WHITE,stars,aff[slot],scale),hint:1,conditional:true});});
-        if(m.green && m.unique)source(m.unique,{key:"unique:"+slot,kind:"parent",slot,name:label+" inherited unique",p:F.PARENT_OF[slot]?F.twice(F.GREEN,m.green,aff[slot],scale):1,hint:1,conditional:!!F.PARENT_OF[slot] || !!m.planned});
+        if(m.green && m.unique)source(m.unique,{key:"unique:"+slot,kind:"parent",slot,name:label+" inherited unique",p:F.PARENT_OF[slot]?F.twice(F.GREEN,m.green,aff[slot],scale):1,hint:1,conditional:!!F.PARENT_OF[slot] || !!m.planned || !!m.fresh});
         // A planned X has not produced these sparks yet. Keep that full chain of chances
         // explicit and separate from actual veterans' white arrays.
-        if(m.planned && !m.manual)(m.projectedWhite||[]).forEach(w=>{
+        if((m.planned || m.fresh) && !m.manual && m.vet==null)(m.projectedWhite||[]).forEach(w=>{
           const base=white(w.id);if(!base)return;
           const stars=w.stars||[0.2,0.7,0.1], fire=stars.reduce((n,p,i)=>n+p*F.twice(F.WHITE,i+1,aff[slot],scale),0);
           source(base,{key:"projected:"+slot+":"+family(base),kind:"parent",slot,name:label+" · train, generate spark, inherit",p:clamp(w.spark)*fire,hint:1,conditional:true,learn:w.learn,spark:w.spark});
         });
       });
       if(o.mode==="finished")(o.entered||[]).forEach(x=>source(x.id,{key:"entered:"+x.id,kind:"entered",name:x.learned?"Reported equipped":"Reported skill shop",p:1,hint:+x.hint||0}));
+      const chance=sources=>{const groups={};sources.forEach(s=>groups[s.key]=Math.max(groups[s.key]||0,clamp(s.p)));return 1-Object.values(groups).reduce((miss,p)=>miss*(1-p),1);};
       Object.values(byId).forEach(row=>{
-        row.p=1-row.sources.reduce((miss,s)=>miss*(1-clamp(s.p)),1);
-        row.deck=1-row.sources.filter(s=>s.kind!=="parent").reduce((miss,s)=>miss*(1-clamp(s.p)),1);
+        row.p=chance(row.sources);
+        row.deck=chance(row.sources.filter(s=>s.kind!=="parent"));
       });
       return {byId,missing:(o.entered||[]).filter(x=>!byId[x.id]).map(x=>String(x.id))};
     }
@@ -52,11 +53,12 @@
       let state=seed>>>0 || 1;const rolls=new Map(),available=[],hints={};
       const random=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return (state>>>0)/4294967296;};
       Object.keys(graph.byId).sort().forEach(id=>{
-        const row=graph.byId[id];let hit=false,hint=0;
+        const row=graph.byId[id];let hit=false;const level={};
         row.sources.filter(s=>!kinds || kinds.includes(s.kind)).forEach(s=>{
           if(!rolls.has(s.key))rolls.set(s.key,random());
-          if(rolls.get(s.key)<s.p){hit=true;hint=Math.min(5,hint+(s.hint||0));}
+          if(rolls.get(s.key)<s.p){hit=true;level[s.key]=Math.max(level[s.key]||0,s.hint||0);}
         });
+        const hint=Math.min(5,Object.values(level).reduce((n,lv)=>n+lv,0));
         if(hit){available.push(id);if(hint)hints[id]=hint;}
       });
       return {available,hints};
@@ -76,7 +78,7 @@
       const ws={};Object.keys(relevant).forEach(id=>{ws[family(id)]=Math.max(ws[family(id)]||0,relevant[id]);});
       const spark=id=>metadata[id] && metadata[id][3]===2?0.4:metadata[id] && metadata[id][2]?0.25:0.2;
       const finals=o.finals && o.finals.length?o.finals:Array.from({length:o.runs||16},()=>({stats:o.stats,sp:o.sp}));
-      const out={families:{},ss:0,of:finals.length,spent:0,rating:0,plans:[],model:"sampled offers; Lv1 hints for unobserved routes"};
+      const out={families:{},skills:{},ss:0,of:finals.length,spent:0,rating:0,plans:[],model:"sampled offers; Lv1 hints for unobserved routes"};
       finals.forEach((career,i)=>{
         const shop=sample(graph,(o.seed||91823)+i*7919), costs=B.create({metadata,skills:values,available:shop.available,must:o.must||[],lengthValue:1,spValue:0});
         const minimum=o.minimum==null?R.SS:o.minimum, base=R.statsScore(career.stats)+R.uniqueBonus(t.r,t.r), gap=minimum-base;
@@ -101,6 +103,7 @@
         }
         out.ss+=+best.reached;out.spent+=best.spent;out.rating+=base+best.rating;
         best.selected.forEach(x=>{
+          out.skills[x.id]=(out.skills[x.id]||0)+1/finals.length;
           if(!(ws[x.family]>0))return;
           const row=out.families[x.family]||(out.families[x.family]={id:white(x.id),learn:0,spark:0,gold:0});
           row.learn+=1/finals.length;row.spark+=spark(x.id)/finals.length;row.gold+=+(metadata[x.id][3]===2)/finals.length;
