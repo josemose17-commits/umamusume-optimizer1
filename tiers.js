@@ -126,7 +126,7 @@
     const days = Math.max(1, 65 - (ctx.races || 0));
     cards.forEach((c) => {
       const card = D.card(c.id);
-      if (ctx.parentGlobal && !D.onGlobal(card, ctx.today)) return;
+      if (ctx.parentGlobal && !(ctx.cardAvailable ? ctx.cardAvailable(card) : D.onGlobal(card, ctx.today))) return;
       const eu = entry(c.id, c.lb);
       const level = D.levelFor(card, c.lb);
       const fx = D.baseEffects(card, level);
@@ -183,6 +183,7 @@
     if (parent) {
       ctx.parentGlobal = !!parent.globalOnly;
       ctx.today = parent.today;
+      ctx.cardAvailable = parent.cardAvailable;
       // Global only: out on Global by the ace's cup (skill-release.js; skillsBy null = out now).
       ctx.allowSkill = id => !ctx.parentGlobal || Release.outBy(skillInfo.skills[id], parent.skillsBy || null);
       [...ctx.known].forEach(id => parentRoutes.whites(id).forEach(white => ctx.known.add(white)));
@@ -249,8 +250,13 @@
   function buildDeck(opts, pool, borrowPool) {
     const comp = opts.comp || {};
     const types = Object.keys(TABS);
-    const locked = (opts.locked || []).map((id) => pool.find((c) => c.id === id)).filter(Boolean);
-    const borrowSlot = opts.borrow && borrowPool && borrowPool.length ? 1 : 0;
+    const requested = [...new Set(opts.locked || [])];
+    const locked = requested.map((id) => pool.find((c) => c.id === id)).filter(Boolean);
+    const borrowedLocks = opts.borrow ? requested.filter(id => !pool.some(c => c.id === id))
+      .map(id => (borrowPool || []).find(c => c.id === id)).filter(Boolean) : [];
+    if (borrowedLocks.length > 1) throw new Error("Only one must-include card can be borrowed. Remove one, or untick “Only cards I own” to try a future deck.");
+    borrowedLocks.forEach(c => locked.push(Object.assign({}, c, { borrowed: true })));
+    const borrowSlot = !borrowedLocks.length && opts.borrow && borrowPool && borrowPool.length ? 1 : 0;
     const count = (deck) => { const n = {}; deck.forEach((c) => { const t = D.card(c.id).ty; n[t] = (n[t] || 0) + 1; }); return n; };
     // Types that may fill the next slot without breaking the makeup.
     const openTypes = (deck) => {

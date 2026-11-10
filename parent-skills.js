@@ -39,7 +39,7 @@
     }
 
     cards.forEach(card => {
-      if (opts.globalOnly && !(card.en && card.en <= opts.today)) { unavailableCards.push(card.id); return; }
+      if (opts.globalOnly && !(opts.cardAvailable ? opts.cardAvailable(card) : card.en && card.en <= opts.today)) { unavailableCards.push(card.id); return; }
       (card.hs || []).forEach(id => offer(id, card, {kind: 'hint'}));
       const ce = (events.cards || {})[card.id] || {};
       const parsed = new Set();
