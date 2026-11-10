@@ -63,6 +63,11 @@
       });
       return {available,hints};
     }
+    function restrict(graph,available,hints) {
+      // The purchase solver also treats positive hint levels as availability. Filter both
+      // channels: a career hint with no verified route must not reopen a rejected skill.
+      return {available:[...new Set(available.map(String))].filter(id=>graph.byId[id]),hints:Object.fromEntries(Object.entries(hints).filter(([id])=>graph.byId[id]))};
+    }
     function parentRel(rel,plan) {
       if(!plan || !plan.parentValues)return rel;
       const targets={},why={};
@@ -113,7 +118,7 @@
       out.spent/=finals.length;out.rating/=finals.length;out.ssShare=out.ss/out.of;
       return out;
     }
-    return {build,sample,parentRel,project,white,family};
+    return {build,sample,restrict,parentRel,project,white,family};
   }
   const api={create};if(typeof module!=="undefined" && module.exports)module.exports=api;else root.UmaSkillAccess=api;
 })(typeof window!=="undefined"?window:globalThis);

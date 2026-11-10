@@ -3685,6 +3685,7 @@
         }
         q.skills.forEach(x=>{if(q.mode==="finished" || access.byId[x.id] && (available.includes(String(x.id)) || x.learned)){hints[x.id]=+x.hint;available.push(String(x.id));}});
         if(q.mode === "plan") {
+          ({available,hints}=ACCESS.restrict(access,available,hints));
           const fixed=q.skills.filter(x=>x.learned && access.byId[x.id]).map(x=>String(x.id));
           const charged=window.UmaSkillBudget.create({available:fixed,must:fixed,skills:Object.fromEntries(fixed.map(id=>[id,0]))}).solve(hints,20000);
           if(charged.unmetMust.length)throw new Error("An equipped purchase lacks cost data.");
@@ -3702,6 +3703,7 @@
           return raceMemo.get(key);
         };
         const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,compare,maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
+        if(q.mode === "plan" && plan.selected.some(row=>!access.byId[row.id]))throw new Error("A purchase lacks a verified skill source. Compare again after checking her deck and family.");
         // A separate, explicitly conditional purchase plan asks which white hints would be
         // worth seeking. These never enter the actual purchase list without a source.
         const rel=aceSkillsFor({preset:p,style:c.style}), potential=[...new Set(Object.keys(rel?rel.targets:{}).map(id=>ACCESS.white(id)).filter(Boolean))]
