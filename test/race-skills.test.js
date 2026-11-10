@@ -30,9 +30,12 @@ test('race format and future rules never silently use unsupported physics',()=>{
  assert.match(R.supported(p,{syoubu:true},C),/later race-engine/);assert.equal(R.supported(p,{},C),null);
  assert.equal(R.request(p,input,[],[],C).data.options.useIntChecks,true);
 });
-test('pinned Umalator runs real equipped-set comparisons with finite paired results',()=>{
- let handler,last;const sandbox={console:{assert(){},log(){},warn(){},error(){}},addEventListener:(type,f)=>handler=f,postMessage:m=>last=m};sandbox.self=sandbox;
- vm.createContext(sandbox);vm.runInContext(fs.readFileSync(require.resolve('../vendor/umalator/simulator.worker.js'),'utf8'),sandbox);
+test('pinned Umalator and its envelope run on engines without Set composition',()=>{
+ let handler,last;const sandbox={URL,console:{assert(){},log(){},warn(){},error(){}},location:{href:'http://localhost/race-worker.js?v=test'},addEventListener:(type,f)=>handler=f,postMessage:m=>{if(m.type==='compare')last=m;}};sandbox.self=sandbox;
+ vm.createContext(sandbox);
+ vm.runInContext('Set.prototype.union=undefined;Set.prototype.intersection=undefined;',sandbox);
+ sandbox.importScripts=url=>vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'..',url.split('?')[0]),'utf8'),sandbox);
+ vm.runInContext(fs.readFileSync(require.resolve('../race-worker.js'),'utf8'),sandbox);
  const p=P.list.find(p=>p.id==='cm21'),input={...p.stats,strategy:'Oikomi',outfitId:'100101'};
  handler({data:R.request(p,input,['100011'],['100011','200331'],C,24)});
  const result=R.summary(Array.from(last.results.results));assert.equal(result.samples,24);assert.ok(result.mean>0);assert.ok(result.max>=result.min);
