@@ -58,6 +58,7 @@
   }
   let catalogPromise;
   const load = () => catalogPromise || (catalogPromise = fetch("data/race-skills.json" + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { catalogPromise = null; throw e; }));
+  const DUEL_RACES = 240, DUEL_SEED = 161803, CONFIRM_SEED = 577215;
   async function optimize(o) {
     const learned = ids(o.learned), values = Object.assign({}, o.values), excluded = [];
     // o.scale: { id: share } for skills the engine fires on a sampled timing but that need a rival
@@ -151,10 +152,29 @@
     const finalists = [...cache.values()].filter(Boolean).sort((a, b) => b.required - a.required || b.result.mean - a.result.mean || a.spent - b.spent).slice(0, 3);
     if (!finalists.includes(cache.get(ids(seed.selected.map(s=>s.id)).join(".")))) finalists.push(cache.get(ids(seed.selected.map(s=>s.id)).join(".")));
     best = null;
+    const checked = [];
     for (const x of finalists.filter(Boolean)) {
       const r = adjust(await o.compare(learned, ids(learned.concat(x.selected.map(s=>s.id))), 96, 314159), x.selected);
-      const v = Object.assign({}, x, { result: r }); if (better(v, best)) best = v;
+      const v = Object.assign({}, x, { result: r }); checked.push(v); if (better(v, best)) best = v;
     }
+    // Head-to-head: the best finalist against the runner-up (same must-haves met), paired on
+    // fresh races. Within the 95% interval it's a tie; a clear loss swaps them.
+    const setOf = x => ids(learned.concat(x.selected.map(s=>s.id)));
+    const runner = checked.filter(v => v !== best && v.required === best.required && setOf(v).join() !== setOf(best).join()).sort((a,b) => b.result.mean - a.result.mean)[0];
+    let duel = null;
+    if (runner) {
+      try {
+        const raw = await o.compare(setOf(runner), setOf(best), DUEL_RACES, DUEL_SEED);
+        const d = Object.assign({}, raw), shift = cut(runner.selected) - cut(best.selected);
+        ["mean","median","low","min","max"].forEach(k => { d[k] += shift; });
+        let verdict = Math.abs(d.mean) <= d.ci95 ? "tie" : d.mean > 0 ? "best" : "swapped";
+        if (verdict === "swapped") { const t = best; best = runner; Object.keys(d).forEach(k => { if (["mean","median","low","min","max"].includes(k)) d[k] = -d[k]; }); duel = { verdict, other: t.selected.map(x=>x.id), diff: d }; }
+        else duel = { verdict, other: runner.selected.map(x=>x.id), diff: d };
+      } catch (error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error; }
+    }
+    // The reported gain comes from races the search and the head-to-head never used.
+    try { best = Object.assign({}, best, { result: adjust(await o.compare(learned, setOf(best), 96, CONFIRM_SEED), best.selected), selectedOn: best.result }); }
+    catch (error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error; }
     const rows = [];
     for (const x of best.selected) {
       const rest = ids(learned.concat(best.selected.filter(s => s.id !== x.id).map(s=>s.id)));
@@ -172,7 +192,7 @@
     ranking.sort((a,b)=>(b.per100||0)-(a.per100||0));
     return { selected: rows, ranking, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
-      evaluations: calls, failedSets, method: "bounded paired race comparisons", learned, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
+      evaluations: calls, failedSets, method: "bounded paired race comparisons", learned, duel, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
   const api = { summary, supported, horse, request, runner, load, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;
