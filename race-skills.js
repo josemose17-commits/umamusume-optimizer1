@@ -24,7 +24,7 @@
       const chain = B.create().chain(id);
       if (!before || chain && chain.includes(before)) map.set(group, id);
     });
-    return Object.assign({ outfitId: "", starCount: 3, uniqueLv: 1, mood: 2, popularity: 1,
+    return Object.assign({ outfitId: "", starCount: 3, uniqueLv: 1, mood: 0, popularity: 1,
       distanceAptitude: "A", surfaceAptitude: "A", strategyAptitude: "A",
       aptitudes: Array(10).fill("A"), samplePolicies: new Map() }, input, { skills: map, samplePolicies: new Map() });
   }

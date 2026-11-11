@@ -57,7 +57,7 @@
   function buildCtx(opts) {
     const sc = opts.scenario;
     const b = E.BUILDS[opts.build] || E.BUILDS.medium;
-    const target = Object.assign({}, b.target, opts.target || {});
+    const target = Object.assign({}, b.target, opts.buildTarget || {}, opts.target || {});
     const caps = {};
     STATS.forEach((s, i) => { caps[s] = (opts.caps && opts.caps[s]) || sc.caps[i]; });
     const forced = E.forcedTurns({ goals: [] }, sc);
