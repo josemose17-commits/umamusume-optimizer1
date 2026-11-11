@@ -84,6 +84,10 @@
       const spark=id=>metadata[id] && metadata[id][3]===2?0.4:metadata[id] && metadata[id][2]?0.25:0.2;
       const finals=o.finals && o.finals.length?o.finals:Array.from({length:o.runs||16},()=>({stats:o.stats,sp:o.sp}));
       const out={families:{},skills:{},ss:0,of:finals.length,spent:0,rating:0,plans:[],model:"sampled offers; Lv1 hints for unobserved routes"};
+      // Her blue spark's stars depend on the one stat it lands on (GameTora, umareference): under
+      // 600 90/10/0%, 600-1100 50/45/5%, over 1100 20/70/10%. Averaged over her careers, per stat.
+      const blueDist=v=>v>1100?[0.2,0.7,0.1]:v>=600?[0.5,0.45,0.05]:[0.9,0.1,0];
+      out.blueStars=[0,1,2,3,4].map(i=>{const d=[0,0,0];finals.forEach(c=>{blueDist(+((c.stats||[])[i])||0).forEach((x,k)=>{d[k]+=x/finals.length;});});return d;});
       finals.forEach((career,i)=>{
         const shop=sample(graph,(o.seed||91823)+i*7919), costs=B.create({metadata,skills:values,available:shop.available,must:o.must||[],lengthValue:1,spValue:0});
         const minimum=o.minimum==null?R.SS:o.minimum, base=R.statsScore(career.stats)+R.uniqueBonus(t.r,t.r), gap=minimum-base;

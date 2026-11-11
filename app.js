@@ -2558,20 +2558,36 @@
   }
 
   // The race build's targets for a racing ace on this cup: the distance build's, with stamina
-  // lowered to what the simulator says her style needs here (data/stamina-needs.js, no
-  // recovery skills) plus STAMINA_MARGIN for stamina debuffers. It never raises stamina:
-  // the no-heal figure overstates long courses, where every ace carries heals.
+  // lowered to the simulator's empty-skill reference for her style here (data/stamina-needs.js:
+  // no equipped skills, Normal mood) plus STAMINA_MARGIN, an uncalibrated allowance for stamina
+  // debuffers. It only lowers: a higher reference (no heals in it) becomes a warning instead,
+  // since her real heals are what decide it. Stamina-showdown cups keep the build's.
   const STAMINA_MARGIN = 100;
-  function staminaNeed(p, style) {
-    const cups = window.UmaStaminaNeeds && window.UmaStaminaNeeds.cups, n = p && cups && cups[p.id] && cups[p.id][style];
-    if (!(n > 0) || !E.BUILDS[p.build]) return null;
-    const build = E.BUILDS[p.build].target.stamina, need = n + STAMINA_MARGIN;
-    return need < build ? { need, raw: n, build } : null;
+  function staminaInfo(p, style) {
+    const cups = window.UmaStaminaNeeds && window.UmaStaminaNeeds.cups, cup = p && cups && cups[p.id];
+    if (!cup || !E.BUILDS[p.build]) return null;
+    const build = E.BUILDS[p.build].target.stamina;
+    if (cup.status === "engine") return { kind: "engine", build };
+    const x = cup.styles && cup.styles[style];
+    // A reference that fails its independent-seed rerun (by more than 4 of 160 races) is noise.
+    if (!x || x.status !== "ok" || !(x.need > 0) || (x.confirm && x.confirm.hits < x.goal - 4)) return null;
+    const need = x.need + STAMINA_MARGIN;
+    return { kind: need < build ? "lower" : "higher", need, raw: x.need, hits: x.hits, of: x.of, build };
   }
+  function staminaNeed(p, style) { const s = staminaInfo(p, style); return s && s.kind === "lower" ? s : null; }
   function raceBuildTarget(p, style) {
     const bt = Object.assign({}, E.BUILDS[p.build].target), s = staminaNeed(p, style);
     if (s) bt.stamina = s.need;
     return bt;
+  }
+  function staminaNote(p, style) {
+    const s = staminaInfo(p, style), who = esc(STYLE_NAME[style] || style);
+    if (!s) return "";
+    if (s.kind === "engine") return ` Stamina stays at ${s.build}: this cup has JP's stamina showdown, which the race simulator here doesn't model.`;
+    const ref = `the race simulator's reference (no skills equipped, Normal mood) gives a ${who} a full last spurt in ${s.hits} of ${s.of} races from ${s.raw}`;
+    return s.kind === "lower"
+      ? ` Stamina is lowered to ${s.need}: ${ref}, +${STAMINA_MARGIN} as a rough allowance for stamina debuffers (not measured). Check her finished build in <b>Skills for this build</b>.`
+      : ` <span class="warn">Stamina: ${ref}, above the ${s.build} used here. Plan recovery skills, and check her full-spurt rate in <b>Skills for this build</b>.</span>`;
   }
 
   // Your target stats for the optimizer (blank ones take the race build's), or null when none set.
@@ -2801,7 +2817,7 @@
     const automatic = state.scenario === "grandlive" && c.goal === "race";
     return `<div class="cm-targets">
       ${host === "parents" ? `<span class="mini"><b>Target stats</b> (optional): the search swaps cards to get her closer. <b>Blue spark targets</b> aims every stat at 1100 for 3★ blue sparks.</span><details class="pred-help"><summary>More on targets</summary>` : ""}
-      <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${stamina ? ` Stamina is lowered to ${stamina.need} for a ${esc(STYLE_NAME[c.style] || c.style)} here: the race simulator gives her a full last spurt from ${stamina.raw} without recovery skills (+${STAMINA_MARGIN} for stamina debuffers), so the rest can go to speed and power.` : ""}${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
+      <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${c.goal !== "ace" ? staminaNote(p, c.style) : ""}${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       ${host === "parents" ? "</details>" : ""}
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
       ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
@@ -3646,11 +3662,11 @@
       <p class="mini">Her own unique is equipped automatically. Planning targets need a card, trainee or parent source; equipped purchases are charged first. For a finished uma, enter SP remaining after those purchases. Edits update an existing comparison automatically.</p>
       <button type="button" class="btn ghost small" id="cmRaceRun">${j.raceRunning ? "Restart skill comparison" : "Compare skills"}</button>
       <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini warn">Course-chart fallback: ${esc(r.staticReason)} This uses the chart and SP costs, without a new race simulation.</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. Mean +${num(r.plan.result.mean)} L against equipped skills. Lower 10% result: ${num(r.plan.result.low)} L.</p><p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. Normal mood.</p>
-      ${sourceRowsHTML(r)}${table(r.plan.selected,false)}
+      ${!r.staticReason && (r.plan.result.fullSpurt||0)<0.95 ? `<p class="mini warn">With these skills she gets a full last spurt in only ${Math.round((r.plan.result.fullSpurt||0)*100)}% of simulated races (no stamina debuffers): raise stamina or add recovery skills.</p>` : ""}${sourceRowsHTML(r)}${table(r.plan.selected,false)}
       ${r.goals && r.goals.length ? `<p class="mini"><b>Parent targets:</b> ${[...new Set(r.goals.map(x=>ACCESS.white(x.id)).filter(Boolean))].map(id=>skillNameHTML(id)).join(", ")}. Targets to search or train for; these are not guaranteed purchases. <button type="button" class="linkish" data-goto-tab="parents">Plan their sources in Parents →</button></p>` : ""}
       <details><summary>Next skills from the equipped baseline</summary><p class="mini">Each is tested against equipped skills alone. The purchase list above tests combinations. Added L for its rows measures removing that purchase from the final set, so those rows do not add up.</p>${table(r.plan.ranking,true)}</details>
       ${r.plan.excluded.length ? `<p class="mini warn">Race or purchase effects unavailable; excluded: ${r.plan.excluded.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${r.plan.failedSets ? `<p class="mini warn">${r.plan.failedSets} skill sets could not be simulated and were excluded.</p>` : ""}${r.plan.unmetMust.length ? `<p class="mini warn">Must-haves not purchased: ${r.plan.unmetMust.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}
-      <details><summary>How these comparisons work</summary><p class="mini">${r.staticReason ? "Existing course-chart gains and legal SP costs are used. This mode does not measure new skill interactions or full-spurt frequency." : `${r.plan.evaluations} sets checked in a bounded search, 24 paired races each. Finalists and purchase contributions use another seed and 96 races. Full spurt in ${Math.round((r.plan.result.fullSpurt||0)*100)}% of validation races. Wit checks are on. Positions, overtaking and opponents remain simplified.`} Mean gain ${num(r.plan.result.mean)} L; 10th percentile ${num(r.plan.result.low)} L. These are estimates, not CM win rates or LoH points.</p><p class="mini">Planning includes only sourced skills. Card offers and inheritance are sampled, with unknown spark hint levels conservatively taken as Lv1. Equipped planning targets condition on getting those sourced skills, and their SP is charged first. User-entered shop skills are accepted as observed only in finished-uma mode. Parent targets come from a separate conditional purchase plan; they do not grant skills to the ace. Predicted stats exclude inheritance unless entered. Fast Learner and scenario-specific price discounts are not modeled. The deck/parent search is bounded, not proof of a global optimum.</p></details>` : ""}</div>
+      <details><summary>How these comparisons work</summary><p class="mini">${r.staticReason ? "Existing course-chart gains and legal SP costs are used. This mode does not measure new skill interactions or full-spurt frequency." : `${r.plan.evaluations} sets checked in a bounded search, 24 paired races each. Finalists and purchase contributions use another seed and 96 races. Full spurt in ${Math.round((r.plan.result.fullSpurt||0)*100)}% of validation races${(r.plan.result.fullSpurt||0)<0.95?' <span class="warn">(under 95%: she needs more stamina or recovery skills)</span>':""}. Wit checks are on. Positions, overtaking and opponents remain simplified.`} Mean gain ${num(r.plan.result.mean)} L${r.plan.result.ci95?` (± ${num(r.plan.result.ci95)} L, 95% interval from race-to-race noise; SD ${num(r.plan.result.sd)} L)`:""}; 10th percentile ${num(r.plan.result.low)} L. These are estimates, not CM win rates or LoH points.</p><p class="mini">Planning includes only sourced skills. Card offers and inheritance are sampled, with unknown spark hint levels conservatively taken as Lv1. Equipped planning targets condition on getting those sourced skills, and their SP is charged first. User-entered shop skills are accepted as observed only in finished-uma mode. Parent targets come from a separate conditional purchase plan; they do not grant skills to the ace. Predicted stats exclude inheritance unless entered. Fast Learner and scenario-specific price discounts are not modeled. The deck/parent search is bounded, not proof of a global optimum.</p></details>` : ""}</div>
     </details>`;
   }
   async function runRaceSkills(refineDeck = false, fromParents = false) {
