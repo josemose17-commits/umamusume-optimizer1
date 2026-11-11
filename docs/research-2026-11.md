@@ -16,7 +16,7 @@ stamina; `trade.js`: stat-line head-to-heads), all on the pinned worker.
 | Sample noise | Same setup, 24 vs. 400 races: mean error 0.01 L and the same top 10. This supports single-skill screening on that setup. It does not prove that close **set** comparisons are always settled. **(audit)** Results now show the paired SD and a 95% interval (± L) for the chosen set, so a close call is visible. |
 | Rushed, Wit checks, position keep | In the pinned worker (`kakari`, `withWisdomChecks`, `useDefaultPacer`). A virtual pacer and lead-fight approximation are not a full field. |
 | Opponent-dependent triggers | **(audit)** Upstream maps `blocked_front`, `change_order_onetime` and similar to sampled timing. A simulated activation is not evidence that a real opponent supplied the condition. The app labels these "Depends on race conditions". Treat their L as conditional. |
-| Front Runner "rival ahead" exclusion | **(audit)** This describes the assumed position (leading), not every race: a Front Runner contesting the lead can have someone ahead. Not changed yet (see open work). |
+| Front Runner "rival ahead" exclusion | **(audit)** This describes the assumed position (leading), not every race. **Changed:** a per-cup setting, *Fight for the lead* (15/30/50% of the race with someone ahead, an assumption), brings those skills back at that share. Also fixed: **Skills for this build**'s set search let them back in at full simulated value even for a leader. They are now dropped when she leads alone. |
 | Single runner vs. a 9-runner field | No publicly validated full-field Global simulator was found. kachi-dev's fork, VFalator and Moomoolator are related forks: agreement between them is weak corroboration. JP's emulator (mee1080/umasim, a port of uma-clock-emu) is JP rules. |
 
 Skill naming: match by skill ID, not English name. **Unyielding** and **Unyielding Spirit** are
@@ -86,8 +86,6 @@ scenario. It is not evidence for Global's Aquarius or Pisces decks. Prompt 2 ask
 
 ## Open work (from the audit)
 
-- Front Runner positions: separate "leading" from "contesting/chasing" instead of always
-  excluding rival-ahead skills.
 - Tactical packages (opening skills that set off Angling and Scheming; corner speed that connects
   into Lightning Surge; Christmas Oguri's recovery chain) evaluated as packages.
 - An untouched confirmation batch for the final skill set, and more races for close finalists.

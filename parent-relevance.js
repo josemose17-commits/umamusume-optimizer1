@@ -65,17 +65,26 @@
   // The charts run a Front Runner in 1st place, so skills that need a rival ahead of her (No
   // Stopping Me!, Slipstream, passing skills) never fit her either.
   const BACK_NO = { Nige: 1, Senkou: 1 }, FRONT_NO = { Oikomi: 1 }, AHEAD_NO = { Nige: 1 };
+  // With pos.contest (0..1, a share of races), Front Runners are taken to fight for the lead:
+  // rival-ahead skills fit her, counted at that share (aheadScale).
+  const sets = (pos) => pos.sets || (pos.sets = { back: new Set(pos.back.map(String)), front: new Set(pos.front.map(String)), ahead: new Set((pos.ahead || []).map(String)) });
   // Why a skill can't fire for this style: "back", "front", "ahead", or null when it can.
   function positionMiss(pos, id, style) {
     if (!pos) return null;
-    if (!pos.sets) pos.sets = { back: new Set(pos.back.map(String)), front: new Set(pos.front.map(String)), ahead: new Set((pos.ahead || []).map(String)) };
+    sets(pos);
     const k = String(id);
-    if (AHEAD_NO[style] && pos.sets.ahead.has(k)) return "ahead";
+    if (AHEAD_NO[style] && pos.sets.ahead.has(k) && !(pos.contest > 0)) return "ahead";
     if (BACK_NO[style] && pos.sets.back.has(k)) return "back";
     if (FRONT_NO[style] && pos.sets.front.has(k)) return "front";
     return null;
   }
   const positionFits = (pos, id, style) => !positionMiss(pos, id, style);
+  // The share of her chart value a skill keeps: a rival-ahead skill for a Front Runner who fights
+  // for the lead keeps pos.contest (the share of races someone is ahead of her); others keep 1.
+  function aheadScale(pos, id, style) {
+    if (!pos || !AHEAD_NO[style] || !(pos.contest > 0)) return 1;
+    return sets(pos).ahead.has(String(id)) ? Math.min(1, pos.contest) : 1;
+  }
 
   // A cup's own positions: data/skill-positions.js (Global's skill versions) with a JP-dated cup's
   // changes (data/skillvalues/index.js meta.variants[...].positions: { back|front|ahead: { add,
@@ -88,8 +97,10 @@
     };
     return { back: adj("back"), front: adj("front"), ahead: adj("ahead") };
   }
+  // The same positions with Front Runners fighting for the lead for that share of races.
+  const withContest = (base, share) => (share > 0 && base ? { back: base.back, front: base.front, ahead: base.ahead || [], contest: share } : base);
 
-  const api = { raceFacts, fits, aceTargets, positionFits, positionMiss, positionsWith };
+  const api = { raceFacts, fits, aceTargets, positionFits, positionMiss, positionsWith, aheadScale, withContest };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaParentRelevance = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
