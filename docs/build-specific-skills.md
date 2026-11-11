@@ -7,7 +7,7 @@ Source revision, worker hash and GPL v3 license are in `vendor/umalator/`.
 ## Inputs and purchases
 
 The runner uses the selected course, weather, ground, style, aptitudes, unique level and
-normal mood. Her own unique is equipped automatically. Entered stats override predicted
+mood (Normal by default; Good or Great can be picked; earlier versions ran every race at Great). Her own unique is equipped automatically. Entered stats override predicted
 stats. Finished-uma mode requires all five stats and the SP remaining after equipped purchases.
 Only explicitly added available skills can be bought in finished mode.
 
