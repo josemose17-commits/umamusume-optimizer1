@@ -35,7 +35,7 @@ standalone chart value may still be tested as part of a pair.
 
 ## Search and interpretation
 
-The additive purchase solution and the empty set provide starting points. Small pairs,
+When every *full* affordable set (one tier per skill family, nothing else still fits the SP; skills that clearly lose lengths alone left out) numbers 200 or fewer, all of them are raced (24 races each) instead of searched; purchases that add nothing are removed by the pruning step below. Otherwise the search below runs. The additive purchase solution, the empty set and greedy fills by each skill's own simulated gain (per SP and outright) provide starting points; moves include two-for-two exchanges (two purchases out, the SP refilled greedily). Small pairs,
 additions, removals and exchanges are compared as complete equipped sets, within the SP
 budget. The UI search checks at most 64 distinct sets with 24 races each (seed 271828).
 Finalists, including the additive starting solution, are rechecked with 96 races and a separate
@@ -43,15 +43,15 @@ seed (314159). Sample noise and the bounded search can miss a better set.
 
 The best finalist then plays the runner-up (the next finalist meeting the same must-haves) head to
 head: 240 paired races on a fresh seed (161803), best set against runner-up set directly. If the
-difference is within its 95% interval, the two are shown as a tie. If the runner-up wins clearly,
-they swap. The gain reported for the final set comes from another 96 races on a seed no step of
+difference is within its 95% interval, no clear difference is reported (not equivalence) and the set that spends less SP is kept. If the runner-up wins clearly,
+they swap. Each purchase in the winner is then raced against the set without it (240 paired races, seed 141421); while one doesn't clearly add lengths (mean within its 95% interval), the weakest is dropped and its SP kept. The gain reported for the final set comes from another 96 races on a seed no step of
 the search used (577215).
 
 Individual next-skill rows compare the equipped baseline against that baseline plus one
 purchase. Purchase-list contributions compare the chosen complete set against itself with
 that purchase removed. Upgrades restore the previously equipped tier. These contributions
 need not add to total set gain. L/SP uses the additional purchase cost, not the full cost of
-a lower tier already learned. Mean, median, 10th percentile and range describe sampled gains. The chosen set also reports the SD of its paired per-race differences and a 95% interval for its mean (normal approximation): sampling noise only, not the simplified field. Picking the best of many sets still favors lucky ones, so treat sets within that interval as ties. A full-spurt rate under 95% for the chosen set is flagged.
+a lower tier already learned. Mean, median, 10th percentile and range describe sampled gains. The chosen set also reports the SD of its paired per-race differences and a 95% interval for its mean (normal approximation): sampling noise only, not the simplified field. Picking the best of many sets still favors lucky ones; a difference within that interval is no clear difference, not proof of equivalence. A full-spurt rate under 95% for the chosen set is flagged.
 Full-spurt frequency is taken from the candidate runner's Umalator validation runs.
 
 After career refinement, the final deck and its initial deck are eligible for this comparison.

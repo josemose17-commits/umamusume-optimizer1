@@ -69,7 +69,7 @@
   // kind "jp": the JP worker's skills and courses (JP-dated cups); else Global's.
   const load = (kind) => { const file = kind === "jp" ? "data/race-skills-jp.json" : "data/race-skills.json";
     return catalogs[file] || (catalogs[file] = fetch(file + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { delete catalogs[file]; throw e; })); };
-  const DUEL_RACES = 240, DUEL_SEED = 161803, CONFIRM_SEED = 577215;
+  const DUEL_RACES = 240, DUEL_SEED = 161803, CONFIRM_SEED = 577215, PRUNE_SEED = 141421;
   async function optimize(o) {
     const learned = ids(o.learned), values = Object.assign({}, o.values), excluded = [];
     // o.scale: { id: share } for skills the engine fires on a sampled timing but that need a rival
@@ -112,7 +112,7 @@
     seed.selected=seed.selected.filter(x=>!dropped(x.id));
     excluded.push(...seed.unsupported.filter(id=>!excluded.includes(id)));
     const limit = o.maxEvaluations || 96, cache = new Map();
-    let calls = 0, failedSets = 0;
+    let calls = 0, failedSets = 0, goal = limit;
     const evaluate = async selected => {
       const key = ids(selected.map(s => s.id)).join(".");
       if (cache.has(key)) return cache.get(key);
@@ -124,40 +124,85 @@
       try { result = selected.length ? adjust(await o.compare(learned, set, 24, 271828), selected) : summary([0]); }
       catch(error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error;cache.set(key,null);calls++;failedSets++;return null; }
       const v = { selected: selected.slice(), spent, required, result };
-      cache.set(key, v); calls++; if (o.progress) o.progress(Math.min(0.95, calls / limit)); return v;
+      cache.set(key, v); calls++; if (o.progress) o.progress(Math.min(0.9, calls / goal)); return v;
     };
     const better = (a, b) => a && (!b || a.required > b.required || a.required === b.required && (a.result.mean > b.result.mean + 1e-6 || Math.abs(a.result.mean - b.result.mean) <= 1e-6 && a.spent < b.spent));
-    let best = await evaluate(seed.selected), empty = await evaluate([]);
-    if (better(empty, best)) best = empty;
-    // Grow from empty too, so a standalone ordering cannot fix the answer before interaction
-    // tests begin. Retain the additive purchase set as a second starting point.
-    const starts = [empty, best].filter(Boolean);
-    // Test small pairs as well: an enabling skill can be worthless alone. This also
-    // supplies starts beyond the additive solution without claiming an exhaustive search.
-    const short = groups.slice().sort((a,b) => Math.max(...b.map(x=>x.L)) - Math.max(...a.map(x=>x.L))).slice(0,8).map(g=>g.slice().sort((a,b)=>b.L/Math.max(1,b.cost)-a.L/Math.max(1,a.cost))[0]);
-    for (let i=0;i<short.length;i++) for (let j=i+1;j<short.length && calls<Math.floor(limit/3);j++) {
-      const v=await evaluate([short[i],short[j]]); if(better(v,best))best=v;
-    }
-    starts.push(best);
-    for (let pass = 0; pass < 3 && calls < limit; pass++) {
-      const centers = pass ? [best] : starts;
-      let moved = false;
-      for (const center of centers) {
-        const candidates = [[], ...center.selected.map(x => center.selected.filter(s => s.id !== x.id))];
-        options.slice().sort((a, b) => b.required.length - a.required.length || b.L / Math.max(1,b.cost) - a.L / Math.max(1,a.cost)).forEach(option => {
-          const rest = center.selected.filter(x => x.family !== option.family);
-          candidates.push(rest.concat(option));
-          // A one-for-one exchange can release SP even when the next addition alone won't fit.
-          center.selected.forEach(old => { if (old.family !== option.family) candidates.push(rest.filter(x => x.id !== old.id).concat(option)); });
-        });
-        // Keep candidate order deterministic and alternate small additions with exchanges.
-        for (const selected of candidates) {
-          if (calls >= limit) break;
-          const v = await evaluate(selected);
-          if (better(v, best)) { best = v; moved = true; }
+    // A small shop: race every full affordable combination (one tier per skill family; full: no
+    // other skill still fits the SP), so the answer is the best set under the simulator, not the
+    // best one a bounded search reached. A skill that clearly loses lengths on its own is left
+    // out; one that adds nothing is dropped from the winner afterwards (pruning below).
+    const cap = o.exhaustive == null ? 200 : o.exhaustive;
+    const all = (() => {
+      if (!(cap > 0)) return null;
+      const harmful = x => { const r = preflight.get(x.id); return !x.required.length && r && r.mean + (r.ci95 || 0) < 0; };
+      const fams = groups.map(g => g.filter(x => !harmful(x))).filter(g => g.length);
+      let sets = [[]];
+      for (const g of fams) {
+        const next = sets.slice();
+        for (const set of sets) {
+          const spent = set.reduce((n, x) => n + x.cost, 0);
+          for (const x of g) if (spent + x.cost <= o.sp) { next.push(set.concat(x)); if (next.length > 20000) return null; }
         }
+        sets = next;
       }
-      if (pass && !moved) break;
+      const full = sets.filter(set => {
+        const spent = set.reduce((n, x) => n + x.cost, 0), used = new Set(set.map(x => x.family));
+        return !fams.some(g => !used.has(g[0].family) && g.some(x => spent + x.cost <= o.sp));
+      });
+      return full.length <= cap ? full : null;
+    })();
+    let best = null, method;
+    if (all) {
+      method = "every full affordable combination";
+      goal = all.length;
+      for (const set of all) { const v = await evaluate(set); if (better(v, best)) best = v; }
+    } else {
+      method = "bounded paired race comparisons";
+      best = await evaluate(seed.selected);
+      const empty = await evaluate([]);
+      if (better(empty, best)) best = empty;
+      // Several different starts: empty, the additive chart solution, and greedy fills by each
+      // skill's own simulated gain (per SP, and outright), so one early ordering can't decide.
+      const alone = x => (preflight.get(x.id) || { mean: x.L }).mean;
+      const greedy = (key, from = [], skip = new Set()) => {
+        const out = from.slice(), fams = new Set(out.map(x => x.family));
+        let spent = out.reduce((n, x) => n + x.cost, 0);
+        options.filter(x => !skip.has(x.family) && alone(x) > 0).sort((a, b) => key(b) - key(a)).forEach(x => {
+          if (!fams.has(x.family) && spent + x.cost <= o.sp) { out.push(x); fams.add(x.family); spent += x.cost; }
+        });
+        return out;
+      };
+      const starts = [empty, best];
+      for (const key of [x => alone(x) / Math.max(1, x.cost), x => alone(x)]) { const v = await evaluate(greedy(key)); if (v) starts.push(v); if (better(v, best)) best = v; }
+      // Small pairs too: an enabling skill can be worthless alone.
+      const short = groups.slice().sort((a,b) => Math.max(...b.map(x=>x.L)) - Math.max(...a.map(x=>x.L))).slice(0,8).map(g=>g.slice().sort((a,b)=>b.L/Math.max(1,b.cost)-a.L/Math.max(1,a.cost))[0]);
+      for (let i=0;i<short.length;i++) for (let j=i+1;j<short.length && calls<Math.floor(limit/3);j++) {
+        const v=await evaluate([short[i],short[j]]); if(better(v,best))best=v;
+      }
+      starts.push(best);
+      for (let pass = 0; pass < 3 && calls < limit; pass++) {
+        const centers = pass ? [best] : [...new Set(starts.filter(Boolean))];
+        let moved = false;
+        for (const center of centers) {
+          const candidates = [[], ...center.selected.map(x => center.selected.filter(s => s.id !== x.id))];
+          options.slice().sort((a, b) => b.required.length - a.required.length || b.L / Math.max(1,b.cost) - a.L / Math.max(1,a.cost)).forEach(option => {
+            const rest = center.selected.filter(x => x.family !== option.family);
+            candidates.push(rest.concat(option));
+            // A one-for-one exchange can release SP even when the next addition alone won't fit.
+            center.selected.forEach(old => { if (old.family !== option.family) candidates.push(rest.filter(x => x.id !== old.id).concat(option)); });
+          });
+          // Two-for-two: take out two purchases and refill the SP with the best others.
+          center.selected.forEach((a, i) => center.selected.slice(i + 1).forEach(b => {
+            candidates.push(greedy(x => alone(x) / Math.max(1, x.cost), center.selected.filter(x => x !== a && x !== b), new Set([a.family, b.family])));
+          }));
+          for (const selected of candidates) {
+            if (calls >= limit) break;
+            const v = await evaluate(selected);
+            if (better(v, best)) { best = v; moved = true; }
+          }
+        }
+        if (pass && !moved) break;
+      }
     }
     // Report on a separate seed and a larger sample; a noisy search win can lose this check.
     const finalists = [...cache.values()].filter(Boolean).sort((a, b) => b.required - a.required || b.result.mean - a.result.mean || a.spent - b.spent).slice(0, 3);
@@ -179,7 +224,8 @@
         const d = Object.assign({}, raw), shift = cut(runner.selected) - cut(best.selected);
         ["mean","median","low","min","max"].forEach(k => { d[k] += shift; });
         let verdict = Math.abs(d.mean) <= d.ci95 ? "tie" : d.mean > 0 ? "best" : "swapped";
-        // A tie goes to the set that spends less SP (a skill that adds nothing isn't bought).
+        // No clear difference: the set that spends less SP is kept (an interval containing zero
+        // shows no clear advantage, not that the two are equal).
         if (verdict === "swapped" || verdict === "tie" && runner.spent < best.spent) { const t = best; best = runner; Object.keys(d).forEach(k => { if (["mean","median","low","min","max"].includes(k)) d[k] = -d[k]; }); duel = { verdict, other: t.selected.map(x=>x.id), diff: d }; }
         else duel = { verdict, other: runner.selected.map(x=>x.id), diff: d };
       } catch (error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error; }
@@ -187,6 +233,27 @@
     // The reported gain comes from races the search and the head-to-head never used.
     try { best = Object.assign({}, best, { result: adjust(await o.compare(learned, setOf(best), 96, CONFIRM_SEED), best.selected), selectedOn: best.result }); }
     catch (error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error; }
+    // Keep SP rather than buy a skill that doesn't clearly add lengths: each purchase is raced
+    // against the set without it on fresh paired races, and the weakest one goes while the set
+    // isn't clearly better with it (its gain within the 95% interval of race-to-race noise).
+    const pruned = [];
+    for (let round = 0; round < 6 && best.selected.length; round++) {
+      let weakest = null;
+      for (const x of best.selected) {
+        if (x.required.length) continue;
+        const without = best.selected.filter(s => s !== x);
+        const raw = await o.compare(setOf({ selected: without }), setOf(best), DUEL_RACES, PRUNE_SEED);
+        const d = adjust(raw, [x]);
+        if (d.mean <= d.ci95 && (!weakest || d.mean < weakest.d.mean)) weakest = { x, d };
+      }
+      if (!weakest) break;
+      pruned.push({ id: weakest.x.id, cost: weakest.x.cost, diff: weakest.d });
+      best = Object.assign({}, best, { selected: best.selected.filter(s => s !== weakest.x), spent: best.spent - weakest.x.cost });
+    }
+    if (pruned.length) {
+      try { best = Object.assign({}, best, { result: best.selected.length ? adjust(await o.compare(learned, setOf(best), 96, CONFIRM_SEED), best.selected) : summary([0]) }); }
+      catch (error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error; }
+    }
     const rows = [];
     for (const x of best.selected) {
       const rest = ids(learned.concat(best.selected.filter(s => s.id !== x.id).map(s=>s.id)));
@@ -204,7 +271,7 @@
     ranking.sort((a,b)=>(b.per100||0)-(a.per100||0));
     return { selected: rows, ranking, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
-      evaluations: calls, failedSets, method: "bounded paired race comparisons", learned, duel, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
+      evaluations: calls, failedSets, method, learned, duel, pruned, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
   const api = { summary, supported, engine, horse, request, runner, load, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;

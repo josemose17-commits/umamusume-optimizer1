@@ -38,11 +38,13 @@ test('a gold row brings its white, and Fast Learner adds 10% of the base cost to
   assert.deepEqual(owned.selected[0].tiers.map((x) => x.id), ['200331'], 'an owned white is not bought again');
 });
 
-test('a head-to-head tie goes to the cheaper set', async () => {
+test('a purchase that adds nothing is dropped and its SP kept', async () => {
   const [a, b] = ['200332', '200512'];
   const out = await R.optimize({ catalog: require('../data/race-skills.json'), available: [a, b], learned: [], hints: {}, sp: 1000, values: { [a]: 1, [b]: 0.5 },
-    compare: async (before, after) => R.summary([after.includes(a) ? 1 : 0, after.includes(a) ? 1 : 0]) });
+    compare: async (before, after) => { const v = (set) => (set.includes(a) ? 1 : 0); return R.summary([v(after) - v(before), v(after) - v(before)]); } });
   assert.deepEqual(out.selected.map((x) => x.id), [a], 'a skill that adds nothing is not bought');
+  assert.deepEqual(out.pruned.map((x) => x.id), [b]);
+  assert.equal(out.method, 'every full affordable combination');
 });
 
 test('every JP-dated cup runs on its shipped in-browser simulator', () => {
@@ -93,4 +95,16 @@ test('stamina showdown: stamina past 1200 gains lengths on League of Heroes 1, n
   assert.ok(gain(SV.meta.sims.loh1) > 0.8, 'showdown with long-race factors');
   assert.ok(Math.abs(gain('jp-nosyoubu-8b68779361')) < 0.2, 'no showdown');
   assert.equal(worker('../bad')({}).type, 'error');
+});
+
+test('a bounded search with a synergy only a pair or swap finds', async () => {
+  // 10 skills, 3 tiers' worth of combinations: too many to race them all with exhaustive: 20.
+  const C = require('../data/race-skills.json'), av = Object.keys(C.skills).filter((id) => /^20\d{4}$/.test(id) && B.DATA.skills[id] && B.DATA.skills[id][2] == null).slice(0, 10);
+  const [x, y] = av.slice(6, 8), values = Object.fromEntries(av.map((id, i) => [id, i < 6 ? 0.3 : 0]));
+  const gain = (set) => set.filter((id) => av.slice(0, 6).includes(id)).length * 0.3 + (set.includes(x) && set.includes(y) ? 3 : 0);
+  const out = await R.optimize({ catalog: C, available: av, learned: [], hints: {}, sp: 600, values, exhaustive: 20, maxEvaluations: 96,
+    compare: async (before, after) => R.summary([gain(after) - gain(before), gain(after) - gain(before)]) });
+  assert.equal(out.method, 'bounded paired race comparisons');
+  assert.ok(out.selected.some((s) => s.id === x) && out.selected.some((s) => s.id === y), 'the pair that only works together is found');
+  assert.ok(out.spent <= 600);
 });
