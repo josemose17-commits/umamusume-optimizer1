@@ -78,6 +78,31 @@ Fixed **(audit)**:
   Blue stars depend on the stat it lands on. They now follow her predicted careers' stats per stat:
   under 600 90/10/0, 600–1100 50/45/5, over 1100 20/70/10.
 
+## What stats and aptitudes are worth (parents)
+
+**Changed.** The family score converted every stat at 60 points = 1 L and every needed aptitude at
+1 L. `tools/build_stat_values.js` (`data/stat-values.js`) measures both per cup and style,
+head-to-head, no skills, Normal mood. Other stats are measured at the style's full-spurt stamina.
+Stamina is measured over the 150 points below that level, what filling a real gap is worth.
+Aquarius Cup 2, per 60 points:
+
+| Style | Speed | Stamina | Power | Guts | Wit |
+| --- | --- | --- | --- | --- | --- |
+| Front | 0.15 | 0.11 | 1.18 | 0.13 | 0.18 |
+| Pace | 0.14 | 0.14 | 0.99 | 0.03 | 0.20 |
+| Late | 0.13 | 0.27 | 0.94 | 0.10 | 0.19 |
+| End | 0.12 | 0.36 | 1.01 | 0.08 | 0.21 |
+
+Speed past 1200 counts half in races, so on these stat lines power is worth several times more
+per point. Aptitudes: distance A→S 0.55–0.65 L on that dirt mile and about 1.25 L on Nakayama
+2000, surface A→S 0.75–0.8 L, style A→S 0.3–0.45 L. B→A is about twice A→S.
+
+Now used for blue-spark value where she's short, blue order and the split of blues you still pick
+(fewest lengths short), pink value, pink choice within each group, and parent ranking. A below-A
+aptitude still comes first, because start stars lift it for sure, while S needs an inspiration roll.
+Stamina-showdown cups keep the flat rules. Limits: one stat line per cup, no skills. Skills that
+add speed or acceleration change these values somewhat.
+
 ## Ace decks
 
 No per-cup Global meta-deck list was found to check the optimizer against. **(audit)** The note.com

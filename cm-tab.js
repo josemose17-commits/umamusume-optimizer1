@@ -482,6 +482,7 @@
       const stats = left.map((g, i) => [g, i]).filter(([g]) => g > 0).map(([, i]) => i);
       if (!stats.length) return { picks, after, text: "", closed: true };
       const val = { p: [0, 0, F.blueStats(2, 100, 1), F.blueStats(3, 100, 1)], g: [0, 0, F.blueStats(2, 50, F.GRAND), F.blueStats(3, 50, F.GRAND)] };
+      const pp = r.x ? F.statPoints(r.x) : [1, 1, 1, 1, 1].map(() => 1 / F.STAT_PER_L);
       const slots = [];
       if (r.useFresh && !(r.train && r.train.f.rental)) slots.push({ key: "gp", who: "Grandparent", scale: "g" });
       slots.push({ key: "p2", who: "Parent 2", scale: "p" }, { key: "p2a", who: "Parent 2's parent", scale: "g" }, { key: "p2b", who: "Parent 2's other parent", scale: "g" });
@@ -499,7 +500,8 @@
           // At most 8★ in one stat across Parent 2 and her parents (3★ + 3★ + 2★): a 9★ line is rare on uma.moe.
           const line = {}; pick.forEach((o, n) => { if (o && slots[n].key.startsWith("p2")) line[o[0]] = (line[o[0]] || 0) + o[1]; });
           if (Object.values(line).some((v) => v > 8)) return;
-          const short = rest.reduce((n, v) => n + Math.max(0, v), 0), key = [Math.round(short), starsAsked, used.size];
+          // Least short in lengths on her cup (equal per point where nothing's measured).
+          const short = rest.reduce((n, v, i) => n + Math.max(0, v) * pp[i], 0), key = [Math.round(short * 100), starsAsked, used.size];
           if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && (key[1] < best.key[1] || (key[1] === best.key[1] && key[2] < best.key[2])))) best = { key, pick: pick.slice() };
           return;
         }
