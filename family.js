@@ -6,19 +6,21 @@
 // (early April, Classic and Senior), at its base chance × (1 + that uma's own affinity / 100),
 // capped at 100%. Base chances by stars (1★/2★/3★): white skill 3/6/9%, green (inherited
 // unique) 5/10/15%, pink 1/3/5% (uma.guide and umareference; the parenting guide says 2% for
-// 1★), blue 70/80/90%. Grandparents fire less often than parents; no page gives the factor and
-// umareference guesses half, so GRAND = 0.5.
+// 1★), blue 70/80/90%. Grandparents use the same base chances (GRAND = 1): their own affinity is
+// already lower (affinity.js individual: only their own links), and JP's measured grandparent
+// blues fired about 90%/80% at 3★/2★ with no affinity (Polaris, 2024-07-30, 1,000 inspirations),
+// so umareference's extra "halved" double-counted it. One JP dataset; Global not replicated.
 // Blue: every member's blue adds +5/+12/+21 at the start, and each time it fires at an
 // inspiration a random +1–10 / 1–16 / 1–28 (taken as even odds: 5.5 / 8.5 / 14.5 on average).
 // Pink: at the start the family's pink stars per aptitude raise it 1 grade for 1–3★, 2 for
 // 4–6★, 3 for 7–9★, 4 for 10★+, but never past A; going on (A to S) takes a pink spark firing at
 // an inspiration (one grade each).
-// A white skill spark gives a hint (+1 to +5 levels, no known odds by star) for its base white
-// skill. Logic only; family-planner.js renders it.
+// A white skill spark gives a hint (+1 to +5 levels) for its base white skill. JP counts (GameWith,
+// 29/57/12 observations) average about Lv1.7/2.4/3.0 by stars: HINT_BY_STARS rounds them down. Logic only; family-planner.js renders it.
 (function (root) {
   "use strict";
   const WHITE = [0.03, 0.06, 0.09], GREEN = [0.05, 0.1, 0.15], PINK = [0.01, 0.03, 0.05], BLUE = [0.7, 0.8, 0.9];
-  const START_BLUE = [5, 12, 21], EVENT_BLUE = [5.5, 8.5, 14.5], GRAND = 0.5;
+  const START_BLUE = [5, 12, 21], EVENT_BLUE = [5.5, 8.5, 14.5], GRAND = 1;
   const GRADES = ["G", "F", "E", "D", "C", "B", "A", "S"];
   const gi = (g) => GRADES.indexOf(g);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
@@ -30,7 +32,7 @@
   const PARENT_OF = { g11: "p1", g12: "p1", g21: "p2", g22: "p2" };
   // In length units: 1 L counts like 60 stat points (as in the deck optimizer), and an
   // aptitude raised to A on the race like 1 L (a rough stand-in: no measured value).
-  const STAT_PER_L = 60, APT_L = 1, HINT_L = 0.15;
+  const STAT_PER_L = 60, APT_L = 1, HINT_L = 0.15, HINT_BY_STARS = [1, 2, 3];
   // Measured values per cup and style (data/stat-values.js, the race simulator): lengths per point
   // of each stat and per aptitude grade. Where a cup has none (stamina showdown, no course data),
   // the flat rules above apply: 1 L per STAT_PER_L points of any stat, APT_L per needed aptitude.
@@ -257,7 +259,7 @@
     return { lookFor, score, families, baseWhite, problems, worthOf, family };
   }
 
-  const api = { statPoints, aptL, measured, create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
+  const api = { HINT_BY_STARS, statPoints, aptL, measured, create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamily = api;
 })(typeof window !== "undefined" ? window : globalThis);

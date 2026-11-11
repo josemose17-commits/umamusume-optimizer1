@@ -31,7 +31,7 @@
       F.SLOTS.forEach(slot=>{
         const m=f[slot];if(!m || !m.cid)return;
         const label=(F.PARENT_OF[slot]?"Grandparent ":"Parent ")+slot+" · "+(m.name||m.tid||m.cid), scale=F.slotScale(slot);
-        (m.white||[]).forEach(([id,stars])=>{const base=white(id);if(base)source(base,{key:"spark:"+slot+":"+family(base),kind:"parent",slot,name:label+" white spark",p:F.twice(F.WHITE,stars,aff[slot],scale),hint:1,conditional:true});});
+        (m.white||[]).forEach(([id,stars])=>{const base=white(id);if(base)source(base,{key:"spark:"+slot+":"+family(base),kind:"parent",slot,name:label+" white spark",p:F.twice(F.WHITE,stars,aff[slot],scale),hint:(F.HINT_BY_STARS||[1,1,1])[Math.max(1,Math.min(3,stars))-1],conditional:true});});
         if(m.green && m.unique)source(m.unique,{key:"unique:"+slot,kind:"parent",slot,name:label+" inherited unique",p:F.PARENT_OF[slot]?F.twice(F.GREEN,m.green,aff[slot],scale):1,hint:1,conditional:!!F.PARENT_OF[slot] || !!m.planned || !!m.fresh});
         // A planned X has not produced these sparks yet. Keep that full chain of chances
         // explicit and separate from actual veterans' white arrays.

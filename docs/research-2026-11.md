@@ -60,23 +60,32 @@ What the app does (`data/stamina-needs.js`, built by `tools/build_stamina_needs.
 
 ## Parents and sparks
 
-The app's rates follow the most common community values (uma.guide, umareference, GameTora):
-inheritance white 3/6/9%, green 5/10/15%, pink 1/3/5%, blue 70/80/90%, × (1 + affinity/100).
-Generation is 20% white, 25% ◎ and 40% gold. **(audit)** The sources do not all agree:
-- Pink 1★: 1% on uma.guide's Sparks page, 2% on its Parenting page.
-- Lineage bonus: linear (+2.5 points per copy, +5 for gold) vs. ×1.1 per copy.
-- Mid-stat blue and below-SS white stars: 50/45/5 vs. 45/50/5.
-- Grandparent factor: umareference says half and questions it for blues. The app applies 0.5 to blues too.
+The app's rates follow the community values (uma.guide, umareference, GameTora), and the second
+ChatGPT pass checked them against JP measurements:
+- Inheritance white 3/6/9%, green 5/10/15%, pink 1/3/5%, race 1/2/3%, blue 70/80/90%,
+  × (1 + that uma's own affinity / 100). **Confirmed** by Polaris's JP counts (2025-08-05; e.g.
+  2★ white 9,912/166,000 = 5.97%, 1★ pink 37/4,000 = 0.93%). Cygames' patent JP2022018121A has the
+  affinity structure. Global not independently replicated.
+- **Changed: grandparents.** The app also multiplied grandparents by 0.5 (umareference's guess).
+  Polaris (2024-07-30, 1,000 inspirations) measured zero-affinity grandparent blues at 895–900 (3★)
+  and 783–795 (2★) per 1,000: the parent rate. A grandparent's own affinity is already lower in the
+  app (affinity.js counts only her own links), so the extra 0.5 double-counted. Now 1.
+- **Changed: lineage.** The spark-generation bonus per family member carrying the same white is now
+  ×1.1 each (Pochi's JP table, 2022), not +2.5/+5 points: 20% → 35.4%, ◎ 25% → 44.3%,
+  gold 40% → 70.9% with all six. Owada's 2021 tests support the direction, not the formula.
+- **Changed: inherited hint level.** A white spark was taken as Lv1 (10% SP off). GameWith's JP counts
+  (29/57/12 observations for 1★/2★/3★) average about Lv1.7/2.4/3.0, so it's now Lv1/Lv2/Lv3 by stars,
+  rounded down. Small samples: still on the cautious side.
+- Star odds: 50/45/5 below SS, 20/70/10 from **SS** (17,500): the app already used SS. Blue by that
+  stat: <600 90/10/0, 600–1099 ~50/45/5 (Data Station 2021: 49/45/6, retained records, some bias),
+  1100+ 20/70/10. Already matched.
+- Affinity: +3 per distinct shared G1 on the links Parent 1↔Parent 2 and each parent↔her own
+  parents (U-tools 2023, JP), as affinity.js does. Global guides disagree about when Global got
+  this system; the app assumes it has.
+- Stacking vs spreading whites: no universal answer. The app values each family's combined chance
+  (1 − Π(1 − p)) against what her deck already offers, which is the calculation ChatGPT describes.
 
-Measurements exist (e.g. Owada's JP tests, 2021-05-21, small samples) but don't settle the current
-Global formula.
-
-Fixed **(audit)**:
-- **Gold lineage credit.** Budgeted parent purchases added +2.5 points per lineage copy even to a
-  learned gold. A gold now gets +5 (an always-learned gold with 6 copies: 70%, not 55%).
-- **Blue-spark stars.** A fresh parent's blue was scored with SS odds (20/70/10) for every stat.
-  Blue stars depend on the stat it lands on. They now follow her predicted careers' stats per stat:
-  under 600 90/10/0, 600–1100 50/45/5, over 1100 20/70/10.
+Gold-lineage and blue-star fixes from the first audit stand. The gold fix is now part of the ×1.1 rule.
 
 ## What stats and aptitudes are worth (parents)
 

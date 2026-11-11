@@ -23,7 +23,9 @@
   // A fresh parent's white sparks, until your veterans tell (MIN_VETS with their skills): a
   // spark for SPARK_P of the skills she learns, 1★/2★/3★ at STARS, and LEARN_MAX relevant skills
   // learned (else LEARN_SHARE of what your veterans learned, the median).
-  const SS_STARS = [0.2, 0.7, 0.1], LINEAGE_WHITE = 0.025, LINEAGE_GOLD = 0.05;
+  // Each parent or grandparent carrying the same white spark multiplies a learned skill's spark
+  // chance by LINEAGE (JP table, Pochi 2022: base × 1.1^n, so 20% → 35.4% and gold 40% → 70.9% at 6).
+  const SS_STARS = [0.2, 0.7, 0.1], LINEAGE = 1.1;
   const SPARK_P = 0.3, STARS = [0.32, 0.6, 0.08], LEARN_MAX = 12, LEARN_SHARE = 0.75, MIN_VETS = 10, SPARK_RANGE = [0.15, 0.45];
   // Races and SS: your veterans in the scenario with BASE_EXTRA extra races or fewer (BASE_MIN
   // of them at least) give the ratings you reach; the simulation gives what each race costs.
@@ -139,8 +141,7 @@
     // (offers: { id: chance }), the most valuable first, up to r.learn of them; each becomes a
     // spark r.spark of the time, at r.stars, firing at her affinity aff.
     // copies: { family: how many of her parents and grandparents carry that white spark }; each
-    // copy adds LINEAGE_WHITE to the chance a learned skill leaves its spark (uma.guide: 20% →
-    // 22.5% → 25%…; the parenting guide has ×1.1 per copy instead, about the same for 1–3).
+    // copy multiplies the chance a learned skill leaves its spark by LINEAGE (×1.1 each).
     // cover: how likely the ace already gets each white from the rest of her family
     // (familyCover); a white she'd get anyway is worth that much less on this parent.
     function freshWhites(x, offers, aff, r, copies, cover, learning) {
@@ -154,11 +155,11 @@
         const p = learning ? a.p : Math.min(a.p, room);
         if (p <= 0) return;
         room -= p;
-        const chance = Math.min(1, r.spark + LINEAGE_WHITE * ((copies && copies[a.f]) || 0));
-        // Each lineage copy adds 2.5 points to a learned white's spark chance and 5 to a learned
-        // gold's (umareference); row.gold is the share of careers that buy the gold.
-        const row = learning && learning.families[a.f], gold = row ? Math.min(p, row.gold || 0) : 0;
-        const generated = learning ? Math.min(p,(row.spark || 0)+((p-gold)*LINEAGE_WHITE+gold*LINEAGE_GOLD)*((copies && copies[a.f]) || 0)) : p*chance;
+        const mult = Math.pow(LINEAGE, (copies && copies[a.f]) || 0), chance = Math.min(1, r.spark * mult);
+        // row.spark already mixes white (20%), ◎ (25%) and gold (40%) purchases; lineage copies
+        // multiply each the same way.
+        const row = learning && learning.families[a.f];
+        const generated = learning ? Math.min(p, (row.spark || 0) * mult) : p*chance;
         value += generated * fire * eff[a.f] * (1 - cv(a.f));
         list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: generated, L: eff[a.f], copies: (copies && copies[a.f]) || 0, cover: cv(a.f), budgeted:!!learning });
       });
