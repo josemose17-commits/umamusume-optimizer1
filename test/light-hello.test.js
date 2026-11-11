@@ -182,7 +182,7 @@ test("target search returns the calendar and Hello diagnostics used for its disp
   const start = cards().map((c) => ({ id: c.card.id, lb: c.lb }));
   const search = O.targetSearch({ scenario: "GL", skills: {}, locked: start.map((c) => c.id) }, { scenario: gl, build: "medium", target: { speed: 1500 } }, start, start, []);
   const result = search.result();
-  assert.equal(result.after.runs, 16); assert.ok(result.after.calendarAssumptions); assert.ok(result.after.grandConcert);
+  assert.equal(result.after.runs, result.validation.heldOut.runs); assert.ok(result.after.calendarAssumptions); assert.ok(result.after.grandConcert);
   assert.equal(result.after.grandConcert.model, "discrete-lessons-v1");
 });
 

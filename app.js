@@ -2524,7 +2524,7 @@
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
-      if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills;
+      if ((scenario().id === "grandlive" || est && est.scoring === "race") && c.goal === "race" && est) r.skills = est.skills;
       const result = Object.assign(r, { key, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
@@ -2552,11 +2552,12 @@
         const opts = Object.assign(euOpts(c, p, tid), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp) });
         const r = T.buildDeck(opts, pool, bp);
         const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
-        if (!tg && !ss && !(state.scenario === "grandlive" && c.goal === "race")) { done(r, opts, null); return; }
+        const rv = c.goal === "race" ? raceValues(p, c.style) : null;
+        if (!tg && !ss && !(state.scenario === "grandlive" && c.goal === "race") && !rv) { done(r, opts, null); return; }
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
         if (ss && !tg) ss.ignoreFit = true;
-        const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, c.style) : undefined, trainee: tid, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, c.style) : undefined, raceValues: rv, trainee: tid, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
         const tick = () => {
           try {
@@ -2611,6 +2612,11 @@
     return { kind: need < build ? "lower" : "higher", need, raw: x.need, hits: x.hits, of: x.of, build };
   }
   function staminaNeed(p, style) { const s = staminaInfo(p, style); return s && s.kind === "lower" ? s : null; }
+  // Race scoring for racing decks (optimizer.js raceL): her simulated stats in lengths on this cup
+  // for this style, from data/stat-curves.js. Null where the cup has none (stamina showdown, no
+  // course data). The optimizer also keeps targets when you typed your own, or on long cups where
+  // a full spurt needs recovery skills (buildCtx raceOn).
+  function raceValues(p, style) { return window.UmaStatCurves ? OPT.raceValuesFor(window.UmaStatCurves, p.id, style) : null; }
   function raceBuildTarget(p, style) {
     const bt = Object.assign({}, E.BUILDS[p.build].target), s = staminaNeed(p, style);
     if (s) bt.stamina = s.need;
@@ -2656,7 +2662,7 @@
     const candidates = comparisonDecks(r, c);
     if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
     const p = presetById(r.preset), sv = skillMap(p.id, c.style);
-    const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, c.style) : undefined, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+    const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style) : null, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
     const job = OPT.sensitivity(sim, candidates);
     j.sensitivityJob = job; renderCM();
     const tick = () => {
@@ -2701,7 +2707,7 @@
         });
       });
       const sv = skillMap(p.id, c.style);
-      const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, c.style) : undefined, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+      const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style) : null, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
       const token = {}; j.wishJob = token; j.wish = null; renderCM();
       const out = []; let at = 0;
       const tick = () => {
@@ -3500,7 +3506,7 @@
         <tr><th>Short</th>${g.short.map((v, i) => `<td class="num ${v > 0 ? "short" : "over"}">${v > 0 ? "−" + v : "+" + (g.stats[i] - g.target[i])}</td>`).join("")}</tr></tbody></table></div>
       <p class="mini">${short.length ? `<b>Her gaps: ${short.join(" · ")}.</b> Parents turns them into the blue sparks to look for.` : "<b>No gaps:</b> every target is reached."} ${host === "cm" ? `<button type="button" class="linkish" data-goto-tab="parents" data-goto-section="gaps">Fill them in Parents →</button>` : ""}</p>`;
       return gapTable + `<p class="mini">Skill points: about ${r.est.sp}.</p>
-      ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : r.skillSetCheck ? " No swaps kept after the skill-set check." : " Euophrys' pick was already the closest."}</p>` : ""}
+      ${fitNoteHTML(r)}
       ${simulationDiagnosticsHTML(r)}${predictedIncludesHTML(r)}</div>`;
     }
     const cell = (i) => {
@@ -3518,9 +3524,29 @@
         ${parent ? `<tr class="blue-row">${E.STATS.map((_, i) => `<td class="num"><span class="mini">3★ ${blue(r.est.stats[i])}%</span></td>`).join("")}</tr>` : ""}</tbody></table>
       <p class="mini">Skill points: about ${r.est.sp}.${parent ? " 3★: the chance of a 3-star blue spark if that stat is the one picked (uma.guide: 0% under 600, 5% to 1100, 10% over). Inheritance isn't in these numbers and adds more." : ""}</p>
       ${parent ? predictedRatingHTML(r, host) : ""}
-      ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : r.skillSetCheck ? " No swaps kept after the skill-set check." : " Euophrys' pick was already the closest."}</p>` : ""}
+      ${fitNoteHTML(r)}
       ${simulationDiagnosticsHTML(r)}${predictedIncludesHTML(r)}
     </div>`;
+  }
+  // How the deck search scored and picked the deck: target fit, or race value (lengths), with the
+  // held-out recheck and a close call when the runner-up is within the noise.
+  function fitNoteHTML(r) {
+    const f = r.fit;
+    if (!f) return "";
+    const swaps = (lead) => f.swaps.length ? " " + lead + ": " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : r.skillSetCheck ? " No swaps kept after the skill-set check." : " Euophrys' pick was already the best.";
+    const L = (n) => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(1) + " L";
+    const v = f.validation || {}, held = v.heldOut ? ` The best ${v.heldOut.decks} of ${v.candidates} decks tried were rechecked on ${v.heldOut.runs} fresh careers.` : "";
+    let close = "";
+    if (f.close) {
+      const out = r.cards.filter((x) => !f.close.cards.some((y) => y.id === x.id && y.lb === x.lb)), inn = f.close.cards.filter((x) => !r.cards.some((y) => y.id === x.id && y.lb === x.lb));
+      const swap = out.map((x, i) => esc(D.card(x.id).n) + " → " + (inn[i] ? esc(D.card(inn[i].id).n) : "?")).join(", ");
+      close = swap ? ` <b>Close call:</b> ${swap} scores within the noise (${f.scoring === "race" ? Math.abs(f.close.gap / OPT.L_VALUE).toFixed(1) + " L apart, noise ± " + (2 * f.close.se / OPT.L_VALUE).toFixed(1) + " L" : Math.round(f.close.gap) + " points apart, noise ± " + Math.round(2 * f.close.se)}), so treat them as tied: pick by the cards you'd rather raise or the skills you want.${r.skillSetCheck ? " The skill-set check raced it too." : ""}` : "";
+    }
+    if (f.scoring === "race") {
+      const statL = (f.after.raceL || 0) - (f.before.raceL || 0), skillL = ((f.after.skill || 0) - (f.before.skill || 0)) / OPT.L_VALUE;
+      return `<p class="mini">Scored by <b>race value</b>: lengths on this course for her style, from her simulated stats (each stat's value measured across its range in the race simulator, no skills, Normal mood; stamina read ${OPT.STAMINA_MARGIN} lower for opponents' debuffs) plus the skills each career's SP buys. Against Euophrys' pick: ${L(statL)} from stats, ${L(skillL)} from skills.${swaps("Swapped")}${held}${close} Type your own targets to rank by them instead.</p>`;
+    }
+    return `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${swaps("Swapped for your targets")}${held}${close}</p>`;
   }
   function predictedIncludesHTML(r) {
     return `
@@ -3784,7 +3810,9 @@
       const ownUnique=(t.us||[]).map(String);
       let learned=ownUnique.slice();
       const baseValues = skillMap(p.id,c.style).map;
-      const candidates = refineDeck && q.mode === "plan" && j.optResult && j.optResult.fit ? [{cards:j.optResult.cards,est:j.optResult.est}, {cards:j.optResult.fit.startCards,est:j.optResult.fit.before}] : [{cards:c.cards || [],est:j.optResult && j.optResult.est}];
+      // The suggested deck, Euophrys' pick and, when the deck search called it close, its runner-up:
+      // the race check decides between them with her real skill purchases.
+      const candidates = refineDeck && q.mode === "plan" && j.optResult && j.optResult.fit ? [{cards:j.optResult.cards,est:j.optResult.est}, {cards:j.optResult.fit.startCards,est:j.optResult.fit.before}].concat(j.optResult.fit.close ? [{cards:j.optResult.fit.close.cards,est:j.optResult.fit.close.est}] : []) : [{cards:c.cards || [],est:j.optResult && j.optResult.est}];
       let chosen = null, chosenScore = -Infinity, compared = 0;
       for (let ci=0;ci<candidates.length;ci++) {
         const candidate = candidates[ci], est = candidate.est;
