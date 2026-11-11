@@ -148,16 +148,16 @@ test("a fresh Parent 1's whites: your veterans' own spark rate, SS stars, and co
   const firstFam = SB.DATA.skills[w.list[0].id][0];
   assert.equal(eff[firstFam], Math.max(...Object.values(eff)), "the most valuable first");
   const copies = { [firstFam]: 2 }, boosted = plan.freshWhites(x, all, 0, q, copies);
-  assert.ok(Math.abs(boosted.list[0].spark - w.list[0].learn * (q.spark + 0.05)) < 1e-12, "two copies in her parents and grandparents: +2.5% each");
+  assert.ok(Math.abs(boosted.list[0].spark - w.list[0].learn * q.spark * 1.21) < 1e-12, "two copies in her parents and grandparents: ×1.1 each");
 
-  // Budgeted purchases: a learned gold gets +5% per lineage copy, a learned white +2.5% (umareference).
+  // Budgeted purchases: each lineage copy multiplies the spark chance by 1.1 (JP table: base × 1.1^n).
   const learnWhite = { families: { [firstFam]: { learn: 1, spark: 0.2, gold: 0 } } };
   const learnGold = { families: { [firstFam]: { learn: 1, spark: 0.4, gold: 1 } } };
   const six = { [firstFam]: 6 };
   const sw = plan.freshWhites(x, all, 0, q, six, {}, learnWhite).list.find((y) => SB.DATA.skills[y.id][0] === firstFam);
   const sg = plan.freshWhites(x, all, 0, q, six, {}, learnGold).list.find((y) => SB.DATA.skills[y.id][0] === firstFam);
-  assert.ok(Math.abs(sw.spark - (0.2 + 6 * 0.025)) < 1e-12, "white: 20% + 6 × 2.5%");
-  assert.ok(Math.abs(sg.spark - (0.4 + 6 * 0.05)) < 1e-12, "gold: 40% + 6 × 5% = 70%");
+  assert.ok(Math.abs(sw.spark - 0.2 * Math.pow(1.1, 6)) < 1e-12, "white: 20% × 1.1^6 = 35.4%");
+  assert.ok(Math.abs(sg.spark - 0.4 * Math.pow(1.1, 6)) < 1e-12, "gold: 40% × 1.1^6 = 70.9%");
 });
 
 test("is your best veteran good enough? a fresh one only when she beats it by the margin", () => {

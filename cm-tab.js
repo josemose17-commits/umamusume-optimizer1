@@ -451,7 +451,7 @@
     }
 
     // ① The blue sparks that fill her gaps, and roughly how many stars cover each.
-    // A 3★ blue on a parent gives about 50 over the run, on a grandparent about 40 (family.js:
+    // A 3★ blue on a parent gives about 50 over the run, on a grandparent about as much at typical affinity (family.js:
     // the start bonus plus both inspirations at a typical affinity).
 
     // Her gaps, what her family's blues already give against them (her veteran, the grandparent
@@ -474,7 +474,7 @@
     // (if not borrowed yet), Parent 2's own, and her two parents', each in any gap stat at 2★ or
     // 3★. Every split is tried (least short, then fewest stars asked = more rentals, then fewer
     // stats). The searches ask for exactly that split. Typical affinity: a parent's 3★ blue adds
-    // about 50 over the run, a grandparent's about 41 (2★: about 26 and 23).
+    // about 50 over the run, a grandparent's about the same at typical affinity (2★: about 29).
     const ROLL = 20;
     function bluePlan(r, left) {
       const after = left.slice(), picks = [];
@@ -888,7 +888,7 @@
       const pct = Math.round(root.UmaCmPlan.SS_SHARE * 100);
       return `<details class="panel"><summary><b>How this works</b></summary><ul class="mini">
         <li><b>Gaps:</b> CM &amp; decks' prediction (16 careers, before inheritance) against your targets, or the race build's where you left one blank.</li>
-        <li><b>Blue sparks:</b> each of the 6 family members gives +5/+12/+21 (1★/2★/3★) at the start, and each blue can fire at both inspirations (early April, Classic and Senior) at 70/80/90% × (1 + that uma's affinity/100) for +1–10/1–16/1–28. Grandparents fire half as often (an estimate; no exact factor is known).</li>
+        <li><b>Blue sparks:</b> each of the 6 family members gives +5/+12/+21 (1★/2★/3★) at the start, and each blue can fire at both inspirations (early April, Classic and Senior) at 70/80/90% × (1 + that uma's affinity/100) for +1–10/1–16/1–28. Grandparents use the same base chances: their own affinity is lower, which already makes them fire less (JP tests measured grandparent blues at about 90%/80% for 3★/2★ with no affinity).</li>
         <li><b>Pink:</b> the family's stars raise an aptitude at the start (1–3★ +1 grade, 4–6★ +2, 7–9★ +3, 10+ +4), never past A. A to S only happens when a pink fires at an inspiration (1/3/5% × affinity). Your rule: S distance; S surface for a sprint; style up to A.</li>
         <li><b>Whites:</b> the race's skills her deck doesn't already give. A parent you train turns a learned skill into a spark about 20% of the time (40% with its gold), +2.5% per copy her parents and grandparents carry; at SS, sparks come out 1★/2★/3★ 20/70/10%.</li>
         <li><b>Parent 1:</b> any of My umas, trained from your best veteran for her and a borrowed grandparent, ranked by what she gives the ace. Families under ${MIN_AFFINITY} affinity aren't suggested. Each G1 two family members both won adds +3.</li>

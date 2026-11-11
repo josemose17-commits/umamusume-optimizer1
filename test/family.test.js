@@ -136,14 +136,15 @@ test("family score: a spark for a skill the ace's deck offers (or she has) count
   assert.strictEqual(sure.white[0].L, L, "the listed L stays the skill's own");
 });
 
-test("blue over the whole run: the start bonus plus both inspirations, grandparents firing half as often", () => {
+test("blue over the whole run: the start bonus plus both inspirations, grandparents at the same base chance", () => {
   const p = F.once(F.BLUE, 3, 0);
   assert.strictEqual(p, 0.9);
   assert.ok(Math.abs(F.blueStats(3, 0) - (21 + 2 * 0.9 * 14.5)) < 1e-9, "3★: +21 at the start, then 90% for ~14.5 at each inspiration");
-  assert.ok(Math.abs(F.blueStats(3, 0, F.GRAND) - (21 + 2 * 0.45 * 14.5)) < 1e-9, "a grandparent's start bonus is full, her inspirations half as likely");
+  assert.strictEqual(F.GRAND, 1, "JP measurements: a grandparent's 3★ blue fires ~90% with no affinity, like a parent's");
+  assert.ok(Math.abs(F.blueStats(3, 0, F.GRAND) - (21 + 2 * 0.9 * 14.5)) < 1e-9);
   const m = (cid, blue) => ({ cid, white: [], blue, pink: [0, 0], green: 0, wins: [] });
   const s = fam.score({ p1: m(chars[0], [1, 3]), g11: m(chars[1], [1, 3]) }, Object.assign({}, base, { gaps: [0, 60, 0, 0, 0] }));
-  assert.ok(s.blueStats[1] > 80 && s.blueStats[1] < 90, "a parent's and a grandparent's 3★ Stamina: about 84 Stamina in expectation");
+  assert.ok(s.blueStats[1] > 95 && s.blueStats[1] < 105, "a parent's and a grandparent's 3★ Stamina: about 100 Stamina in expectation");
   assert.strictEqual(s.blueFill, 60, "but only her 60 short counts");
 });
 
