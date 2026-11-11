@@ -15,7 +15,16 @@
     const out = { cup: typeof b.cup === "string" ? b.cup.slice(0, 16) : "", style: STYLES.includes(b.style) ? b.style : "Senkou",
       tid: b.tid ? String(b.tid).replace(/\D/g, "").slice(0, 8) : "", stats: {}, apt: {}, mood: MOODS.includes(String(b.mood)) ? String(b.mood) : "0",
       uniqueLv: String(clampInt(b.uniqueLv, 1, 6, 1)), sp: b.sp === "" || b.sp == null ? "" : String(clampInt(b.sp, 0, 20000, 0)),
-      fast: !!b.fast, skills: [] };
+      fast: !!b.fast, skills: [], goal: b.goal === "win" ? "win" : "length",
+      strength: ["weaker", "equal", "stronger"].includes(b.strength) ? b.strength : "equal", mix: null, team: [] };
+    // Rivals by running style for the full-field check (null: the cup's default spread).
+    if (b.mix && typeof b.mix === "object") {
+      const mix = {}; let n = 0;
+      ["Nige", "Senkou", "Sasi", "Oikomi"].forEach((k) => { mix[k] = clampInt(b.mix[k], 0, 17, 0); n += mix[k]; });
+      if (n >= 1 && n <= 17) out.mix = mix;
+    }
+    // Teammates: saved builds' codes (at most two).
+    (Array.isArray(b.team) ? b.team : []).forEach((c) => { if (typeof c === "string" && c.length < 4000 && out.team.length < 2) out.team.push(c); });
     STATS.forEach((s) => { const v = b.stats && b.stats[s]; if (v !== "" && v != null && Number.isFinite(+v)) out.stats[s] = String(clampInt(v, 1, 3000, 1)); });
     ["distanceAptitude", "surfaceAptitude", "strategyAptitude"].forEach((k) => { const g = b.apt && b.apt[k]; if (g && GRADES.includes(g) && g.length === 1) out.apt[k] = g; });
     const seen = new Set();
@@ -43,7 +52,8 @@
   function encode(build) {
     const b = clean(build);
     return b64(JSON.stringify([1, b.cup, b.style, b.tid, STATS.map((s) => b.stats[s] || ""), [b.apt.distanceAptitude || "", b.apt.surfaceAptitude || "", b.apt.strategyAptitude || ""],
-      b.mood, b.uniqueLv, b.sp, b.fast ? 1 : 0, b.skills.map((x) => x.id + "." + x.hint + (x.have ? "h" : ""))]));
+      b.mood, b.uniqueLv, b.sp, b.fast ? 1 : 0, b.skills.map((x) => x.id + "." + x.hint + (x.have ? "h" : "")),
+      b.goal === "win" ? 1 : 0, b.strength, b.mix ? ["Nige", "Senkou", "Sasi", "Oikomi"].map((k) => b.mix[k]) : 0]));
   }
   function decode(code) {
     let a;
@@ -53,7 +63,8 @@
     STATS.forEach((s, i) => { if (a[4] && a[4][i]) stats[s] = a[4][i]; });
     ["distanceAptitude", "surfaceAptitude", "strategyAptitude"].forEach((k, i) => { if (a[5] && a[5][i]) apt[k] = a[5][i]; });
     const skills = (Array.isArray(a[10]) ? a[10] : []).map((t) => { const m = /^(\d+)\.([0-5])(h?)$/.exec(String(t)); return m ? { id: m[1], hint: +m[2], have: !!m[3] } : null; }).filter(Boolean);
-    return clean({ cup: a[1], style: a[2], tid: a[3], stats, apt, mood: a[6], uniqueLv: a[7], sp: a[8], fast: !!a[9], skills });
+    const mix = Array.isArray(a[13]) ? { Nige: a[13][0], Senkou: a[13][1], Sasi: a[13][2], Oikomi: a[13][3] } : null;
+    return clean({ cup: a[1], style: a[2], tid: a[3], stats, apt, mood: a[6], uniqueLv: a[7], sp: a[8], fast: !!a[9], skills, goal: a[11] ? "win" : "length", strength: a[12], mix });
   }
 
   // Skill names as typed or copied: case, spacing and punctuation don't matter; "O"/"OO" (or
