@@ -107,12 +107,15 @@ test('top-player rivals: real picks, own aptitudes and unique, only skills that 
   const picks = new Set(RP.distances.Long.umas.map((u) => u[0]));
   a.forEach((r) => {
     assert.ok(picks.has(r.uma), r.name);
-    const st = RP.distances.Long.stats;
+    const st = r.own ? RP.distances.Long.builds[r.uma].stats : RP.distances.Long.stats;
     Object.keys(st).forEach((k) => assert.ok(r.stats[k] >= st[k].p50 && r.stats[k] <= st[k].p95, k));
     r.skills.forEach((id) => assert.ok(F.canFire(F.conditionsOf(T[id]), p, r.style), `${r.name} (${r.style}) got ${id}`));
     const fams = r.skills.map((id) => (B.DATA.skills[id] || [id])[0]);
     assert.equal(new Set(fams).size, fams.length, 'one tier per family');
   });
+  assert.ok(a.some((r) => r.own), 'per-uma builds are used');
+  const gs = RP.distances.Long.builds['100701'];
+  assert.ok(gs && gs.styles[3] > 0.5 && gs.unique && gs.skills.length >= 30, "Gold Ship's own long build: mostly End Closer");
   assert.equal(F.canFire(['running_style==1&phase==1'], p, 'Senkou'), false);
   assert.equal(F.canFire(['running_style==1&phase==1@distance_type==4'], p, 'Senkou'), true);
   assert.equal(F.canFire(['track_id==10001'], p, 'Senkou'), true, 'Sapporo course 10105 is track 10001');
@@ -127,8 +130,16 @@ test('the field swap search finds a pair the shortlist missed, within the SP', a
     return { results: req.horses.map((h, i) => ({ finishOrder: i === 0 ? first : i <= first ? i - 1 : i })) };
   });
   const field = F.rivals(her, { mix: F.MIX.cm, strength: 'equal', skillsFor: () => [] });
-  const out = await F.search({ preset: p, kind: 'cm', her, learned: [], team: [], field, table: {}, settings: {}, run, sp: 300,
-    candidates: [[opt('X')], [opt('Z')]], options: [opt('Y'), opt('Z'), opt('W', 250)] });
+  const options = [opt('X'), opt('Y'), opt('Z'), opt('W', 250)];
+  const out = await F.search({ preset: p, kind: 'cm', her, learned: [], team: [], field, table: {}, settings: {}, run, sp: 300, exhaustive: 0,
+    candidates: [[opt('X')], [opt('Z')]], options });
+  assert.equal(out.method, 'search');
   assert.deepEqual(out.selected.map((x) => x.id).sort(), ['X', 'Y']);
   assert.ok(out.spent <= 300);
+  // A small shop races every full set instead.
+  const all = await F.search({ preset: p, kind: 'cm', her, learned: [], team: [], field, table: {}, settings: {}, run, sp: 300, candidates: [[opt('Z')]], options });
+  assert.equal(all.method, 'every full set');
+  assert.equal(all.fullSets, 2, '{X, Y, Z} and {W}');
+  assert.deepEqual(all.selected.map((x) => x.id).sort(), ['X', 'Y']);
+  assert.equal(F.fullSets(options, 300, 60).every((set) => set.reduce((n, x) => n + x.cost, 0) <= 300), true);
 });
