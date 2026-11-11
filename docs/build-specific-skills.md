@@ -40,6 +40,12 @@ budget. The UI search checks at most 64 distinct sets with 24 races each (seed 2
 Finalists, including the additive starting solution, are rechecked with 96 races and a separate
 seed (314159). Sample noise and the bounded search can miss a better set.
 
+The best finalist then plays the runner-up (the next finalist meeting the same must-haves) head to
+head: 240 paired races on a fresh seed (161803), best set against runner-up set directly. If the
+difference is within its 95% interval, the two are shown as a tie. If the runner-up wins clearly,
+they swap. The gain reported for the final set comes from another 96 races on a seed no step of
+the search used (577215).
+
 Individual next-skill rows compare the equipped baseline against that baseline plus one
 purchase. Purchase-list contributions compare the chosen complete set against itself with
 that purchase removed. Upgrades restore the previously equipped tier. These contributions

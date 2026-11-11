@@ -13,7 +13,7 @@ stamina; `trade.js`: stat-line head-to-heads), all on the pinned worker.
 | Check | Result |
 | --- | --- |
 | Mood | **Fixed.** Comparisons ran at Great mood. uma.guide recommends Normal for CM rounds and Great for finals. Normal is now the default; Good and Great can be picked. In `exp.js` (Pace Chaser, Nakayama 2000 [cm23], 40 gold skills, single skills only, 400 races) mood moved values by at most 0.02 L. That is one setup, not every build. |
-| Sample noise | Same setup, 24 vs. 400 races: mean error 0.01 L and the same top 10. This supports single-skill screening on that setup. It does not prove that close **set** comparisons are always settled. **(audit)** Results now show the paired SD and a 95% interval (± L) for the chosen set, so a close call is visible. |
+| Sample noise | **Changed:** the top two sets now play head-to-head (240 paired races, fresh seed: tie, win or swap), and the final gain is confirmed on races the search never used. Same setup, 24 vs. 400 races: mean error 0.01 L and the same top 10. This supports single-skill screening on that setup. It does not prove that close **set** comparisons are always settled. **(audit)** Results now show the paired SD and a 95% interval (± L) for the chosen set, so a close call is visible. |
 | Rushed, Wit checks, position keep | In the pinned worker (`kakari`, `withWisdomChecks`, `useDefaultPacer`). A virtual pacer and lead-fight approximation are not a full field. |
 | Opponent-dependent triggers | **(audit)** Upstream maps `blocked_front`, `change_order_onetime` and similar to sampled timing. A simulated activation is not evidence that a real opponent supplied the condition. The app labels these "Depends on race conditions". Treat their L as conditional. |
 | Front Runner "rival ahead" exclusion | **(audit)** This describes the assumed position (leading), not every race. **Changed:** a per-cup setting, *Fight for the lead* (15/30/50% of the race with someone ahead, an assumption), brings those skills back at that share. Also fixed: **Skills for this build**'s set search let them back in at full simulated value even for a leader. They are now dropped when she leads alone. |
@@ -88,7 +88,6 @@ scenario. It is not evidence for Global's Aquarius or Pisces decks. Prompt 2 ask
 
 - Tactical packages (opening skills that set off Angling and Scheming; corner speed that connects
   into Lightning Surge; Christmas Oguri's recovery chain) evaluated as packages.
-- An untouched confirmation batch for the final skill set, and more races for close finalists.
 - Stamina stress tests against debuffs once a debuff model exists.
 - Practice and room matches against fields of contrasting styles remain the real check.
 
