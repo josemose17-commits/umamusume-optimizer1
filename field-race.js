@@ -39,6 +39,49 @@
     });
     return out;
   }
+  const rng = (seed) => { let s = seed >>> 0; return () => { s = (s + 0x6d2b79f5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+  // Whether conditions (strings: & = and, @ = or) can hold on this course for this style. Only the
+  // fixed parts are checked: style, distance, surface, track and direction.
+  function canFire(conds, p, style) {
+    const fixed = { running_style: STYLES.indexOf(style) + 1, distance_type: { Sprint: 1, Mile: 2, Medium: 3, Long: 4 }[p.course.dist],
+      ground_type: p.course.surface === "Dirt" ? 2 : 1, track_id: 10000 + Math.floor((p.course.id - 10000) / 100), rotation: p.course.turn === "Left" ? 2 : 1 };
+    return [].concat(conds || []).join("@").split("@").some((alt) => alt.split("&").every((tok) => {
+      const m = /^(\w+)(==|!=)(\d+)$/.exec(tok.trim());
+      if (!m || !(m[1] in fixed) || !fixed[m[1]]) return true;
+      return m[2] === "==" ? fixed[m[1]] === +m[3] : fixed[m[1]] !== +m[3];
+    }));
+  }
+  const conditionsOf = (entry) => ((entry && entry.alternatives) || []).map((a) => a.condition || "");
+  // Rivals as top players run them (data/rival-pools.js, one distance): each a most-picked uma,
+  // drawn by pick rate, with her own aptitudes, unique and best running style; stats drawn from
+  // top-class percentiles (p50..p95 for "strong", p25..p75 for "typical"); skills each drawn at
+  // their real purchase rate, if they can fire for her style here (debuffs included).
+  // o: { preset, count, seed, level ("strong"|"typical"), trainee(id) -> { apt, us, n }, allowed(id), table, mood, uniqueLevel, familyOf }
+  function topRivals(pool, o) {
+    const rand = rng(o.seed || 1793), p = o.preset;
+    const di = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.course.dist], si = p.course.surface === "Dirt" ? 1 : 0;
+    const umas = pool.umas.map(([id, w]) => ({ id, w, t: o.trainee(id) })).filter((x) => x.t && x.t.apt);
+    const total = umas.reduce((a, x) => a + x.w, 0), rank = (g) => "GFEDCBAS".indexOf(g);
+    const [lo, hi] = o.level === "typical" ? ["p25", "p75"] : ["p50", "p95"];
+    const out = [];
+    for (let i = 0; i < o.count && umas.length; i++) {
+      let r = rand() * total, u = umas[umas.length - 1];
+      for (const x of umas) { r -= x.w; if (r <= 0) { u = x; break; } }
+      const k = [1, 0, 2, 3].reduce((b, j) => (rank(u.t.apt[6 + j]) > rank(u.t.apt[6 + b]) ? j : b), 1), style = STYLES[k];
+      const stats = {};
+      STATS.forEach((st) => { const q = pool.stats[st]; stats[st] = Math.round(q[lo] + rand() * (q[hi] - q[lo])); });
+      const picked = new Map(), familyOf = o.familyOf || ((id) => id);
+      pool.skills.forEach(([id, rate]) => {
+        if (/^1\d{5}$/.test(id) || !o.allowed(id) || !o.table[id] || !canFire(conditionsOf(o.table[id]), p, style) || rand() >= rate) return;
+        const f = familyOf(id), had = picked.get(f);
+        if (!had || +id < +had) picked.set(f, id); // a higher tier (lower ID) replaces the lower one
+      });
+      const uid = u.t.us && u.t.us[0] ? String(u.t.us[0]) : null;
+      out.push({ name: u.t.n, uma: u.id, style, stats, apt: [u.t.apt[di], u.t.apt[si], u.t.apt[6 + k]], mood: o.mood || 0,
+        unique: uid && o.table[uid] ? { id: uid, level: o.uniqueLevel || 4 } : null, skills: [...picked.values()] });
+    }
+    return out;
+  }
   // Gate draws: count deterministic permutations of n gates (she is runner 0 in every draw).
   function layouts(n, count, seed = 20261111) {
     let s = seed >>> 0;
@@ -86,8 +129,11 @@
   //   draws (gate draws, default 12), screen / check (races per draw), signal }.
   // Goal: CM, her win rate; LoH, her average place (lower is better).
   async function search(o) {
+    // Several rival fields (o.fields) take turns across the gate draws: real opponents change.
+    const fields = o.fields && o.fields.length ? o.fields : [o.field];
+    o = Object.assign({}, o, { field: fields[0] });
     const draws = layouts(1 + o.team.length + o.field.length, o.draws || 12);
-    const SCREEN = o.screen || 20, CHECK = o.check || 100;
+    const SCREEN = o.screen || (o.precise ? 40 : 20), CHECK = o.check || (o.precise ? 250 : 100);
     const loh = o.kind === "loh";
     let done = 0, total = 0;
     const cache = new Map(), unsupported = o.unsupported || new Set();
@@ -99,9 +145,9 @@
       // A bought tier replaces the lower one she has (one skill per family, as in the game).
       const fams = new Set(set.map((x) => x.family)), familyOf = o.familyOf || ((id) => id);
       const her = runner(Object.assign({}, o.her, { skills: o.learned.filter((id) => !fams.has(familyOf(id))).concat(set.map((x) => x.id)) }));
-      const all = [her].concat(o.team.map(runner), o.field.map(runner));
       const out = { win: [], place: [], top3: [], team: [] };
       for (let g = 0; g < draws.length; g++) {
+        const all = [her].concat(o.team.map(runner), fields[g % fields.length].map(runner));
         if (o.signal && o.signal.aborted) throw new Error("Comparison cancelled.");
         const seeds = Array.from({ length: n }, (_, i) => block * 1000000 + g * 10000 + i + 1);
         const results = await runSafe(o, all, draws[g], seeds, unsupported);
@@ -132,11 +178,37 @@
       cache.clear(); done = 0; // a skill was taken out mid-search: race every set again on the same field
     }
     async function body() {
-    total = draws.length * (uniq.length * SCREEN + CHECK * 4 + Math.round(CHECK / 2) * ((o.candidates[0] || []).length + 2));
+    total = draws.length * ((uniq.length + (o.options && o.options.length ? (o.moves == null ? 30 : o.moves) : 0)) * SCREEN + CHECK * 4 + Math.round(CHECK / 2) * ((o.candidates[0] || []).length + 2));
     // 1. Screen every candidate on the same races.
     const screened = [];
     for (const set of uniq) screened.push({ set, r: await races(set, 1, SCREEN) });
     screened.sort((a, b) => score(b.r) - score(a.r) || spent(a.set) - spent(b.set));
+    // 1b. Swap search in the field itself, so the answer doesn't rest on the lengths search's
+    // shortlist: from the best set, remove, add or exchange one purchase (o.options, most
+    // promising first) on the same races; move on the first improvement, up to o.moves sets.
+    if (o.options && o.options.length) {
+      const limit = o.moves == null ? 30 : o.moves, budget = o.sp == null ? Infinity : o.sp;
+      let center = screened[0], tried = 0, moved = true;
+      while (moved && tried < limit) {
+        moved = false;
+        const cands = center.set.map((x) => center.set.filter((y) => y !== x));
+        o.options.forEach((x) => {
+          if (center.set.some((y) => y.id === x.id)) return;
+          const rest = center.set.filter((y) => y.family !== x.family);
+          cands.push(rest.concat(x));
+          rest.forEach((old) => cands.push(rest.filter((y) => y !== old).concat(x)));
+        });
+        for (const c of cands) {
+          if (tried >= limit) break;
+          if (spent(c) > budget || screened.some((v) => keyOf(v.set) === keyOf(c))) continue;
+          tried++;
+          const v = { set: c, r: await races(c, 1, SCREEN) };
+          screened.push(v);
+          if (score(v.r) > score(center.r) + 1e-9) { center = v; moved = true; break; }
+        }
+      }
+      screened.sort((a, b) => score(b.r) - score(a.r) || spent(a.set) - spent(b.set));
+    }
     // 2. The top two on fresh races, head to head (paired). Win/lose is a noisy yes/no, and SP
     // left on a finished uma is worth nothing, so without a clear difference the set with the
     // better estimate stays (her average place breaks an exact tie), not the cheaper one.
@@ -180,11 +252,11 @@
     if (o.progress) o.progress(1);
     return { selected: set, spent: spent(set), result: report(fin), baseline: report(none), gain: paired(fin, none), duel, pruned,
       screened: screened.map((x) => ({ ids: x.set.map((s) => s.id), spent: spent(x.set), score: score(x.r), win: summary(x.r.win).mean, place: summary(x.r.place).mean })),
-      unsupported: [...unsupported].sort(), races: done, draws: draws.length, field: 1 + o.team.length + o.field.length, goal: loh ? "place" : o.team.length ? "team" : "win" };
+      unsupported: [...unsupported].sort(), races: done, draws: draws.length, screenRaces: draws.length * SCREEN, field: 1 + o.team.length + o.field.length, goal: loh ? "place" : o.team.length ? "team" : "win" };
     }
   }
 
-  const api = { STYLES, MIX, STRENGTH, course, runner, rivals, layouts, request, runSafe, summary, search };
+  const api = { STYLES, MIX, STRENGTH, course, runner, rivals, topRivals, canFire, conditionsOf, layouts, request, runSafe, summary, search };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFieldRace = api;
 })(typeof window !== "undefined" ? window : globalThis);

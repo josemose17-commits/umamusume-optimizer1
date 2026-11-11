@@ -95,3 +95,40 @@ test('vendored GlobalSim: license, notice, every cup course but Del Mar, and the
   // The validated setup (no experimental showdown): a heal never makes her run out more often.
   assert.ok(heal.empty <= none.empty + 0.1, `a heal ran her out of stamina: ${heal.empty} vs ${none.empty}`);
 });
+
+test('top-player rivals: real picks, own aptitudes and unique, only skills that can fire for their style', () => {
+  const RP = require('../data/rival-pools.js'), D = require('../data/gametora.js'), B = require('../skill-budget.js');
+  const T = JSON.parse(fs.readFileSync(path.join(ROOT, 'vendor/globalsim/skill-data.json'), 'utf8')).skills;
+  const p = P.list.find((x) => x.id === 'loh1'), trainees = (D.DATA || D).trainees;
+  assert.ok(RP.meta.classTrainers > 10000 && RP.distances.Long.umas.length >= 10 && RP.distances.Long.skills.length >= 30);
+  const make = (seed) => F.topRivals(RP.distances.Long, { preset: p, count: 11, seed, trainee: (id) => trainees.find((t) => String(t.id) === String(id)), allowed: () => true, table: T, familyOf: (id) => (B.DATA.skills[id] || [id])[0] });
+  const a = make(5), b = make(5), c = make(6);
+  assert.equal(a.length, 11); assert.deepEqual(a, b, 'reproducible'); assert.notDeepEqual(a, c, 'different seeds, different fields');
+  const picks = new Set(RP.distances.Long.umas.map((u) => u[0]));
+  a.forEach((r) => {
+    assert.ok(picks.has(r.uma), r.name);
+    const st = RP.distances.Long.stats;
+    Object.keys(st).forEach((k) => assert.ok(r.stats[k] >= st[k].p50 && r.stats[k] <= st[k].p95, k));
+    r.skills.forEach((id) => assert.ok(F.canFire(F.conditionsOf(T[id]), p, r.style), `${r.name} (${r.style}) got ${id}`));
+    const fams = r.skills.map((id) => (B.DATA.skills[id] || [id])[0]);
+    assert.equal(new Set(fams).size, fams.length, 'one tier per family');
+  });
+  assert.equal(F.canFire(['running_style==1&phase==1'], p, 'Senkou'), false);
+  assert.equal(F.canFire(['running_style==1&phase==1@distance_type==4'], p, 'Senkou'), true);
+  assert.equal(F.canFire(['track_id==10001'], p, 'Senkou'), true, 'Sapporo course 10105 is track 10001');
+});
+
+test('the field swap search finds a pair the shortlist missed, within the SP', async () => {
+  const p = P.list.find((x) => x.id === 'cm22');
+  // She wins only with both X and Y; neither is in the candidates.
+  const run = async (req, seeds) => seeds.map((s) => {
+    const has = (id) => req.horses[0].skills.includes(id), u = ((s * 2654435761) >>> 0) / 4294967296;
+    const first = has('X') && has('Y') ? (u < 0.7 ? 0 : 3) : (u < 0.2 ? 0 : 3);
+    return { results: req.horses.map((h, i) => ({ finishOrder: i === 0 ? first : i <= first ? i - 1 : i })) };
+  });
+  const field = F.rivals(her, { mix: F.MIX.cm, strength: 'equal', skillsFor: () => [] });
+  const out = await F.search({ preset: p, kind: 'cm', her, learned: [], team: [], field, table: {}, settings: {}, run, sp: 300,
+    candidates: [[opt('X')], [opt('Z')]], options: [opt('Y'), opt('Z'), opt('W', 250)] });
+  assert.deepEqual(out.selected.map((x) => x.id).sort(), ['X', 'Y']);
+  assert.ok(out.spent <= 300);
+});
