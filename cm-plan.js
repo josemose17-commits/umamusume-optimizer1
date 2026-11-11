@@ -23,7 +23,7 @@
   // A fresh parent's white sparks, until your veterans tell (MIN_VETS with their skills): a
   // spark for SPARK_P of the skills she learns, 1★/2★/3★ at STARS, and LEARN_MAX relevant skills
   // learned (else LEARN_SHARE of what your veterans learned, the median).
-  const SS_STARS = [0.2, 0.7, 0.1], LINEAGE_WHITE = 0.025;
+  const SS_STARS = [0.2, 0.7, 0.1], LINEAGE_WHITE = 0.025, LINEAGE_GOLD = 0.05;
   const SPARK_P = 0.3, STARS = [0.32, 0.6, 0.08], LEARN_MAX = 12, LEARN_SHARE = 0.75, MIN_VETS = 10, SPARK_RANGE = [0.15, 0.45];
   // Races and SS: your veterans in the scenario with BASE_EXTRA extra races or fewer (BASE_MIN
   // of them at least) give the ratings you reach; the simulation gives what each race costs.
@@ -155,7 +155,10 @@
         if (p <= 0) return;
         room -= p;
         const chance = Math.min(1, r.spark + LINEAGE_WHITE * ((copies && copies[a.f]) || 0));
-        const generated = learning ? Math.min(p,(learning.families[a.f].spark || 0)+p*LINEAGE_WHITE*((copies && copies[a.f]) || 0)) : p*chance;
+        // Each lineage copy adds 2.5 points to a learned white's spark chance and 5 to a learned
+        // gold's (umareference); row.gold is the share of careers that buy the gold.
+        const row = learning && learning.families[a.f], gold = row ? Math.min(p, row.gold || 0) : 0;
+        const generated = learning ? Math.min(p,(row.spark || 0)+((p-gold)*LINEAGE_WHITE+gold*LINEAGE_GOLD)*((copies && copies[a.f]) || 0)) : p*chance;
         value += generated * fire * eff[a.f] * (1 - cv(a.f));
         list.push({ id: fam.baseWhite(fams[a.f].ids[0]), learn: p, spark: generated, L: eff[a.f], copies: (copies && copies[a.f]) || 0, cover: cv(a.f), budgeted:!!learning });
       });
@@ -190,11 +193,12 @@
       const rest = x.skillPlan ? [] : rows.filter((r) => r.gamble).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
       return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L) });
     }
-    // Her blue spark's stat is random (1 in 5 each), its stars 20/70/10% (her stats at SS are 1100+):
-    // what it adds over the run where the ace is short (her gaps), else on the key stats.
-    function blueExpected(x, aff) {
-      const w = want(x), per = SS_STARS.reduce((n, d, k) => n + d * F.blueStats(k + 1, aff), 0);
-      return w.blue.reduce((n, b) => n + (w.gaps ? Math.min(per, b.gap) : per), 0) / 5 / F.STAT_PER_L;
+    // Her blue spark's stat is random (1 in 5 each); its stars depend on that stat's value in her
+    // predicted careers (learning.blueStars, per stat), else 20/70/10% as for a stat over 1100.
+    // What it adds over the run where the ace is short (her gaps), else on the key stats.
+    function blueExpected(x, aff, learning) {
+      const w = want(x), per = (i) => ((learning && learning.blueStars && learning.blueStars[i]) || SS_STARS).reduce((n, d, k) => n + d * F.blueStats(k + 1, aff), 0);
+      return w.blue.reduce((n, b) => n + (w.gaps ? Math.min(per(b.i), b.gap) : per(b.i)), 0) / 5 / F.STAT_PER_L;
     }
     // Her pink spark lands on one of her A-or-better aptitudes at random, 20/70/10% by stars: the
     // share that's one the ace needs, as the chance it fires and takes that aptitude a grade on.
@@ -233,7 +237,7 @@
     function freshExtra(x, t, s, offers, r, parents, learning) {
       if(learning && learning.ssShare < SS_SHARE) return {value:0,whites:{value:0,list:[],fire:0,blocked:true},blue:0,pink:0,unready:true};
       const aff = s.own.p1 || 0, w = freshWhites(x, offers, aff, r, lineageCopies(x, parents), familyCover(s), learning);
-      const blue = blueExpected(x, aff), pink = pinkExpected(x, t, aff, s);
+      const blue = blueExpected(x, aff, learning), pink = pinkExpected(x, t, aff, s);
       return { value: w.value + blue + pink, whites: w, blue, pink };
     }
     // Her G1 plan with these parents (veterans or a rental) (extra: more G1s after the shared ones).

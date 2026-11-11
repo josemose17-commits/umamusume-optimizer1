@@ -44,7 +44,7 @@ Individual next-skill rows compare the equipped baseline against that baseline p
 purchase. Purchase-list contributions compare the chosen complete set against itself with
 that purchase removed. Upgrades restore the previously equipped tier. These contributions
 need not add to total set gain. L/SP uses the additional purchase cost, not the full cost of
-a lower tier already learned. Mean, median, 10th percentile and range describe sampled gains.
+a lower tier already learned. Mean, median, 10th percentile and range describe sampled gains. The chosen set also reports the SD of its paired per-race differences and a 95% interval for its mean (normal approximation): sampling noise only, not the simplified field. Picking the best of many sets still favors lucky ones, so treat sets within that interval as ties. A full-spurt rate under 95% for the chosen set is flagged.
 Full-spurt frequency is taken from the candidate runner's Umalator validation runs.
 
 After career refinement, the final deck and its initial deck are eligible for this comparison.

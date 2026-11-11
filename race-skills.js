@@ -8,7 +8,10 @@
   function summary(xs) {
     const s = xs.slice().sort((a, b) => a - b), n = s.length;
     if (!n || s.some(x => !Number.isFinite(x))) throw new Error("The race simulator returned no valid comparisons.");
-    return { mean: average(s), median: (s[Math.floor((n - 1) / 2)] + s[Math.floor(n / 2)]) / 2, low: s[Math.floor((n - 1) * 0.1)], min: s[0], max: s[n - 1], samples: n };
+    const mean = average(s), sd = n > 1 ? Math.sqrt(s.reduce((t, x) => t + (x - mean) * (x - mean), 0) / (n - 1)) : 0;
+    // sd of the paired per-race differences; ci95: the half-width of the mean's 95% interval
+    // (normal approximation). It measures sampling noise only, not the simplified field.
+    return { mean, median: (s[Math.floor((n - 1) / 2)] + s[Math.floor(n / 2)]) / 2, low: s[Math.floor((n - 1) * 0.1)], min: s[0], max: s[n - 1], samples: n, sd, ci95: n > 1 ? 1.96 * sd / Math.sqrt(n) : 0 };
   }
   function supported(p, variant, catalog) {
     if (!catalog.courses[p.course.id]) return "This course is missing from the pinned race simulator.";

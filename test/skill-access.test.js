@@ -34,6 +34,10 @@ test('parent learning obeys actual SP and SS before spark value',()=>{
  const strong=A.project({trainee:t,stats:[1200,1200,1200,1200,1200],sp:1000,offers:{200331:1,200512:1},weights,minimum:R.SS,runs:4});
  assert.equal(strong.ssShare,1);assert.ok(strong.plans.every(p=>p.spent<=1000 && p.rating>=R.SS));
  const w=strong.families[B.DATA.skills[200332][0]];assert.ok(w.learn>0);assert.ok(w.spark<=w.learn*0.4+1e-9);
+ // Blue stars follow each stat's own value, not her overall rank.
+ assert.deepEqual(strong.blueStars[0],[0.2,0.7,0.1].map(x=>x),'1200 speed: over 1100');
+ const mixed=A.project({trainee:t,finals:[{stats:[1200,500,800,300,1150],sp:1000}],sp:1000,offers:{},weights,minimum:R.SS});
+ assert.deepEqual(mixed.blueStars,[[0.2,0.7,0.1],[0.9,0.1,0],[0.5,0.45,0.05],[0.9,0.1,0],[0.2,0.7,0.1]]);
 });
 test('purchase-driven parent targets use canonical white families and retain race metadata',()=>{
  const rel=A.parentRel({targets:{200512:3},why:{200512:'L'},L:{900011:2}}, {parentValues:{200331:0.8,900011:10}});
