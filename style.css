@@ -775,3 +775,15 @@ table.pred .over { color: var(--accent); }
   .cmp-races th:last-child { width: 26%; }
   .cmp-races td { overflow-wrap: anywhere; padding: 6px 4px; }
 }
+
+/* Skill optimizer */
+.skillopt .panel + .panel { margin-top: 12px; }
+.so-shop td, .so-shop th { vertical-align: middle; }
+.so-shop select { min-width: 4.2em; }
+.so-shop tr.so-buy > th { box-shadow: inset 4px 0 0 var(--accent); }
+.so-shop tr.so-buy > th::after { content: " · buy"; color: var(--accent); font-weight: 600; font-size: .8rem; }
+.so-saved { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 4px; }
+#soPaste { width: 100%; box-sizing: border-box; font: inherit; margin: 6px 0; }
+.skillopt, .skillopt .panel, .skillopt .field { min-width: 0; }
+.skillopt select, .skillopt input:not([type="checkbox"]) { max-width: 100%; min-width: 0; }
+.skillopt .field.grow { flex: 1 1 14rem; }

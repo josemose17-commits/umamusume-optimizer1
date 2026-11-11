@@ -1,7 +1,8 @@
 # Build-specific skill comparisons
 
-The racing deck's **Skills for this build** uses alpha123's pinned Global Umalator worker,
-loaded locally in a Web Worker. The app still has no build step or external runtime API.
+The racing deck's **Skills for this build** and the **Skill optimizer** tab use alpha123's pinned Global Umalator worker,
+loaded locally in a Web Worker. JP-dated cups (CM 22 on, League of Heroes) use the pinned JP worker with that cup's
+skill versions and stamina showdown rules (`race-variants.js`, `data/race-variants/`). The app still has no build step or external runtime API.
 Source revision, worker hash and GPL v3 license are in `vendor/umalator/`.
 
 ## Inputs and purchases
@@ -29,7 +30,7 @@ so aliases do not create independent extra chances.
 
 `skill-budget.js` supplies legal purchase options: prerequisite chains, actual hint discounts,
 one final tier per skill family and only incremental upgrade costs for learned lower tiers.
-Fast Learner and scenario-specific price discounts are not modeled. No guessed costs are substituted. Missing race/purchase data and unsupported skill conditions are listed. Skills with zero
+Fast Learner is priced in the Skill optimizer tab (10% of the base cost, added to the hint discount); this deck flow doesn't ask for it. Scenario-specific price discounts are not modeled. No guessed costs are substituted. Missing race/purchase data and unsupported skill conditions are listed. Skills with zero
 standalone chart value may still be tested as part of a pair.
 
 ## Search and interpretation

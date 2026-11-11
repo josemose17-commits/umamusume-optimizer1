@@ -303,6 +303,7 @@
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
         <button type="button" role="tab" data-tab="all">All scenarios</button>
         <button type="button" role="tab" data-tab="cm" id="tabCM">CM &amp; decks</button>
+        <button type="button" role="tab" data-tab="skillopt" id="tabSkillOpt">Skill optimizer</button>
         <button type="button" role="tab" data-tab="parents" id="tabParents">Parents</button>
         <button type="button" role="tab" data-tab="tiers" id="tabTiers">Tier list</button>
         <button type="button" role="tab" data-tab="pulls" id="tabPulls">Pull planner</button>
@@ -581,6 +582,7 @@
       $("#deckPanel").hidden = true;
       $("#tabCards").hidden = true;
       $("#tabCM").hidden = true;
+      $("#tabSkillOpt").hidden = true;
       $("#tabTiers").hidden = true;
       $("#tabTrainees").hidden = true;
     }
@@ -746,6 +748,7 @@
       if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
       if (state.tab === "cm" && cmLogClick(e.target)) return;
+      if (state.tab === "skillopt" && soClick(e)) return;
       if (deckTab() && cmPlan() && cmPlan().click(e)) return;
       const nav = e.target.closest("[data-goto-tab]");
       if (nav) {
@@ -817,6 +820,7 @@
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
+    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "skillopt") soChange(e); });
     $("#tabBody").addEventListener("change", (e) => { if (deckTab() && cmPlan()) cmPlan().change(e); });
     $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "parents" && parents()) parents().onToggle(e); }, true);
     $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null || e.target.dataset.cmTarget != null) setTimeout(renderTab, 0); });
@@ -2284,7 +2288,7 @@
     svCache[id] = "loading";
     fetch("data/skillvalues/" + id + ".json?v=" + ASSET_V)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { svCache[id] = j; renderCM(); if (state.tab === "tiers") renderTiers(); })
+      .then((j) => { svCache[id] = j; renderCM(); if (state.tab === "tiers") renderTiers(); if (state.tab === "skillopt") renderTab(); })
       .catch(() => { svCache[id] = "error"; renderCM(); });
   }
 
@@ -3751,11 +3755,11 @@
     renderCM();
     let worker;
     try {
-      const RS = window.UmaRaceSkills, catalog = await RS.load();
-      const unsupported = RS.supported(p, simVariant(p), catalog);
+      const RS = window.UmaRaceSkills, eng = RS.engine(p, SV.meta.sims), catalog = await RS.load(eng.catalog);
+      const unsupported = RS.supported(p, Object.assign({}, simVariant(p), { inBrowser: !!eng.sim }), catalog);
       await ensureSkills([p.id]);
       if(!same())return;initialKey=optKey(host);initialSourceKey=skillPlanKey(c);
-      worker = unsupported ? null : RS.runner(); j.raceWorker = worker;
+      worker = unsupported ? null : RS.runner(eng.sim); j.raceWorker = worker;
       const t = D.trainee(deckTrainee(host)), idx = { Sprint:2,Mile:3,Medium:4,Long:5 }[p.course.dist], si = STYLES.findIndex(x=>x[0]===c.style);
       const apt = [q.apt.distanceAptitude || t.apt[idx],q.apt.surfaceAptitude || t.apt[p.course.surface==="Dirt"?1:0],q.apt.strategyAptitude || t.apt[6+si]];
       const ownUnique=(t.us||[]).map(String);
@@ -4205,6 +4209,244 @@
     return false;
   }
 
+  // ---- Skill optimizer: a finished uma's skill shop for one CM or League of Heroes cup ----
+  // Inputs (skill-opt.js clean/encode), a live course-chart plan, and the paired race check
+  // (race-skills.js optimize) on the cup's own simulator (Global's, or its JP-dated one).
+  const SO = window.UmaSkillOpt;
+  const soJob = { running: false, progress: 0, error: null, result: null, key: null, worker: null, token: null };
+  const soNames = {};
+  function soBuild() {
+    if (!state.skillOpt || typeof state.skillOpt !== "object") state.skillOpt = {};
+    const b = Object.assign(SO.clean(state.skillOpt), { pasteOpen: !!state.skillOpt.pasteOpen });
+    if (!presetById(b.cup)) b.cup = defaultPreset().id;
+    state.skillOpt = b;
+    return b;
+  }
+  const soTrainee = (b) => (b.tid ? D.trainee(+b.tid) : null);
+  // The cup's skill names, out on Global by then (datalist and pasted lists).
+  function soCupNames(p) {
+    if (!soNames[p.id]) soNames[p.id] = Object.keys(SV.skills).filter((id) => released(id, p)).map((id) => [id, skillInfo(id)[0]]).sort((a, b) => a[1].localeCompare(b[1]));
+    return soNames[p.id];
+  }
+  // Her grades for this cup: entered, else the trainee's, else A.
+  function soApt(b, p) {
+    const t = soTrainee(b), si = STYLES.findIndex((x) => x[0] === b.style), di = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.course.dist];
+    return [b.apt.distanceAptitude || (t ? t.apt[di] : "A"), b.apt.surfaceAptitude || (t ? t.apt[p.course.surface === "Dirt" ? 1 : 0] : "A"), b.apt.strategyAptitude || (t ? t.apt[6 + si] : "A")];
+  }
+  function soAdd(b, id, hint, have) {
+    const ids = SO.withLower(id, window.UmaSkillBudget.create());
+    ids.forEach((x, i) => {
+      const row = b.skills.find((r) => r.id === x), last = i === ids.length - 1;
+      if (!row) b.skills.push({ id: x, hint: last ? hint || 0 : 0, have: !!have && last });
+      else if (last) { if (hint != null) row.hint = hint; if (have) row.have = true; }
+    });
+  }
+  function soCupOptions(cur) {
+    const P2 = P.list, groups = [["Now and next on Global", P2.filter((x) => x.kind === "cm" && x.global.end >= TODAY && !x.global.est)], ["Later Champions Meetings (Global dates estimated)", P2.filter((x) => x.kind === "cm" && x.global.est)], ["League of Heroes", P2.filter((x) => x.kind === "loh")], ["Past Global Champions Meetings", P2.filter((x) => x.kind === "cm" && x.global.end < TODAY).reverse()]];
+    return groups.filter((g) => g[1].length).map(([label, list]) => `<optgroup label="${esc(label)}">${list.map((x) => `<option value="${x.id}"${x.id === cur ? " selected" : ""}>${esc(presetLabel(x))}</option>`).join("")}</optgroup>`).join("");
+  }
+  // Which simulator the race check uses for this cup, in a few words.
+  function soEngineNote(p) {
+    const RS = window.UmaRaceSkills, eng = RS.engine(p, SV.meta.sims), v = simVariant(p);
+    if (!eng.sim) return "Race check: Global's Umalator, skills as Global has them now (no stamina showdown, as on Global).";
+    const showdown = v.syoubu ? (p.course.distance >= 2101 ? `stamina showdown on${v.syoubuLong ? " at JP's long-race strength (Oct 2024)" : ""}: stamina above 1200 speeds up her last spurt` : "stamina showdown on, but it only acts from 2101 m, so not on this course") : "no stamina showdown (JP added it after this cup's JP date)";
+    return `Race check: the JP Umalator as JP's game was on this cup's JP date (${fmtDate(p.jp.start)}): skills at their versions then, ${showdown}.`;
+  }
+  const soNum = (x) => (Number.isFinite(x) ? x.toFixed(2) : "–");
+  function soResultHTML(b, p) {
+    if (soJob.running) return `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`;
+    if (soJob.error) return `<p class="mini warn">${esc(soJob.error)}</p>`;
+    const r = soJob.result;
+    if (!r) return `<p class="mini">Press <b>Race-check</b> to race the best sets head to head on this course (about a minute). The quick plan above adds up chart gains; the race check also catches skills that need each other, overlap, or need stamina she doesn't have.</p>`;
+    const stale = soJob.key !== SO.encode(b);
+    const rows = (list, mode) => list.map((x) => `<tr><th>${skillNameHTML(x.id)}${positionNote(p.id, x.id, b.style) ? `<div class="mini">${esc(positionNote(p.id, x.id, b.style))}</div>` : ""}</th><td>${x.cost}${mode === "rank" && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${soNum((mode === "rank" ? x.result : x.marginal).mean)}</td><td>${soNum(x.per100)}</td></tr>`).join("");
+    const plan = r.plan, spurt = plan.result.fullSpurt;
+    return `${stale ? `<p class="mini warn">Inputs changed since this check. <button type="button" class="linkish" data-so="race">Race-check again</button></p>` : ""}
+      ${r.staticReason ? `<p class="mini warn">Course-chart only: ${esc(r.staticReason)}</p>` : ""}
+      <p><b>Buy:</b> ${plan.selected.length ? plan.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing: no purchase gains length"}. ${plan.spent} / ${plan.budget} SP, ${plan.unspent} left. <b>+${soNum(plan.result.mean)} L</b> on average${plan.result.ci95 ? ` (± ${soNum(plan.result.ci95)})` : ""} over what she has; worst 10% of races ${soNum(plan.result.low)} L.</p>
+      ${duelHTML(plan)}
+      ${!r.staticReason && Number.isFinite(spurt) && spurt < 0.95 ? `<p class="mini warn">With these skills she reaches a full last spurt in only ${Math.round(spurt * 100)}% of races: more stamina or a recovery skill would help.</p>` : ""}
+      <div class="table-wrap"><table><thead><tr><th>Buy</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows(plan.selected, "buy") || '<tr><td colspan="4">No purchase.</td></tr>'}</tbody></table></div>
+      <p class="mini">Added L: what she loses if that one skill is left out of the set, so rows don't add up to the total.</p>
+      <details><summary>Every shop skill on its own</summary><p class="mini">Each one added alone to what she has, best L per 100 SP first.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>SP</th><th>L alone</th><th>L / 100 SP</th></tr></thead><tbody>${rows(plan.ranking, "rank")}</tbody></table></div></details>
+      ${(plan.offPosition || []).length ? `<p class="mini">Left out (they need a rival ahead and a Front Runner leads alone): ${plan.offPosition.map((id) => skillNameHTML(id)).join(", ")}.</p>` : ""}
+      ${plan.excluded.length ? `<p class="mini warn">The simulator can't run these, so they were left out: ${plan.excluded.map((id) => skillNameHTML(id)).join(", ")}.</p>` : ""}
+      <details><summary>How the race check works</summary><p class="mini">${r.staticReason ? "Chart gains and real SP costs only." : `${plan.evaluations} skill sets raced, 24 paired races each; the best few again on 96 fresh races; then the top two head to head on 240 races, and the winner's gain on 96 races no step used. ${r.field} runners, wit checks and position keeping on. Full spurt in ${Math.round((spurt || 0) * 100)}% of races.`} ${esc(r.engineNote)} The simulator runs her against copies of herself, not real rivals: blocking, debuffs and rival skills aren't modeled, so treat sets within the ± range as ties. Prices use hint discounts${b.fast ? " and Fast Learner" : ""}; a gold skill needs its white bought first (or owned), and that is counted.</p></details>`;
+  }
+  function renderSkillOpt(body) {
+    const b = soBuild(), p = presetById(b.cup), t = soTrainee(b);
+    loadSkillValues(p.id);
+    const loaded = typeof svCache[p.id] === "object";
+    const values = loaded ? skillMap(p.id, b.style).map : {};
+    const names = soCupNames(p), apt = soApt(b, p);
+    let quick = null;
+    try { if (loaded && b.sp !== "") quick = SO.quickPlan({ skills: b.skills, values, sp: +b.sp, fast: b.fast }); } catch (e) { quick = null; }
+    const buy = new Set(quick ? quick.selected.flatMap((x) => x.tiers.map((y) => y.id)) : []);
+    const statRow = SO.STATS.map((s, i) => `<label class="field"><span>${E.STAT_LABELS[E.STATS[i]]}</span><input type="number" min="1" max="3000" inputmode="numeric" data-so-stat="${s}" value="${esc(b.stats[s] || "")}" placeholder="Final"></label>`).join("");
+    const aptSel = [["distanceAptitude", p.course.dist], ["surfaceAptitude", p.course.surface], ["strategyAptitude", STYLE_LABEL[b.style]]].map(([k, label], i) => `<label class="field"><span>${esc(label)} aptitude</span><select data-so-apt="${k}"><option value="">${t ? "Hers" : "A"} (${apt[i]})</option>${"SABCDEFG".split("").map((g) => `<option${b.apt[k] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("");
+    const shopRows = b.skills.map((x, i) => {
+      const L = values[x.id], own = SO.price(x.id, x.hint, b.fast), chain = window.UmaSkillBudget.create().chain(x.id) || [x.id];
+      const lower = chain.slice(0, -1).filter((id) => !b.skills.some((r) => r.id === id && r.have));
+      const note = positionNote(p.id, x.id, b.style);
+      return `<tr class="${buy.has(x.id) && !x.have ? "so-buy" : ""}"><th>${skillNameHTML(x.id)}${releasePill(SV.skills[x.id], p, window.UmaSkillRelease.cutoff(p, TODAY))}${note ? `<div class="mini">${esc(note)}</div>` : ""}${lower.length && !x.have ? `<div class="mini">needs ${lower.map((id) => esc(skillInfo(id)[0])).join(" + ")}</div>` : ""}</th>
+        <td><select data-so-hint="${i}" aria-label="Hint level">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}"${x.hint === n ? " selected" : ""}>${n ? "Lv" + n : "–"}</option>`).join("")}</select></td>
+        <td class="num">${x.have ? "–" : own == null ? "?" : own}</td><td class="num">${loaded ? (Number.isFinite(L) ? soNum(L) : '<span class="mini">no value</span>') : "…"}</td>
+        <td><label class="chip-toggle"><input type="checkbox" data-so-have="${i}"${x.have ? " checked" : ""}> Has it</label></td>
+        <td><button type="button" class="linkish" data-so-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></td></tr>`;
+    }).join("");
+    const quickHTML = !loaded ? `<p class="mini">Loading this cup's skill values…</p>` : b.sp === "" ? `<p class="mini">Enter her SP to see what to buy.</p>` : !b.skills.length ? `<p class="mini">Add the skills her shop offers.</p>` : quick ? `<p><b>Quick plan:</b> ${quick.selected.length ? quick.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing affordable gains length"}. ${quick.spent} / ${quick.budget} SP, ${quick.unspent} left. About <b>+${soNum(quick.L)} L</b> by the course chart.</p><p class="mini">Highlighted in the list. Chart gains added up for her running style, with hint${b.fast ? " and Fast Learner" : ""} discounts and gold prerequisites counted. Race-check it below: skills that overlap or need stamina change the answer.</p>` : `<p class="mini warn">Couldn't price this list.</p>`;
+    const saved = state.soSaved || [];
+    body.innerHTML = `<div class="skillopt">
+      <section class="panel"><h2>Skill optimizer</h2>
+        <p class="mini">What to buy with her skill points for a Champions Meeting or League of Heroes race: the skills that gain the most lengths on that course for her style, within her SP. Like UmaTools' optimizer, but scored by race lengths instead of rating.</p>
+        <div class="row-wrap"><label class="field grow"><span>Cup</span><select data-so-field="cup">${soCupOptions(b.cup)}</select></label>
+          <label class="field"><span>Running style</span><select data-so-field="style">${STYLES.map(([k, l]) => `<option value="${k}"${b.style === k ? " selected" : ""}>${l}</option>`).join("")}</select></label></div>
+        <p class="mini">${esc(p.course.track)} ${p.course.distance} m ${esc(p.course.surface)} · ${p.kind === "loh" ? "12" : "9"} runners. ${esc(soEngineNote(p))}</p>
+        <div class="row-wrap"><label class="field grow"><span>Trainee (optional: her aptitudes and unique)</span><input data-so-trainee="1" list="traineeList" value="${t ? esc(traineeLabel(t)) : ""}" placeholder="Type a trainee name" autocomplete="off"></label>
+          ${t ? `<button type="button" class="btn ghost small" data-so="innate">Add her innate skills</button>` : ""}
+          <button type="button" class="btn ghost small" data-so="fromcm">Use my CM &amp; decks ace</button></div>
+        <div class="tg-row">${statRow}</div>
+        <div class="row-wrap">${aptSel}</div>
+        <div class="row-wrap"><label class="field"><span>Skill points</span><input type="number" min="0" max="20000" inputmode="numeric" data-so-field="sp" value="${esc(b.sp)}" placeholder="SP"></label>
+          <label class="chip-toggle"><input type="checkbox" data-so-field="fast"${b.fast ? " checked" : ""}> Fast Learner (−10%)</label>
+          <label class="field"><span>Mood</span><select data-so-field="mood">${[["0", "Normal (CM rounds)"], ["1", "Good"], ["2", "Great (finals)"], ["-1", "Bad"], ["-2", "Awful"]].map(([v, l]) => `<option value="${v}"${b.mood === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+          <label class="field"><span>Unique level</span><select data-so-field="uniqueLv">${[1, 2, 3, 4, 5, 6].map((n) => `<option${+b.uniqueLv === n ? " selected" : ""}>${n}</option>`).join("")}</select></label></div>
+      </section>
+      <section class="panel"><h3>Her skill shop</h3>
+        <div class="row-wrap"><label class="field grow"><span>Add a skill</span><input id="soSkill" list="soSkillList" autocomplete="off" placeholder="Skill name, then Enter"></label><button type="button" class="btn ghost small" data-so="add">Add</button></div>
+        <datalist id="soSkillList">${names.map(([, n]) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
+        <details${b.pasteOpen ? " open" : ""} data-so-paste-box="1"><summary>Paste a list</summary><p class="mini">One skill per line. Add <b>Lv3</b> (or hint 3) for a hint level; a price at the end is ignored. "O" and "OO" at the end mean ○ and ◎.</p><textarea id="soPaste" rows="5" placeholder="Professor of Curvature Lv2&#10;Corner Adept O Lv3&#10;Swinging Maestro"></textarea><button type="button" class="btn ghost small" data-so="paste">Add these</button></details>
+        ${b.skills.length ? `<div class="table-wrap"><table class="so-shop"><thead><tr><th>Skill</th><th>Hint</th><th>SP</th><th>L (chart)</th><th></th><th></th></tr></thead><tbody>${shopRows}</tbody></table></div><button type="button" class="linkish" data-so="clear">Clear the list</button>` : ""}
+        <p class="mini">L: median lengths gained on this course for her style (Umalator chart, no other skills). Tick <b>Has it</b> for skills she already learned: they're the baseline and cost nothing. SP shown for one tier at its hint level.</p>
+        ${quickHTML}
+      </section>
+      <section class="panel"><h3>Race check</h3>
+        <button type="button" class="btn" data-so="race">${soJob.running ? "Restart race check" : "Race-check"}</button>
+        <div id="soOut">${soResultHTML(b, p)}</div>
+      </section>
+      <section class="panel"><h3>Save and share</h3>
+        <div class="row-wrap"><button type="button" class="btn ghost small" data-so="share">Copy share link</button><label class="field grow"><span>Save as</span><input id="soName" placeholder="${esc((t ? t.n : "Build") + " · " + p.name)}"></label><button type="button" class="btn ghost small" data-so="save">Save</button></div>
+        ${saved.length ? `<ul class="so-saved">${saved.map((s, i) => `<li><button type="button" class="linkish" data-so-load="${i}">${esc(s.name)}</button> <span class="mini">${esc(s.at || "")}</span> <button type="button" class="linkish" data-so-del="${i}" aria-label="Delete ${esc(s.name)}">✕</button></li>`).join("")}</ul>` : `<p class="mini">Saved builds stay in this browser. A share link carries the whole build.</p>`}
+      </section></div>`;
+  }
+  function soChanged() { save(); renderTab(); }
+  async function runSkillOpt() {
+    const b = soBuild(), p = presetById(b.cup), t = soTrainee(b);
+    if (soJob.worker) soJob.worker.close();
+    const token = {}; Object.assign(soJob, { token, running: true, error: null, progress: 0, key: SO.encode(b) });
+    const same = () => soJob.token === token;
+    renderTab();
+    let worker = null;
+    try {
+      if (SO.STATS.some((s) => !(+b.stats[s] > 0))) throw new Error("Enter all five final stats.");
+      if (b.sp === "") throw new Error("Enter her skill points.");
+      if (!b.skills.some((x) => !x.have)) throw new Error("Add the skills her shop offers.");
+      const RS = window.UmaRaceSkills, eng = RS.engine(p, SV.meta.sims), catalog = await RS.load(eng.catalog);
+      const unsupported = RS.supported(p, Object.assign({}, simVariant(p), { inBrowser: !!eng.sim }), catalog);
+      await ensureSkills([p.id]);
+      if (!same()) return;
+      worker = unsupported ? null : RS.runner(eng.sim); soJob.worker = worker;
+      const apt = soApt(b, p), own = t ? (t.us || []).map(String).filter((id) => catalog.skills[id]) : [];
+      const learned = [...new Set(own.concat(b.skills.filter((x) => x.have).map((x) => x.id)))];
+      const available = b.skills.filter((x) => !x.have).map((x) => x.id), hints = Object.fromEntries(b.skills.map((x) => [x.id, x.hint]));
+      const values = skillMap(p.id, b.style).map;
+      const input = { outfitId: t ? String(t.id) : "", starCount: t ? t.r : 3, uniqueLv: +b.uniqueLv, mood: +b.mood, strategy: b.style,
+        speed: +b.stats.speed, stamina: +b.stats.stamina, power: +b.stats.power, guts: +b.stats.guts, wisdom: +b.stats.wisdom,
+        distanceAptitude: apt[0], surfaceAptitude: apt[1], strategyAptitude: apt[2], aptitudes: t ? t.apt.slice(2, 6).concat(t.apt.slice(0, 2), t.apt.slice(6, 10)) : Array(10).fill("A") };
+      const compare = async (before, after, n, seed) => {
+        if (!same()) throw new Error("Comparison cancelled.");
+        if (unsupported) {
+          const value = (skills) => { const by = {}; skills.forEach((id) => { const f = window.UmaSkillBudget.DATA.skills[id] && window.UmaSkillBudget.DATA.skills[id][0] || id; by[f] = Math.max(by[f] || 0, values[id] || 0); }); return Object.values(by).reduce((a, c) => a + c, 0); };
+          return RS.summary([value(after) - value(before)]);
+        }
+        const key = JSON.stringify([p.id, eng.sim, input, before, after, n, seed]);
+        if (!raceMemo.has(key)) { const answer = await worker.run(RS.request(p, input, before, after, catalog, n, seed)); raceMemo.set(key, Object.assign(RS.summary(answer.results.results), { fullSpurt: answer.results.runData.nspurt[1] / n })); if (raceMemo.size > 2500) raceMemo.delete(raceMemo.keys().next().value); }
+        return raceMemo.get(key);
+      };
+      const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available, learned, hints, sp: +b.sp, values, must: [], compare, scale: raceScale(p, b.style, available), maxEvaluations: 64, fastLearner: b.fast,
+        progress: (f) => { if (!same()) return; soJob.progress = f * 100; const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
+      if (same()) soJob.result = { plan, staticReason: unsupported, engineNote: soEngineNote(p), field: p.kind === "loh" ? 12 : 9 };
+    } catch (error) { if (same() && !/cancelled/i.test(error.message || "")) soJob.error = error.message || String(error); }
+    finally { if (worker) worker.close(); if (same()) { soJob.running = false; soJob.worker = null; if (state.tab === "skillopt") renderTab(); } }
+  }
+  function soClick(e) {
+    const el = e.target.closest("[data-so],[data-so-remove],[data-so-load],[data-so-del]");
+    if (!el) return false;
+    const b = soBuild(), p = presetById(b.cup), act = el.dataset.so;
+    if (el.dataset.soRemove != null) { b.skills.splice(+el.dataset.soRemove, 1); soChanged(); return true; }
+    if (el.dataset.soLoad != null) { const s = (state.soSaved || [])[+el.dataset.soLoad], v = s && SO.decode(s.code); if (v) { state.skillOpt = v; soJob.result = null; soChanged(); flash("Loaded " + s.name); } return true; }
+    if (el.dataset.soDel != null) { (state.soSaved || []).splice(+el.dataset.soDel, 1); soChanged(); return true; }
+    if (act === "add") {
+      const box = document.getElementById("soSkill"), text = box.value.trim().toLowerCase();
+      const hit = soCupNames(p).find(([, n]) => n.toLowerCase() === text) || (SO.parsePaste(text, soCupNames(p)).found[0] || null);
+      const id = hit ? (Array.isArray(hit) ? hit[0] : hit.id) : null;
+      if (!id) { flash("Pick a skill from the list (out on Global by this cup)."); return true; }
+      soAdd(b, id, Array.isArray(hit) ? 0 : hit.hint); soChanged();
+      const again = document.getElementById("soSkill"); if (again) again.focus();
+      return true;
+    }
+    if (act === "paste") {
+      const r = SO.parsePaste((document.getElementById("soPaste") || {}).value || "", soCupNames(p));
+      r.found.forEach((x) => soAdd(b, x.id, x.hint));
+      b.pasteOpen = !!r.missed.length; soChanged();
+      flash(`Added ${r.found.length} skill${r.found.length === 1 ? "" : "s"}${r.missed.length ? `; not found: ${r.missed.slice(0, 4).join(", ")}${r.missed.length > 4 ? "…" : ""}` : ""}`);
+      return true;
+    }
+    if (act === "innate") { const t = soTrainee(b); if (t) { (t.is || []).concat(t.as || []).map(String).filter((id) => SV.skills[id]).forEach((id) => soAdd(b, id, 0)); soChanged(); } return true; }
+    if (act === "fromcm") {
+      const c = cm("cm"), ace = W.current(state).ace, q = raceState(c);
+      b.cup = c.preset; b.style = c.style;
+      if (ace && ace.tid) b.tid = String(ace.tid);
+      SO.STATS.forEach((s) => { if (q.stats[s]) b.stats[s] = q.stats[s]; });
+      ["distanceAptitude", "surfaceAptitude", "strategyAptitude"].forEach((k) => { if (q.apt[k]) b.apt[k] = q.apt[k]; });
+      if (q.sp !== "" && q.sp != null) b.sp = q.sp;
+      if (q.mood != null) b.mood = String(q.mood); if (q.uniqueLv) b.uniqueLv = String(q.uniqueLv);
+      (q.skills || []).forEach((x) => soAdd(b, String(x.id), +x.hint || 0, !!x.learned));
+      state.skillOpt = SO.clean(b); soChanged(); flash("Copied from CM & decks"); return true;
+    }
+    if (act === "clear") { b.skills = []; soChanged(); return true; }
+    if (act === "race") { runSkillOpt(); return true; }
+    if (act === "stop") { if (soJob.worker) soJob.worker.close(); soJob.token = null; soJob.running = false; soJob.worker = null; renderTab(); return true; }
+    if (act === "share") {
+      const url = location.origin + location.pathname + "#so=" + SO.encode(b);
+      try { navigator.clipboard.writeText(url).then(() => flash("Share link copied"), () => prompt("Copy this link", url)); } catch (err) { prompt("Copy this link", url); }
+      return true;
+    }
+    if (act === "save") {
+      const t = soTrainee(b), name = ((document.getElementById("soName") || {}).value || "").trim() || (t ? t.n : "Build") + " · " + p.name;
+      state.soSaved = (state.soSaved || []).filter((s) => s.name !== name);
+      state.soSaved.unshift({ name: name.slice(0, 60), code: SO.encode(b), at: TODAY });
+      state.soSaved = state.soSaved.slice(0, 30); soChanged(); flash("Saved"); return true;
+    }
+    return true;
+  }
+  function soChange(e) {
+    const el = e.target, b = soBuild();
+    if (el.dataset.soField) { const k = el.dataset.soField; b[k] = el.type === "checkbox" ? el.checked : el.value; }
+    else if (el.dataset.soStat) b.stats[el.dataset.soStat] = el.value;
+    else if (el.dataset.soApt) b.apt[el.dataset.soApt] = el.value;
+    else if (el.dataset.soHint != null) b.skills[+el.dataset.soHint].hint = +el.value;
+    else if (el.dataset.soHave != null) b.skills[+el.dataset.soHave].have = el.checked;
+    else if (el.dataset.soTrainee) {
+      const t = traineeByLabel.get(el.value.trim());
+      if (!t && el.value.trim()) { flash("Pick a trainee from the list."); return true; }
+      b.tid = t ? String(t.id) : "";
+      if (t) { const best = stylesFor(t)[0]; if ("GFEDCB".indexOf(t.apt[6 + STYLES.findIndex((x) => x[0] === b.style)]) !== -1) b.style = best[0]; }
+    } else return false;
+    state.skillOpt = SO.clean(Object.assign(b, { pasteOpen: b.pasteOpen }));
+    state.skillOpt.pasteOpen = b.pasteOpen;
+    soChanged();
+    return true;
+  }
+  document.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target && e.target.id === "soSkill") { e.preventDefault(); soClick({ target: document.querySelector('[data-so="add"]') }); } });
+  document.addEventListener("toggle", (e) => { const d = e.target; if (d && d.dataset && d.dataset.soPasteBox && state.skillOpt) { state.skillOpt.pasteOpen = d.open; save(); } }, true);
+  // A shared build (#so=...) opens here once, then the link is taken off the address.
+  if (HAS_DATA && /^#so=/.test(location.hash)) {
+    const v = SO.decode(location.hash.slice(4));
+    if (v) { state.skillOpt = v; state.tab = "skillopt"; save(); }
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* ignore */ }
+  }
+
   function renderTab() {
     if (HAS_DATA && P && W) W.migrate(state, workflowOptions());
     const sc = scenario();
@@ -4226,6 +4468,10 @@
     }
     if (state.tab === "pulls" && HAS_DATA && pulls()) {
       pulls().render(body);
+      return;
+    }
+    if (state.tab === "skillopt" && HAS_DATA && SO) {
+      renderSkillOpt(body);
       return;
     }
     if ((state.tab === "cards" || state.tab === "trainees") && HAS_DATA) {
