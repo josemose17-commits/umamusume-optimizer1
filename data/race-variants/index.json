@@ -1,0 +1,139 @@
+{
+ "jpBuild": "2026-09-13",
+ "worker": "376111657974ccbd1e1a245fdd4c57e825a73ad4",
+ "presets": {
+  "cm22": "jp-nosyoubu-8b68779361",
+  "cm23": "jp-nosyoubu-8b68779361",
+  "cm24": "jp-nosyoubu-8b68779361",
+  "cm25": "jp-nosyoubu-8b68779361",
+  "cm26": "jp-nosyoubu-8b68779361",
+  "cm27": "jp-5ba7dd1e48",
+  "cm28": "jp-5ba7dd1e48",
+  "cm29": "jp-5ba7dd1e48",
+  "cm30": "jp-fd89759e71",
+  "cm31": "jp-fd89759e71",
+  "cm32": "jp-fd89759e71",
+  "cm33": "jp-fd89759e71",
+  "cm34": "jp-longsyoubu-88f70ea8cd",
+  "cm35": "jp-fd89759e71",
+  "cm36": "jp-fd89759e71",
+  "cm37": "jp-longsyoubu-88f70ea8cd",
+  "cm38": "jp-fd89759e71",
+  "cm39": "jp-fd89759e71",
+  "loh1": "jp-longsyoubu-88f70ea8cd",
+  "cm40": "jp-fd89759e71",
+  "cm41": "jp-fd89759e71",
+  "loh2": "jp-fd89759e71",
+  "cm42": "jp-fd89759e71",
+  "cm43": "jp-longsyoubu-88f70ea8cd",
+  "loh3": "jp-fd89759e71",
+  "cm44": "jp-0fbb0ca542",
+  "cm45": "jp-2a9e60daeb",
+  "loh4": "jp-2a9e60daeb",
+  "cm46": "jp-63c890d045",
+  "cm47": "jp-longsyoubu-61b00d38d4",
+  "loh5": "jp-7a14458ae5",
+  "cm48": "jp-7a14458ae5",
+  "cm49": "jp-7a14458ae5",
+  "cm50": "jp-7a14458ae5"
+ },
+ "variants": {
+  "jp-nosyoubu-8b68779361": {
+   "syoubu": false,
+   "syoubuLong": false,
+   "over": 80,
+   "cups": [
+    "cm22",
+    "cm23",
+    "cm24",
+    "cm25",
+    "cm26"
+   ]
+  },
+  "jp-5ba7dd1e48": {
+   "syoubu": true,
+   "syoubuLong": false,
+   "over": 53,
+   "cups": [
+    "cm27",
+    "cm28",
+    "cm29"
+   ]
+  },
+  "jp-fd89759e71": {
+   "syoubu": true,
+   "syoubuLong": false,
+   "over": 48,
+   "cups": [
+    "cm30",
+    "cm31",
+    "cm32",
+    "cm33",
+    "cm35",
+    "cm36",
+    "cm38",
+    "cm39",
+    "cm40",
+    "cm41",
+    "loh2",
+    "cm42",
+    "loh3"
+   ]
+  },
+  "jp-longsyoubu-88f70ea8cd": {
+   "syoubu": true,
+   "syoubuLong": true,
+   "over": 48,
+   "cups": [
+    "cm34",
+    "cm37",
+    "loh1",
+    "cm43"
+   ]
+  },
+  "jp-0fbb0ca542": {
+   "syoubu": true,
+   "syoubuLong": false,
+   "over": 36,
+   "cups": [
+    "cm44"
+   ]
+  },
+  "jp-2a9e60daeb": {
+   "syoubu": true,
+   "syoubuLong": false,
+   "over": 35,
+   "cups": [
+    "cm45",
+    "loh4"
+   ]
+  },
+  "jp-63c890d045": {
+   "syoubu": true,
+   "syoubuLong": false,
+   "over": 34,
+   "cups": [
+    "cm46"
+   ]
+  },
+  "jp-longsyoubu-61b00d38d4": {
+   "syoubu": true,
+   "syoubuLong": true,
+   "over": 34,
+   "cups": [
+    "cm47"
+   ]
+  },
+  "jp-7a14458ae5": {
+   "syoubu": true,
+   "syoubuLong": false,
+   "over": 0,
+   "cups": [
+    "loh5",
+    "cm48",
+    "cm49",
+    "cm50"
+   ]
+  }
+ }
+}

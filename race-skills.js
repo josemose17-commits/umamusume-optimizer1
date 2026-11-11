@@ -13,9 +13,18 @@
     // (normal approximation). It measures sampling noise only, not the simplified field.
     return { mean, median: (s[Math.floor((n - 1) / 2)] + s[Math.floor(n / 2)]) / 2, low: s[Math.floor((n - 1) * 0.1)], min: s[0], max: s[n - 1], samples: n, sd, ci95: n > 1 ? 1.96 * sd / Math.sqrt(n) : 0 };
   }
+  // The simulator a cup runs on: its JP-dated variant (data/race-variants, cm22 on and League of
+  // Heroes: skill versions as on its JP date, stamina showdown when JP had it), else Global's.
+  // sims: data/skillvalues/index.js meta.sims.
+  function engine(p, sims) {
+    const name = p && sims ? sims[p.id] : null;
+    return name && /^jp-[\w-]+$/.test(name) ? { sim: name, catalog: "jp" } : { sim: null, catalog: "global" };
+  }
+  // Why the race simulator can't run this cup (then only its course chart is used), or null.
+  // variant: the cup's simVariant; inBrowser: its JP-dated simulator ships with the page.
   function supported(p, variant, catalog) {
     if (!catalog.courses[p.course.id]) return "This course is missing from the pinned race simulator.";
-    if (variant && (variant.syoubu || Object.keys(variant.changed || {}).length)) return "This cup needs a later race-engine or skill version; only its existing course chart can be used.";
+    if (variant && !variant.inBrowser && (variant.syoubu || Object.keys(variant.changed || {}).length)) return "This cup needs a later race-engine or skill version; only its existing course chart can be used.";
     return null;
   }
   function horse(input, skills, catalog) {
@@ -43,8 +52,8 @@
       uma1: horse(input, before, catalog), uma2: horse(input, after, catalog),
       options: { seed, usePosKeep: true, useCompeteTop: true, useIntChecks: true } } };
   }
-  function runner() {
-    const worker = new Worker("race-worker.js" + version);
+  function runner(sim) {
+    const worker = new Worker("race-worker.js" + version + (sim ? (version ? "&" : "?") + "sim=" + encodeURIComponent(sim) : ""));
     let pending = null;
     worker.onmessage = ({ data }) => {
       if (!pending) return;
@@ -56,8 +65,10 @@
     return { run: message => new Promise((resolve, reject) => { if (pending) { reject(new Error("Race worker is busy.")); return; } const timer=setTimeout(()=>{worker.terminate();pending=null;reject(new Error("The race comparison took too long. Reduce the skill list and try again."));},20000);pending = { resolve, reject, timer }; worker.postMessage(message); }),
       close: () => { worker.terminate(); if (pending) { clearTimeout(pending.timer); pending.reject(new Error("Comparison cancelled.")); pending = null; } } };
   }
-  let catalogPromise;
-  const load = () => catalogPromise || (catalogPromise = fetch("data/race-skills.json" + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { catalogPromise = null; throw e; }));
+  const catalogs = {};
+  // kind "jp": the JP worker's skills and courses (JP-dated cups); else Global's.
+  const load = (kind) => { const file = kind === "jp" ? "data/race-skills-jp.json" : "data/race-skills.json";
+    return catalogs[file] || (catalogs[file] = fetch(file + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { delete catalogs[file]; throw e; })); };
   const DUEL_RACES = 240, DUEL_SEED = 161803, CONFIRM_SEED = 577215;
   async function optimize(o) {
     const learned = ids(o.learned), values = Object.assign({}, o.values), excluded = [];
@@ -75,7 +86,7 @@
       if (/cancelled|too long|load|busy/i.test(error.message)) throw error;
       throw new Error("The equipped baseline has conditions this engine cannot simulate. Change the comparison's equipped list or use the course chart.");
     }
-    let budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true });
+    let budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true, fastLearner: !!o.fastLearner });
     const preflight = new Map();
     // A catalog entry does not guarantee that this engine parses its conditions. Test each
     // addition and keep unsupported routes out of the search, with their IDs disclosed.
@@ -90,7 +101,7 @@
     // (additive: its standalone gain from the equipped baseline).
     const cut = list => list.reduce((n, x) => { const f = scale[x.id]; const alone = preflight.get(x.id); return f > 0 && f < 1 && alone ? n + (1 - f) * alone.mean : n; }, 0);
     const adjust = (result, list) => { const c = cut(list); return c ? Object.assign({}, result, { mean: result.mean - c, median: result.median - c, low: result.low - c, min: result.min - c, max: result.max - c, scaledOff: c }) : result; };
-    budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true });
+    budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true, fastLearner: !!o.fastLearner });
     // Unvalued must-haves are normally retained by the purchase solver; an unsupported
     // race effect cannot be restored that way.
     // An upgrade of an available skill can also be dropped (scale 0) by position.
@@ -168,7 +179,8 @@
         const d = Object.assign({}, raw), shift = cut(runner.selected) - cut(best.selected);
         ["mean","median","low","min","max"].forEach(k => { d[k] += shift; });
         let verdict = Math.abs(d.mean) <= d.ci95 ? "tie" : d.mean > 0 ? "best" : "swapped";
-        if (verdict === "swapped") { const t = best; best = runner; Object.keys(d).forEach(k => { if (["mean","median","low","min","max"].includes(k)) d[k] = -d[k]; }); duel = { verdict, other: t.selected.map(x=>x.id), diff: d }; }
+        // A tie goes to the set that spends less SP (a skill that adds nothing isn't bought).
+        if (verdict === "swapped" || verdict === "tie" && runner.spent < best.spent) { const t = best; best = runner; Object.keys(d).forEach(k => { if (["mean","median","low","min","max"].includes(k)) d[k] = -d[k]; }); duel = { verdict, other: t.selected.map(x=>x.id), diff: d }; }
         else duel = { verdict, other: runner.selected.map(x=>x.id), diff: d };
       } catch (error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error; }
     }
@@ -194,6 +206,6 @@
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
       evaluations: calls, failedSets, method: "bounded paired race comparisons", learned, duel, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
-  const api = { summary, supported, horse, request, runner, load, optimize };
+  const api = { summary, supported, engine, horse, request, runner, load, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;
 })(typeof window !== "undefined" ? window : globalThis);

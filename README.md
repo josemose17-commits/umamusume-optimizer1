@@ -89,11 +89,26 @@ Each ace keeps her deck by cup. Racing and parent decks keep separate results.
 
 **Skills for this build:** open this box for Umalator comparisons with her equipped skills as the baseline. The two best skill sets are then raced head-to-head on fresh races. You see **Close call** when they're tied (pick by the hints you have or the SP you'd rather keep), or by how much the chosen one wins. Its reported gain comes from races the search never used. Races run at **Normal** mood by default, as in CM rounds (uma.guide's advice); pick **Great** to plan for the finals. **Find my best deck** runs it automatically. Planning checks trainee, named card and entered family sources; typing a target does not make it available. Offers and inheritance are sampled, and **Where these skills come from** shows the routes and estimated access. Equipped planning purchases use projected SP first. In **Finished uma**, enter all five final stats, SP left, available skills and hints; tick skills she already has as **Equipped**. Edits recalculate an existing comparison.
 
-The suggested purchase set uses actual hint discounts and prerequisite costs, with skills simulated together. **Next skills from the equipped baseline** ranks individual additions by L per 100 SP. In the suggested set, Added L is the effect of removing that purchase from the complete set, so the rows don't add up. Later cups needing an unsupported engine use a labeled course-chart fallback without a new race simulation. Searches are bounded; they cannot prove the best possible build. See [comparison methods and limits](docs/build-specific-skills.md).
+The suggested purchase set uses actual hint discounts and prerequisite costs, with skills simulated together. **Next skills from the equipped baseline** ranks individual additions by L per 100 SP. In the suggested set, Added L is the effect of removing that purchase from the complete set, so the rows don't add up. Cups on a JP-dated simulator (CM 22 on, League of Heroes) race on it in the browser, stamina showdown included (see Skill optimizer); a cup whose course no simulator has would use a labeled course-chart fallback. Searches are bounded; they cannot prove the best possible build. See [comparison methods and limits](docs/build-specific-skills.md).
 
 **Future cups:** deck searches, borrowed cards, must-include cards, skill sources and upgrade suggestions use cards expected by the cup's start. Forecast dates come from GameTora's calendar (also used by Pull planner); **Expected ~date** marks estimates. Untick **Only cards I own** to try future cards at LB4, or leave it on to use your cards plus one future borrow. This never adds cards to your collection. Parents' deck builder uses the same cup date. Training still uses the scenario you select, and cards without scoring data stay out of searches. Current and past cups use cards released on Global today.
 
 **The skills table** ranks every skill by its median length gain (L) on the cup's course for her running style, from alpha123's Umalator. The Umalator runs one uma alone, so the values place her in the pack by style (a Front Runner in 1st, a Pace Chaser 2nd–4th, Late Surgers and End Closers 5th–9th of 9) and leave out the skills she can't fire from there: ones that need her in the back half of the pack (for Front Runners and Pace Chasers) or the front half (for End Closers), and, for a Front Runner, ones that need a rival right ahead of her (No Stopping Me!, Blast a Hole Through!, Slipstream, passing skills), since nobody is ahead of a leader. If your Front Runner fights another Front Runner for the lead, set **Front Runners in this cup** (next to the running style) to *Fight for the lead* with how much of the race someone is ahead of her (15%, 30% or 50%: your guess, not a measured rate). Those skills then come back, counted at that share everywhere: the skills table (tagged **needs a rival ahead**), deck search, must-haves, Parents and **Skills for this build**. That last one's race simulator would otherwise fire them as if someone were always ahead, so their simulated gain is cut to the share, and dropped when she leads alone. The line under the table says what was left out, and a must-have she can't fire is marked. This applies everywhere the values count: the deck optimizer, must-haves and Parents. Skills that wait for other skills to fire are valued as if those had fired: Groundwork and Solid Preparation (3 skills in the opening leg) go off at the gate, where greens, Concentration and Early Lead fire, so the extra acceleration lands while she's still speeding up (worth most to a Front Runner); Tail Held High and the others at a random moment of their leg. For a Front Runner, Concentration, Focus and greens are tagged (**helps her lead**, **sets off Groundwork**): their L is only the distance a quicker start saves or their own stat boost, but they fire at the gate, where they help her take the lead and, three together, set off Groundwork. The simulator can't put a number on that.
+
+## Skill optimizer
+
+What to buy with a finished uma's skill points for one Champions Meeting or League of Heroes race. It works like [UmaTools' Skill Optimizer](https://daftuyda.moe/optimizer), but scores skills by the lengths they gain on that cup's course for her running style instead of by rating.
+
+1. Pick the **cup** and **running style**. A **trainee** is optional: she brings her aptitudes and her own unique, and **Add her innate skills** puts her innate and awakening skills in the shop. **Use my CM & decks ace** copies the cup, style, ace, stats, SP and skills from CM & decks' *Skills for this build*.
+2. Type her five final **stats**, **skill points**, **Fast Learner** (10% of the base cost off, added to the hint discount), **mood** (Normal for CM rounds, Great for finals) and **unique level**. Aptitudes default to hers (or A).
+3. Add the skills her **shop** offers: by name (Enter adds it), or **Paste a list** (one per line; `Lv3` or `hint 3` sets the hint, a price at the end is ignored, "O"/"OO" at the end mean ○/◎, small typos are matched). Adding a gold or ◎ also adds the skills it needs, so each tier's hint can be set. Tick **Has it** for skills she already learned.
+4. The **quick plan** updates as you type: the best affordable purchases by the course chart's gains, added up, highlighted in the list. Hint discounts, Fast Learner and gold prerequisites are priced in.
+5. **Race-check** races the sets in alpha123's Umalator, in your browser, the same way as *Skills for this build* (about 10 seconds): 60-odd sets, the best few again on fresh races, the top two head to head (a tie goes to the set that spends less), and the winner's gain on races no step used. It catches what the chart can't: skills that need each other, overlap, or need stamina she doesn't have.
+6. **Copy share link** puts the whole build in a link (`#so=...`); **Save** keeps builds in this browser.
+
+**Which simulator:** Global cups through CM 21 race on Global's Umalator. Cups Global hasn't run yet (CM 22 on) and every League of Heroes race on the JP Umalator as JP's game was on that cup's JP date, the same model as the skill values (see Data): each skill at its version then (never older than Global's), and **stamina showdown** from CM 27 on, at JP's stronger long-race factors from Oct 2024 where they apply. Showdown only acts on courses of 2101 m and more, and only above 1200 stamina. Those cups, and the Del Mar and Longchamp tracks Global doesn't have yet, now get real race comparisons here and in *Skills for this build*, where before they used the chart only.
+
+Limits: the simulator races her against copies of herself, so blocking, debuffs and rivals' skills aren't modeled; sets within the ± range are ties. LoH races have 12 runners, CM races 9.
 
 ## Parents
 
@@ -307,12 +322,21 @@ node tools/build_count_skills.js <umalator-global dir> <umalator dir> <GameTora 
 node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --compose=data/skillvalues --gametora=<GameTora cache dir> --variants=<variants dir> --metadata-only
 ```
 
+The in-browser race comparisons for JP-dated cups use the same variants. After `tools/build_skill_versions.js`, run:
+
+```
+node tools/build_race_variants.js <uma-tools clone> <variants dir>
+```
+
+It checks that each variant, applied to the pinned JP worker, is exactly the simulator the skill values came from.
+
 The last pass refreshes names and JP release dates for skills inserted by the count-skill pass. It preserves those skill values and each cup's simulator provenance. Simulation jobs are cached, so an interrupted rebuild can resume.
 
 When releasing a change to the site, bump the `?v=` number on the file links in `index.html` so browsers fetch the new files instead of cached ones.
 
 ## Files
 
+- `skill-opt.js`: the Skill optimizer tab's builds, share links, pasted lists and quick plan. `race-variants.js`, `data/race-variants/` and `data/race-skills-jp.json`: JP-dated cups' simulators in the browser (the pinned JP worker in `vendor/umalator-jp`, each cup's skill versions and stamina showdown rules), from `tools/build_race_variants.js`.
 - `cm-log.js`: the CM results log (your real races per cup: placings, reasons, summary and flags).
 - `scenarios.js`: scenario data (mechanics, caps, base training values, key turns, deck advice, extra inputs).
 - `data/dates.js`: Friend and Group card outings (unlock event and each outing's rewards), from game8's card pages.

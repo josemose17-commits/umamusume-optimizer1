@@ -4,7 +4,8 @@
   const DATA = root.UmaSkillPurchases || (typeof require !== "undefined" ? require("./data/skill-purchases.js") : null);
   const DISCOUNT = [0, 10, 20, 30, 35, 40];
   const level = (n) => Math.max(0, Math.min(5, Math.floor(+n || 0)));
-  const discounted = (cost, lv) => Math.floor(cost * (100 - DISCOUNT[level(lv)]) / 100);
+  // Fast Learner takes another 10% of the base cost, added to the hint discount (up to 50%).
+  const discounted = (cost, lv, fast) => Math.floor(cost * (100 - DISCOUNT[level(lv)] - (fast ? 10 : 0)) / 100);
   function create(opts = {}) {
     const metadata = opts.metadata || DATA.skills, values = Object.assign({}, opts.skills), costs = Object.assign({}, opts.costs);
     const learned = new Set([...(opts.learned || [])].map(String));
@@ -12,6 +13,7 @@
     const must = new Set((opts.must || []).map(String));
     must.forEach((id) => { if (!Number.isFinite(values[id])) values[id] = 0; });
     const lengthValue = opts.lengthValue == null ? 60 : opts.lengthValue;
+    const fast = !!opts.fastLearner;
     const spValue = opts.spValue == null ? 0.35 : opts.spValue;
     const chains = new Map(), unsupported = new Set();
     const whites = new Map();
@@ -59,7 +61,7 @@
         if (base.length >= c.length) return;
         const tiers = c.slice(base.length).map((p) => {
           const raw = Number.isFinite(costs[p]) && costs[p] > 0 ? costs[p] : metadata[p][1];
-          return { id: p, hint: level(levels[p]), cost: discounted(raw, levels[p]) };
+          return { id: p, hint: level(levels[p]), cost: discounted(raw, levels[p], fast) };
         });
         const cost = tiers.reduce((n, p) => n + p.cost, 0);
         const L = values[id] - (base.length ? values[base[base.length - 1]] || 0 : 0);
@@ -212,7 +214,7 @@
       if (utilities.size >= 2048) utilities.clear();
       utilities.set(key, value); return value;
     }
-    const key = JSON.stringify([values, costs, [...learned].sort(), [...available].sort(), [...must].sort()]);
+    const key = JSON.stringify([values, costs, [...learned].sort(), [...available].sort(), [...must].sort(), fast]);
     return { options, solve, solveSS, chain, unlocks, hintUtility, key };
   }
   let catalog;
