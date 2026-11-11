@@ -53,6 +53,7 @@
       pcm: k.pcm || null,
       cmp: k.cmp || null,
       contest: k.contest || {},
+      cmLog: k.cmLog || {},
       pull: k.pull || null,
       // The Parents tab's plan spans careers (lineage, G1 wins, rating check).
       parents: k.parents || null,
@@ -744,6 +745,7 @@
     $("#tabBody").addEventListener("click", (e) => {
       if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
+      if (state.tab === "cm" && cmLogClick(e.target)) return;
       if (deckTab() && cmPlan() && cmPlan().click(e)) return;
       const nav = e.target.closest("[data-goto-tab]");
       if (nav) {
@@ -2766,7 +2768,7 @@
     loadSkillValues(p.id);
     euReady();
     const c = x.ace ? cm("cm") : null;
-    body.innerHTML = `<div class="cm">${cmHeader(p, c, plan.teamHTML())}${c ? cmOptimizer(p, c, "cm") + cmSkills(p, c, "cm") : `<section class="panel"><p class="mini">Add an ace to your team above to build her deck.</p></section>`}</div>`;
+    body.innerHTML = `<div class="cm">${cmHeader(p, c, plan.teamHTML())}${cmLogHTML(p)}${c ? cmOptimizer(p, c, "cm") + cmSkills(p, c, "cm") : `<section class="panel"><p class="mini">Add an ace to your team above to build her deck.</p></section>`}</div>`;
   }
 
   // Her gaps: each stat's target (yours, else the race build's, within the caps) against the
@@ -3677,6 +3679,35 @@
   function raceState(c) {
     return c.raceSkills || (c.raceSkills = { mode: "plan", stats: {}, apt: {}, skills: [], sp: "", uniqueLv: "1" });
   }
+  // Your real CM races for this cup (cm-log.js), under the team.
+  const logOpen = {};
+  function cmLogHTML(p) {
+    if (!window.UmaCmLog || !p) return "";
+    const cmp = state.cmp || {}, team = ((cmp.byCup || {})[p.id] || []).filter((a) => D.trainee(a.tid));
+    const name = (tid) => { const t = D.trainee(tid); return t ? t.n + (t.t ? " [" + t.t + "]" : "") : "#" + tid; };
+    const aces = team.map((a) => ({ tid: +a.tid, style: a.style || "", name: name(a.tid) }));
+    return `<section class="panel">${window.UmaCmLog.html({ cup: p.id, kind: p.kind, aces, races: (state.cmLog || {})[p.id] || [], open: logOpen[p.id], nameOf: name })}</section>`;
+  }
+  function cmLogClick(t) {
+    const saveBtn = t.closest("[data-log-save]"), del = t.closest("[data-log-del]");
+    if (!saveBtn && !del) return false;
+    state.cmLog = state.cmLog || {};
+    if (saveBtn) {
+      const pid = saveBtn.dataset.logSave, p = presetById(pid), box = saveBtn.closest("details");
+      const team = (((state.cmp || {}).byCup || {})[pid] || []);
+      const places = team.map((a) => ({ tid: a.tid, style: a.style, place: (box.querySelector(`[data-log-place="${a.tid}"]`) || {}).value, reason: (box.querySelector(`[data-log-reason="${a.tid}"]`) || {}).value, contest: a.style === "Nige" ? contestShare(pid) : 0 }));
+      const e = window.UmaCmLog.entry({ date: new Date().toISOString().slice(0, 10), field: p && p.kind === "loh" ? 12 : 9, places });
+      if (!e) { flash("Pick at least one ace's place first."); return true; }
+      (state.cmLog[pid] = state.cmLog[pid] || []).push(e);
+      logOpen[pid] = true; commitLog(); flash("Race saved"); return true;
+    }
+    const [pid, i] = del.dataset.logDel.split(",");
+    const list = state.cmLog[pid] || [];
+    if (list[+i]) { list.splice(+i, 1); logOpen[pid] = true; commitLog(); flash("Race deleted"); }
+    return true;
+  }
+  function commitLog() { save(); renderCM(); }
+  document.addEventListener("toggle", (e) => { const d = e.target; if (d && d.dataset && d.dataset.logOpen) logOpen[d.dataset.logOpen] = d.open; }, true);
   // The head-to-head between the two best skill sets (race-skills.js duel), in plain words.
   function duelHTML(plan) {
     const d = plan && plan.duel, num = (x) => Number.isFinite(x) ? x.toFixed(2) : "–";
