@@ -106,7 +106,7 @@ Speed past 1200 counts half in races, so on these stat lines power is worth seve
 per point. Aptitudes: distance A→S 0.55–0.65 L on that dirt mile and about 1.25 L on Nakayama
 2000, surface A→S 0.75–0.8 L, style A→S 0.3–0.45 L. B→A is about twice A→S.
 
-Now used for blue-spark value where she's short, blue order and the split of blues you still pick
+With her predicted stats, each value is rescaled to her side of 1200 (the main nonlinearity). Blue past her target counts at half (PAST_TARGET, an assumption) instead of 0. Now used for blue-spark value where she's short, blue order and the split of blues you still pick
 (fewest lengths short), pink value, pink choice within each group, and parent ranking. A below-A
 aptitude still comes first, because start stars lift it for sure, while S needs an inspiration roll.
 Stamina-showdown cups keep the flat rules. Limits: one stat line per cup, no skills. Skills that

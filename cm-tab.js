@@ -187,7 +187,7 @@
       if (!rel) throw new Error("The race's skill values didn't load. Try again.");
       const vetsAll = ctx.veterans().list, umas = [...ctx.myUmas()];
       const skillPlan=ctx.skillPlan?ctx.skillPlan():null;
-      const x = CP.context({ ace: { cid: t.cid, tid: t.id }, race: { preset: p, style }, rel, offers: v.offers, build: ctx.build(p), gaps: gapsOf(d),skillPlan });
+      const x = CP.context({ ace: { cid: t.cid, tid: t.id }, race: { preset: p, style }, rel, offers: v.offers, build: ctx.build(p), gaps: gapsOf(d), stats: d && d.predicted && d.predicted.stats || null, skillPlan });
       await stage(`${who}: your veterans as Parent 1…`, 0.2);
       const vets = CP.rankVets(x, vetsAll);
       // The new parent you planned, trained and imported: she's Parent 1 now, with her real sparks.

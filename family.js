@@ -42,11 +42,22 @@
     const cup = p && Values && Values.cups && Values.cups[p.id], v = cup && cup.status === "ok" && cup.styles && cup.styles[st];
     return v && v.status === "ok" ? v : null;
   }
-  // L per point of each stat (speed, stamina, power, guts, wit) for this ace's cup and style.
+  // L per point of each stat (speed, stamina, power, guts, wit) for this ace's cup and style. The
+  // values were measured from the cup's stat line; points past 1200 count half in races, so with her
+  // predicted stats (x.stats) each is rescaled to her side of 1200 (speed at 1100 counts double a
+  // value measured at 1450). Stamina is valued against what she needs, so it isn't rescaled.
+  const raceShare = (v) => (v > 1200 ? 0.5 : 1);
+  const KEYS = ["speed", "stamina", "power", "guts", "wisdom"];
   function statPoints(x) {
     const v = measured(x);
-    return v ? v.stats.map((s) => s.perPoint) : [1, 1, 1, 1, 1].map(() => 1 / STAT_PER_L);
+    if (!v) return [1, 1, 1, 1, 1].map(() => 1 / STAT_PER_L);
+    const mine = x && x.stats;
+    return v.stats.map((s, i) => (mine && i !== 1 && Number.isFinite(+mine[i]) && v.base ? s.perPoint * raceShare(+mine[i]) / raceShare(v.base[KEYS[i]]) : s.perPoint));
   }
+  // Blue past her target: half its measured value (caps and an uncertain target can stop some of
+  // it from landing); up to the gap, full value. pp: statPoints(x).
+  const PAST_TARGET = 0.5;
+  const blueWorth = (v, gap, pp) => (Math.min(v, gap) + PAST_TARGET * Math.max(0, v - gap)) * pp;
   // L for raising aptitude i (APT_LABELS order) from grade `from` to `to`: B→A and A→S as
   // measured, lower steps at the B→A value. Flat APT_L without measurements.
   function aptL(x, i, from, to) {
@@ -237,7 +248,7 @@
         out.whiteL=union(out.white,w=>family(w.id));out.greenL=union(out.green,w=>w.id);
       }
       const pp = statPoints(x);
-      out.blueL = want.gaps ? out.blueStats.reduce((n, v, i) => n + Math.min(v, want.gaps[i] || 0) * pp[i], 0) : out.blueStats.reduce((n, v, i) => n + (keyStats.has(i) ? v * pp[i] : 0), 0);
+      out.blueL = want.gaps ? out.blueStats.reduce((n, v, i) => n + blueWorth(v, want.gaps[i] || 0, pp[i]), 0) : out.blueStats.reduce((n, v, i) => n + (keyStats.has(i) ? v * pp[i] : 0), 0);
       out.pink.forEach((p) => { p.L = aptL(x, p.i, p.grade, p.target); });
       out.value = out.whiteL + out.greenL + out.blueL + out.pink.reduce((n, p) => n + p.p * p.L, 0);
       return out;
@@ -259,7 +270,7 @@
     return { lookFor, score, families, baseWhite, problems, worthOf, family };
   }
 
-  const api = { HINT_BY_STARS, statPoints, aptL, measured, create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
+  const api = { PAST_TARGET, blueWorth, HINT_BY_STARS, statPoints, aptL, measured, create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamily = api;
 })(typeof window !== "undefined" ? window : globalThis);

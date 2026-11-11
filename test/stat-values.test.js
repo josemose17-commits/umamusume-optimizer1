@@ -33,3 +33,19 @@ test("aptitude steps add up, and showdown cups fall back to the flat rules", () 
   assert.equal(F.aptL(x("cm27", "Senkou"), 4, "A", "S"), F.APT_L);
   assert.deepEqual(F.statPoints(x("cm27", "Senkou")), [1, 1, 1, 1, 1].map(() => 1 / F.STAT_PER_L));
 });
+
+test("her predicted stats rescale the measured values across 1200, and stamina stays", () => {
+  const plain = F.statPoints(x("cm22", "Senkou"));
+  const base = V.cups.cm22.styles.Senkou.base;
+  assert.ok(base.speed > 1200, "Aquarius' line has speed past 1200");
+  const below = F.statPoints(Object.assign(x("cm22", "Senkou"), { stats: [1100, 500, 1250, 600, 1000] }));
+  assert.ok(Math.abs(below[0] - 2 * plain[0]) < 1e-12, "speed at 1100 counts double");
+  assert.equal(below[1], plain[1], "stamina is valued against her need, not rescaled");
+  assert.ok(Math.abs(below[2] - plain[2]) < 1e-12, "power past 1200 on both: unchanged");
+});
+
+test("blue past her target counts at half", () => {
+  assert.equal(F.blueWorth(50, 30, 1), 30 + 0.5 * 20);
+  assert.equal(F.blueWorth(20, 30, 1), 20);
+  assert.equal(F.blueWorth(50, 0, 0.01), 0.25);
+});
