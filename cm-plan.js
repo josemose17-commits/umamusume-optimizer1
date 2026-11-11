@@ -168,7 +168,12 @@
     // below A it doesn't lift, else the one your rule takes to S. Same order as the searches.
     function pinkFocus(x, s) {
       const needs = want(x).pink, lifted = (i) => { const q = ((s && s.pink) || []).find((y) => y.i === i); return q ? q.p : 0; };
-      return needs.find((p) => p.target === "A" && lifted(p.i) < 0.9) || needs.find((p) => p.target === "S") || needs[0] || null;
+      // A below-A aptitude her family doesn't lift comes first: the family's pink stars lift it at
+      // the start for sure, while reaching S needs a pink to fire at an inspiration. Within each
+      // group, the one worth the most lengths on this cup (measured; equal without data).
+      const worth = (p) => (1 - lifted(p.i)) * F.aptL(x, p.i, p.grade, p.target);
+      const best = (list) => list.slice().sort((a, b) => worth(b) - worth(a))[0];
+      return best(needs.filter((p) => p.target === "A" && lifted(p.i) < 0.9)) || best(needs.filter((p) => p.target === "S")) || needs[0] || null;
     }
     // Independent Training's prioritized skills (the game takes up to 10): the race's whites her
     // deck can offer, most valuable as a spark for the ace first (worth × chance the deck offers
@@ -197,8 +202,8 @@
     // predicted careers (learning.blueStars, per stat), else 20/70/10% as for a stat over 1100.
     // What it adds over the run where the ace is short (her gaps), else on the key stats.
     function blueExpected(x, aff, learning) {
-      const w = want(x), per = (i) => ((learning && learning.blueStars && learning.blueStars[i]) || SS_STARS).reduce((n, d, k) => n + d * F.blueStats(k + 1, aff), 0);
-      return w.blue.reduce((n, b) => n + (w.gaps ? Math.min(per(b.i), b.gap) : per(b.i)), 0) / 5 / F.STAT_PER_L;
+      const w = want(x), pp = F.statPoints(x), per = (i) => ((learning && learning.blueStars && learning.blueStars[i]) || SS_STARS).reduce((n, d, k) => n + d * F.blueStats(k + 1, aff), 0);
+      return w.blue.reduce((n, b) => n + (w.gaps ? Math.min(per(b.i), b.gap) : per(b.i)) * pp[b.i], 0) / 5;
     }
     // Her pink spark lands on one of her A-or-better aptitudes at random, 20/70/10% by stars: the
     // share that's one the ace needs, as the chance it fires and takes that aptitude a grade on.
@@ -207,7 +212,7 @@
       if (!good) return 0;
       const fire = SS_STARS.reduce((n, d, k) => n + d * F.twice(F.PINK, k + 1, aff), 0);
       return want(x).pink.filter((p) => ["S", "A"].indexOf((t.apt || [])[p.i]) !== -1)
-        .reduce((n, p) => { const now = s && s.pink ? (s.pink.find((q) => q.i === p.i) || { p: 0 }).p : 0; return n + (1 - now) * fire / good * F.APT_L; }, 0);
+        .reduce((n, p) => { const now = s && s.pink ? (s.pink.find((q) => q.i === p.i) || { p: 0 }).p : 0; return n + (1 - now) * fire / good * F.aptL(x, p.i, p.grade, p.target); }, 0);
     }
     // How many of her parents and grandparents carry each relevant white spark.
     function lineageCopies(x, parents) {
@@ -265,9 +270,11 @@
         if (m.pink && m.pink[1]) (pinks[m.pink[0]] = pinks[m.pink[0]] || []).push({ stars: m.pink[1], aff: s.own[k], scale: F.slotScale(k) });
       });
       // Training a parent: every stat she gains counts. The ace: what fills her gaps (else key stats).
-      const blue = stats.reduce((n, v, i) => n + (training ? v : w.gaps ? Math.min(v, w.gaps[i] || 0) : key.has(i) ? v : 0), 0) / F.STAT_PER_L;
+      // Training a parent: her own stats, at the flat rate. For the ace: lengths on her cup.
+      const pp = training ? [1, 1, 1, 1, 1].map(() => 1 / F.STAT_PER_L) : F.statPoints(x);
+      const blue = stats.reduce((n, v, i) => n + (training ? v : w.gaps ? Math.min(v, w.gaps[i] || 0) : key.has(i) ? v : 0) * pp[i], 0);
       const green = training ? 0 : s.green.filter(q => slots.includes(q.slot)).reduce((n, q) => n + q.p * q.L, 0);
-      const pink = training ? 0 : w.pink.reduce((n, p) => n + F.pinkReach(p.grade, p.target, pinks[p.i] || []) * F.APT_L, 0);
+      const pink = training ? 0 : w.pink.reduce((n, p) => n + F.pinkReach(p.grade, p.target, pinks[p.i] || []) * F.aptL(x, p.i, p.grade, p.target), 0);
       return { value: white + blue + green + pink, white, blue, green, pink, start, stats, hints: whites.reduce((n, q) => n + q.p, 0) };
     }
     // Every version in umas (trainee ids) that could be Parent 1 for the ace, trained with a

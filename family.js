@@ -31,6 +31,30 @@
   // In length units: 1 L counts like 60 stat points (as in the deck optimizer), and an
   // aptitude raised to A on the race like 1 L (a rough stand-in: no measured value).
   const STAT_PER_L = 60, APT_L = 1, HINT_L = 0.15;
+  // Measured values per cup and style (data/stat-values.js, the race simulator): lengths per point
+  // of each stat and per aptitude grade. Where a cup has none (stamina showdown, no course data),
+  // the flat rules above apply: 1 L per STAT_PER_L points of any stat, APT_L per needed aptitude.
+  const Values = root.UmaStatValues || (typeof require !== "undefined" ? (() => { try { return require("./data/stat-values.js"); } catch (e) { return null; } })() : null);
+  function measured(x) {
+    const p = x && x.race && x.race.preset, st = x && x.race && x.race.style;
+    const cup = p && Values && Values.cups && Values.cups[p.id], v = cup && cup.status === "ok" && cup.styles && cup.styles[st];
+    return v && v.status === "ok" ? v : null;
+  }
+  // L per point of each stat (speed, stamina, power, guts, wit) for this ace's cup and style.
+  function statPoints(x) {
+    const v = measured(x);
+    return v ? v.stats.map((s) => s.perPoint) : [1, 1, 1, 1, 1].map(() => 1 / STAT_PER_L);
+  }
+  // L for raising aptitude i (APT_LABELS order) from grade `from` to `to`: B→A and A→S as
+  // measured, lower steps at the B→A value. Flat APT_L without measurements.
+  function aptL(x, i, from, to) {
+    const v = measured(x);
+    if (!v) return APT_L;
+    const kind = i <= 1 ? "surface" : i <= 5 ? "distance" : "style", a = v.apt[kind];
+    let L = 0;
+    for (let g = Math.max(0, gi(from)); g < gi(to); g++) L += Math.max(0, (g + 1 === gi("S") ? a.AS : a.BA).L);
+    return L;
+  }
 
   // The chance a spark fires at least once in the run's two inspiration events.
   // The chance it fires at one inspiration (scale: GRAND for a grandparent).
@@ -109,7 +133,9 @@
       // biggest first; with none known, the build's two top stats.
       const gaps = (x.gaps || []).map((g) => Math.max(0, +g || 0));
       const blue = gaps.some((g) => g > 0)
-        ? STATS.map((s, i) => ({ i, label: STAT_LABELS[i], w: w[s] || 0, gap: gaps[i] || 0 })).filter((b) => b.gap > 0).sort((a, b) => b.gap - a.gap)
+        // Most lengths first: a typical blue (about 50 points over the run) or the gap, if smaller,
+        // at this cup's value per point (equal per point where nothing's measured: biggest gap first).
+        ? STATS.map((s, i) => ({ i, label: STAT_LABELS[i], w: w[s] || 0, gap: gaps[i] || 0, L: Math.min(50, gaps[i] || 0) * statPoints(x)[i] })).filter((b) => b.gap > 0).sort((a, b) => b.L - a.L || b.gap - a.gap)
         : STATS.map((s, i) => ({ i, label: STAT_LABELS[i], w: w[s] || 0, gap: 0 })).sort((a, b) => b.w - a.w).slice(0, 2);
       const apt = (x.ace && x.ace.apt) || null, c = x.race.preset.course;
       const pink = apt ? aptTargets(c, x.race.style).filter((n) => gi(apt[n.i]) >= 0 && gi(apt[n.i]) < gi(n.target)).map((n) => Object.assign(n, { label: APT_LABELS[n.i], grade: apt[n.i] })) : [];
@@ -208,7 +234,10 @@
         const union=(rows,key)=>{const map=new Map();rows.forEach(w=>{const k=key(w),r=map.get(k)||{miss:1,worth:w.worth==null?w.L:w.worth};r.miss*=1-w.p;map.set(k,r);});return [...map.values()].reduce((n,r)=>n+(1-r.miss)*r.worth,0);};
         out.whiteL=union(out.white,w=>family(w.id));out.greenL=union(out.green,w=>w.id);
       }
-      out.value = out.whiteL + out.greenL + out.blueFill / STAT_PER_L + out.pink.reduce((n, p) => n + p.p * APT_L, 0);
+      const pp = statPoints(x);
+      out.blueL = want.gaps ? out.blueStats.reduce((n, v, i) => n + Math.min(v, want.gaps[i] || 0) * pp[i], 0) : out.blueStats.reduce((n, v, i) => n + (keyStats.has(i) ? v * pp[i] : 0), 0);
+      out.pink.forEach((p) => { p.L = aptL(x, p.i, p.grade, p.target); });
+      out.value = out.whiteL + out.greenL + out.blueL + out.pink.reduce((n, p) => n + p.p * p.L, 0);
       return out;
     }
 
@@ -228,7 +257,7 @@
     return { lookFor, score, families, baseWhite, problems, worthOf, family };
   }
 
-  const api = { create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
+  const api = { statPoints, aptL, measured, create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamily = api;
 })(typeof window !== "undefined" ? window : globalThis);
