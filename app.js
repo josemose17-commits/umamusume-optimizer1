@@ -4289,6 +4289,9 @@
     return ["11703", "11709"].includes(String(p.course.id)) ? "The full-field simulator has no track data for Del Mar yet." : "";
   }
   const soMix = (b, p) => b.mix || FR.MIX[p.kind === "loh" ? "loh" : "cm"];
+  const RP = window.UmaRivalPools;
+  const topField = (b) => /^top-/.test(b.strength) && !!RP;
+  const poolName = (p) => (p.course.surface === "Dirt" ? "Dirt" : p.course.dist);
   const soFieldSize = (p) => (p.kind === "loh" ? 12 : 9);
   // A rival's skills: the best chart picks for her style that this cup has (no debuffs), at hint
   // Lv2, within about the SP a finished uma has.
@@ -4297,17 +4300,7 @@
     const ids = Object.keys(vals).filter((id) => vals[id] > 0 && released(id, p) && table[id] && !(window.UmaDebuffs && window.UmaDebuffs[id])).sort((a, c) => vals[c] - vals[a]).slice(0, 16);
     return SO.quickPlan({ skills: ids.map((id) => ({ id, hint: 2 })), values: vals, sp, fast: false }).selected.map((x) => x.id);
   }
-  // Whether a skill's conditions (data/skill-kinds.js, @ = or, & = and) can hold on this course for
-  // this style. Only the fixed parts are checked: style, distance, surface, track and direction.
-  function canFire(conds, p, style) {
-    const fixed = { running_style: STYLES.findIndex((x) => x[0] === style) + 1, distance_type: { Sprint: 1, Mile: 2, Medium: 3, Long: 4 }[p.course.dist],
-      ground_type: p.course.surface === "Dirt" ? 2 : 1, track_id: +String(p.course.id).slice(0, 5), rotation: p.course.turn === "Left" ? 2 : 1 };
-    return (conds || []).join("@").split("@").some((alt) => alt.split("&").every((tok) => {
-      const m = /^(\w+)(==|!=)(\d+)$/.exec(tok);
-      if (!m || !(m[1] in fixed) || !fixed[m[1]]) return true;
-      return m[2] === "==" ? fixed[m[1]] === +m[3] : fixed[m[1]] !== +m[3];
-    }));
-  }
+  const canFire = (conds, p, style) => FR.canFire(conds, p, style);
   // A rival who runs short of stamina buys heals first, as a player would: the biggest heals
   // that can fire for her style on this course (up to about 45% of her SP), then chart picks.
   function rivalHealSkills(p, style, sp, table) {
@@ -4342,8 +4335,8 @@
     const rows = r.screened.map((x) => `<tr><th>${x.ids.length ? x.ids.map((id) => esc(skillInfo(id)[0])).join(", ") : "nothing"}</th><td class="num">${x.spent}</td><td class="num">${pct(x.win)}</td><td class="num">${n2(x.place)}</td></tr>`).join("");
     const mix = Object.entries(r.mix).filter(([, n]) => n).map(([k, n]) => `${n} ${STYLE_LABEL[k]}`).join(", ");
     return `<p><b>Buy for winning:</b> ${r.selected.length ? r.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing"}. ${r.spent} / ${b.sp} SP.</p><p>${goalLine}</p>${duel}${pruned}
-      <details><summary>Every set raced in the field</summary><p class="mini">The strongest sets from the lengths search, each on the same ${r.draws * 20} races (same gate draws and seeds). Win % and average place.</p><div class="table-wrap"><table><thead><tr><th>Set</th><th>SP</th><th>Win</th><th>Place</th></tr></thead><tbody>${rows}</tbody></table></div></details>
-      <details><summary>The field and how it's raced</summary><p class="mini">${r.field} runners in GlobalSim (Global's game, version 77, checked against official race recordings), with pacing, lane changes, blocking and position fights between runners. Her: your stats, aptitudes, mood${r.unique ? ", her unique at level " + b.uniqueLv : ""}. ${r.team ? r.team + " teammate" + (r.team > 1 ? "s" : "") + " from your saved builds. " : ""}Rivals: ${mix}, ${r.strength === "equal" ? "as strong as her (her stats)" : r.strength === "weaker" ? "10% weaker than her" : "10% stronger than her"}, A aptitudes, each with her style's best chart skills this cup has within about her SP, no debuffs and no own unique${r.rivalHeals ? ` (with chart picks they ran out of stamina in ${Math.round(r.outOf * 100)}% of races, so they carry the biggest heals that can fire for their style here first)` : ""}: <b>a modeled field, not real players' builds</b>. Their skills: ${Object.entries(r.picks).map(([k, ids]) => `${STYLE_LABEL[k]}: ${ids.map((id) => esc(skillInfo(id)[0])).join(", ") || "none"}`).join("; ")}. ${r.draws} gate draws, ${r.races} races in all: every set on the same draws and seeds, the top two head to head on fresh races, each purchase checked by racing without it, and the result on races no step used. ${r.showdownOff ? `<span class="warn">Stamina showdown isn't in this check: the field simulator's version is experimental and mishandles recovery skills, so it's left off (the lengths check above includes showdown).</span> ` : ""}${p.global.start > TODAY ? "Skills at Global's current versions (this cup is a forecast). " : ""}${r.missing.length ? `<span class="warn">Not in the field simulator's skill table, so they do nothing here: ${r.missing.map((id) => esc(skillInfo(id)[0])).join(", ")}.</span> ` : ""}${r.unsupported.length ? `<span class="warn">The field simulator can't run these skills' conditions yet, so they were taken out of every runner: ${r.unsupported.map((id) => esc(skillInfo(id)[0])).join(", ")}.</span> ` : ""}${r.legacy.length ? `Older skill definitions (not yet audited by the simulator) for: ${r.legacy.map((id) => esc(skillInfo(id)[0])).join(", ")}.` : ""}</p></details>`;
+      <details><summary>Every set raced in the field</summary><p class="mini">The strongest sets from the lengths search, buying nothing, the best set minus each purchase, and a swap search in the field (removing, adding or exchanging one purchase), each on the same ${r.screenRaces} races (same gate draws, rivals and seeds). Win % and average place.</p><div class="table-wrap"><table><thead><tr><th>Set</th><th>SP</th><th>Win</th><th>Place</th></tr></thead><tbody>${rows}</tbody></table></div></details>
+      <details><summary>The field and how it's raced</summary><p class="mini">${r.field} runners in GlobalSim (Global's game, version 77, checked against official race recordings), with pacing, lane changes, blocking and position fights between runners. Her: your stats, aptitudes, mood${r.unique ? ", her unique at level " + b.uniqueLv : ""}. ${r.team ? r.team + " teammate" + (r.team > 1 ? "s" : "") + " from your saved builds. " : ""}${r.fields ? `Rivals: <b>top players' builds</b> from uma.moe's statistics of top-class Team Trials rosters at this distance (not CM-specific), four different fields taking turns: ${r.fields.map((f, i) => `field ${i + 1}: ${f.map((x) => `${esc(x.name)} (${STYLE_LABEL[x.style]}, ${x.skills.length} skills)`).join(", ")}`).join("; ")}. Their skills are drawn at real purchase rates from the 50 most-bought; real umas also carry minor skills not in that list.` : `Rivals: ${mix}, ${r.strength === "equal" ? "as strong as her (her stats)" : r.strength === "weaker" ? "10% weaker than her" : "10% stronger than her"}, A aptitudes, each with her style's best chart skills this cup has within about her SP, no debuffs and no own unique${r.rivalHeals ? ` (with chart picks they ran out of stamina in ${Math.round(r.outOf * 100)}% of races, so they carry the biggest heals that can fire for their style here first)` : ""}: <b>a modeled field, not real players' builds</b>. Their skills: ${Object.entries(r.picks).map(([k, ids]) => `${STYLE_LABEL[k]}: ${ids.map((id) => esc(skillInfo(id)[0])).join(", ") || "none"}`).join("; ")}.`} ${r.draws} gate draws, ${r.races} races in all: every set on the same draws and seeds, the top two head to head on fresh races, each purchase checked by racing without it, and the result on races no step used. ${r.showdownOff ? `<span class="warn">Stamina showdown isn't in this check: the field simulator's version is experimental and mishandles recovery skills, so it's left off (the lengths check above includes showdown).</span> ` : ""}${p.global.start > TODAY ? "Skills at Global's current versions (this cup is a forecast). " : ""}${r.missing.length ? `<span class="warn">Not in the field simulator's skill table, so they do nothing here: ${r.missing.map((id) => esc(skillInfo(id)[0])).join(", ")}.</span> ` : ""}${r.unsupported.length ? `<span class="warn">The field simulator can't run these skills' conditions yet, so they were taken out of every runner: ${r.unsupported.map((id) => esc(skillInfo(id)[0])).join(", ")}.</span> ` : ""}${r.legacy.length ? `Older skill definitions (not yet audited by the simulator) for: ${r.legacy.map((id) => esc(skillInfo(id)[0])).join(", ")}.` : ""}</p></details>`;
   }
   function soResultHTML(b, p) {
     if (soJob.running) return `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`;
@@ -4436,10 +4429,12 @@
     const mix = soMix(b, p), n = Object.values(mix).reduce((a, c) => a + c, 0), saved = state.soSaved || [];
     const own = SO.encode(b);
     return `<p class="mini">She races ${p.kind === "loh" ? "11" : "8"} rivals (and your teammates, if you pick them) in GlobalSim, a full-field simulator with blocking, lanes and position fights. ${p.kind === "loh" ? "League of Heroes scores by placing, so the goal is her best average place." : "The goal is her win rate (her team's, with teammates)."}</p>
-      <div class="row-wrap"><label class="field"><span>Rivals' strength</span><select data-so-field="strength">${[["weaker", "10% weaker than her"], ["equal", "As strong as her"], ["stronger", "10% stronger than her"]].map(([v, l]) => `<option value="${v}"${b.strength === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
-        ${FR.STYLES.map((k) => `<label class="field"><span>${STYLE_LABEL[k]} rivals</span><input type="number" min="0" max="17" inputmode="numeric" data-so-mix="${k}" value="${mix[k] || 0}"></label>`).join("")}</div>
+      <div class="row-wrap"><label class="field grow"><span>Rivals</span><select data-so-field="strength">${[["top-strong", "Top players: strong (top-class stats, upper half)"], ["top-typical", "Top players: typical (top-class median stats)"], ["equal", "Modeled: as strong as her"], ["weaker", "Modeled: 10% weaker than her"], ["stronger", "Modeled: 10% stronger than her"]].map(([v, l]) => `<option value="${v}"${b.strength === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        ${topField(b) ? "" : FR.STYLES.map((k) => `<label class="field"><span>${STYLE_LABEL[k]} rivals</span><input type="number" min="0" max="17" inputmode="numeric" data-so-mix="${k}" value="${mix[k] || 0}"></label>`).join("")}</div>
+      ${topField(b) ? `<p class="mini">Rivals are drawn from what top players run at ${esc(poolName(p))} distance (uma.moe statistics of ${RP ? RP.meta.classTrainers.toLocaleString() : "?"} top-class Team Trials trainers, ${RP ? fmtDate(RP.meta.version) : ""}): the most-picked umas by pick rate, each with her own aptitudes, unique and best style, top-class stats, and skills at their real purchase rates, debuffs included. Four different fields take turns, as opponents change from race to race.</p>` : ""}
+      <div class="row-wrap"><label class="chip-toggle"><input type="checkbox" data-so-field="precise"${b.precise ? " checked" : ""}> More precise (about 2.5× the races, for close calls)</label></div>
       <div class="row-wrap">${[0, 1].map((i) => `<label class="field grow"><span>Teammate ${i + 1}</span><select data-so-team="${i}"><option value="">None</option>${saved.filter((x) => x.code !== own).map((x) => `<option value="${esc(x.code)}"${b.team[i] === x.code ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>`).join("")}</div>
-      <p class="mini">${n} rivals${b.team.length ? ` + ${b.team.length} teammate${b.team.length > 1 ? "s" : ""}` : ""}${n + b.team.length + 1 !== soFieldSize(p) ? ` <span class="warn">(a real ${p.kind === "loh" ? "League of Heroes" : "CM"} race has ${soFieldSize(p)} runners)</span>` : ""}. Teammates come from your saved builds: save each ace's build first.</p>`;
+      <p class="mini">${topField(b) ? soFieldSize(p) - 1 - b.team.length : n} rivals${b.team.length ? ` + ${b.team.length} teammate${b.team.length > 1 ? "s" : ""}` : ""}${!topField(b) && n + b.team.length + 1 !== soFieldSize(p) ? ` <span class="warn">(a real ${p.kind === "loh" ? "League of Heroes" : "CM"} race has ${soFieldSize(p)} runners)</span>` : ""}. Teammates come from your saved builds: save each ace's build first.</p>`;
   }
   function soChanged() { save(); renderTab(); }
   async function runSkillOpt() {
@@ -4491,21 +4486,25 @@
           const rivalSp = Math.max(1200, +b.sp + ownCost), mix = soMix(b, p), picks = {};
           FR.STYLES.forEach((k) => { if (mix[k]) picks[k] = rivalSkills(p, k, rivalSp, gs.table); });
           const team = b.team.map((code) => teammate(code, p)).filter(Boolean);
-          let field = FR.rivals(her, { mix, strength: b.strength, skillsFor: (k) => picks[k] });
+          let field = topField(b) ? null : FR.rivals(her, { mix, strength: b.strength, skillsFor: (k) => picks[k] });
+          const familyOf = (id) => (window.UmaSkillBudget.DATA.skills[id] || [id])[0];
+          const fields = topField(b) ? [0, 1, 2, 3].map((i) => FR.topRivals(RP.distances[poolName(p)], { preset: p, count: soFieldSize(p) - 1 - team.length, seed: 1000 + i * 7919 + p.course.id,
+            level: b.strength === "top-typical" ? "typical" : "strong", trainee: (id) => D.trainee(+id), allowed: (id) => released(id, p), table: gs.table, mood: +b.mood, uniqueLevel: 4, familyOf })) : null;
+          if (fields) field = fields[0];
           // If the rivals run out of stamina in more than 30% of races, they carry heals instead.
           const unsupported = new Set(), runIt = (req, seeds) => pool.runResults(req, seeds, { signal: ctrl.signal });
           const probe = await FR.runSafe({ preset: p, table: gs.table, settings: gs.settings, run: runIt }, [FR.runner(her)].concat(team.map(FR.runner), field.map(FR.runner)), FR.layouts(1 + team.length + field.length, 1)[0], Array.from({ length: 24 }, (_, i) => 777000 + i), unsupported);
           const outOf = probe.reduce((n, r) => n + r.results.slice(1 + team.length).filter((x) => x.hpEmptyOnRace).length, 0) / (probe.length * field.length);
           let rivalHeals = false;
-          if (outOf > 0.3) { rivalHeals = true; FR.STYLES.forEach((k) => { if (mix[k]) picks[k] = rivalHealSkills(p, k, rivalSp, gs.table); }); field = FR.rivals(her, { mix, strength: b.strength, skillsFor: (k) => picks[k] }); }
+          if (!fields && outOf > 0.3) { rivalHeals = true; FR.STYLES.forEach((k) => { if (mix[k]) picks[k] = rivalHealSkills(p, k, rivalSp, gs.table); }); field = FR.rivals(her, { mix, strength: b.strength, skillsFor: (k) => picks[k] }); }
           const mine = [...new Set(learned.concat(available))];
-          const field2 = await FR.search({ preset: p, kind: p.kind, her, learned, team, field, table: gs.table, settings: gs.settings,
+          const field2 = await FR.search({ preset: p, kind: p.kind, her, learned, team, field, fields, table: gs.table, options: plan.ranking, sp: +b.sp, precise: b.precise, settings: gs.settings,
             // GlobalSim's showdown is an experimental option that mishandles recovery skills (a heal
             // made runners run out of stamina in 90% of races); the validated setup leaves it off.
-            showdown: false, candidates: plan.shortlist.concat([[]], plan.shortlist[0].map((x) => plan.shortlist[0].filter((y) => y !== x))), familyOf: (id) => (window.UmaSkillBudget.DATA.skills[id] || [id])[0],
+            showdown: false, candidates: plan.shortlist.concat([[]], plan.shortlist[0].map((x) => plan.shortlist[0].filter((y) => y !== x))), familyOf,
             run: runIt, unsupported, signal: ctrl.signal,
             progress: (f) => { if (!same()) return; soJob.progress = 40 + f * 60; const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing the field… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
-          if (same()) soJob.result.field2 = Object.assign(field2, { mix, strength: b.strength, team: team.length, unique: !!her.unique, rivalHeals, outOf, picks, showdownOff: !!(v.syoubu && p.course.distance >= 2101),
+          if (same()) soJob.result.field2 = Object.assign(field2, { mix, strength: b.strength, team: team.length, unique: !!her.unique, rivalHeals, outOf, picks, fields, showdownOff: !!(v.syoubu && p.course.distance >= 2101),
             missing: mine.filter((id) => !gs.table[id]), legacy: mine.filter((id) => gs.legacy.has(id)) });
         } catch (error) { if (same() && !/cancel|abort/i.test(error.message || "")) soJob.result.fieldError = error.message || String(error); }
         finally { if (pool) pool.close(); soJob.abort = null; }
