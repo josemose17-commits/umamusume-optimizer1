@@ -4272,16 +4272,94 @@
     return `Race check: the JP Umalator as JP's game was on this cup's JP date (${fmtDate(p.jp.start)}): skills at their versions then, ${showdown}.`;
   }
   const soNum = (x) => (Number.isFinite(x) ? x.toFixed(2) : "–");
+  // ---- "For winning": the full-field simulator (GlobalSim, field-race.js) ----
+  const FR = window.UmaFieldRace;
+  let gsLoad = null;
+  function globalSim() {
+    return gsLoad || (gsLoad = (async () => {
+      const base = new URL("vendor/globalsim/", location.href);
+      const G = await import(new URL("index.js?v=" + ASSET_V, base).href);
+      G.setGeometrySource(new URL("course_geometry/", base).href);
+      const [table, settings] = await Promise.all(["skill-data.json", "settings.json"].map((f) => fetch(new URL(f + "?v=" + ASSET_V, base)).then((r) => { if (!r.ok) throw new Error("The full-field simulator did not load."); return r.json(); })));
+      return { G, table: table.skills, legacy: new Set(table.legacy), settings };
+    })().catch((e) => { gsLoad = null; throw e; }));
+  }
+  // Why the full-field check can't run this cup, or "".
+  function fieldUnsupported(p) {
+    return ["11703", "11709"].includes(String(p.course.id)) ? "The full-field simulator has no track data for Del Mar yet." : "";
+  }
+  const soMix = (b, p) => b.mix || FR.MIX[p.kind === "loh" ? "loh" : "cm"];
+  const soFieldSize = (p) => (p.kind === "loh" ? 12 : 9);
+  // A rival's skills: the best chart picks for her style that this cup has (no debuffs), at hint
+  // Lv2, within about the SP a finished uma has.
+  function rivalSkills(p, style, sp, table) {
+    const vals = skillMap(p.id, style).map;
+    const ids = Object.keys(vals).filter((id) => vals[id] > 0 && released(id, p) && table[id] && !(window.UmaDebuffs && window.UmaDebuffs[id])).sort((a, c) => vals[c] - vals[a]).slice(0, 16);
+    return SO.quickPlan({ skills: ids.map((id) => ({ id, hint: 2 })), values: vals, sp, fast: false }).selected.map((x) => x.id);
+  }
+  // Whether a skill's conditions (data/skill-kinds.js, @ = or, & = and) can hold on this course for
+  // this style. Only the fixed parts are checked: style, distance, surface, track and direction.
+  function canFire(conds, p, style) {
+    const fixed = { running_style: STYLES.findIndex((x) => x[0] === style) + 1, distance_type: { Sprint: 1, Mile: 2, Medium: 3, Long: 4 }[p.course.dist],
+      ground_type: p.course.surface === "Dirt" ? 2 : 1, track_id: +String(p.course.id).slice(0, 5), rotation: p.course.turn === "Left" ? 2 : 1 };
+    return (conds || []).join("@").split("@").some((alt) => alt.split("&").every((tok) => {
+      const m = /^(\w+)(==|!=)(\d+)$/.exec(tok);
+      if (!m || !(m[1] in fixed) || !fixed[m[1]]) return true;
+      return m[2] === "==" ? fixed[m[1]] === +m[3] : fixed[m[1]] !== +m[3];
+    }));
+  }
+  // A rival who runs short of stamina buys heals first, as a player would: the biggest heals
+  // that can fire for her style on this course (up to about 45% of her SP), then chart picks.
+  function rivalHealSkills(p, style, sp, table) {
+    const K = (window.UmaSkillKinds || {}).skills || {}, heal = (id) => Math.max(0, ...((table[id] || {}).alternatives || []).flatMap((a) => a.effects.filter((e) => e.type === 9).map((e) => e.modifier)));
+    const ids = Object.keys(K).filter((id) => K[id][0] === "recovery" && released(id, p) && table[id] && canFire(K[id][1], p, style) && !/activate_count|is_surrounded|blocked|change_order|is_overtake/.test(K[id][1].join("@")))
+      .sort((a, c) => heal(c) - heal(a));
+    const picked = SO.quickPlan({ skills: ids.slice(0, 8).map((id) => ({ id, hint: 2 })), values: Object.fromEntries(ids.map((id) => [id, heal(id) / 100])), sp: Math.round(sp * 0.45), fast: false }).selected.map((x) => x.id);
+    const fams = new Set(picked.map((id) => (window.UmaSkillBudget.DATA.skills[id] || [id])[0]));
+    const vals = skillMap(p.id, style).map;
+    const rest = Object.keys(vals).filter((id) => vals[id] > 0 && released(id, p) && table[id] && !(window.UmaDebuffs && window.UmaDebuffs[id]) && !fams.has((window.UmaSkillBudget.DATA.skills[id] || [id])[0])).sort((a, c) => vals[c] - vals[a]).slice(0, 14);
+    const spent = picked.reduce((n, id) => n + (SO.price(id, 2, false) || 0), 0);
+    return picked.concat(SO.quickPlan({ skills: rest.map((id) => ({ id, hint: 2 })), values: vals, sp: sp - spent, fast: false }).selected.map((x) => x.id));
+  }
+  // A saved build as a teammate: her stats, style and unique, the skills she has and her quick plan.
+  function teammate(code, p) {
+    const t2 = SO.decode(code);
+    if (!t2 || SO.STATS.some((s) => !(+t2.stats[s] > 0))) return null;
+    const tr = soTrainee(t2), vals = skillMap(p.id, t2.style).map;
+    const have = t2.skills.filter((x) => x.have).map((x) => x.id);
+    const buy = t2.sp === "" ? [] : SO.quickPlan({ skills: t2.skills, values: vals, sp: +t2.sp, fast: t2.fast }).selected.map((x) => x.id);
+    return { style: t2.style, stats: Object.fromEntries(SO.STATS.map((s) => [s, +t2.stats[s]])), apt: soApt(t2, p), mood: +t2.mood,
+      unique: tr && tr.us && tr.us[0] ? { id: String(tr.us[0]), level: +t2.uniqueLv } : null, skills: have.concat(buy) };
+  }
+  function fieldResultHTML(r, b, p) {
+    const pct = (x) => (x * 100).toFixed(1) + "%", n2 = (x) => x.toFixed(2), w = r.win, res = r.result, base = r.baseline;
+    const goalLine = r.goal === "place"
+      ? `Average place <b>${n2(res.place.mean)}</b> (± ${n2(res.place.ci95)}) of ${r.field}, buying nothing ${n2(base.place.mean)}. Top 3 in ${pct(res.top3.mean)}, wins ${pct(res.win.mean)}.`
+      : r.goal === "team" ? `Her team wins <b>${pct(res.team.mean)}</b> (± ${pct(res.team.ci95)}) of races (${pct(base.team.mean)} if she buys nothing); she wins ${pct(res.win.mean)} herself. Average place ${n2(res.place.mean)}.`
+      : `She wins <b>${pct(res.win.mean)}</b> (± ${pct(res.win.ci95)}) of races against this field, ${pct(base.win.mean)} if she buys nothing. Average place ${n2(res.place.mean)} of ${r.field}; top 3 in ${pct(res.top3.mean)}.`;
+    const duel = r.duel ? `<p class="mini">${r.duel.verdict === "tie" ? "<b>No clear difference</b> from" : "<b>Beat</b>"} the next-best set (${r.duel.other.length ? r.duel.other.map((id) => skillNameHTML(id)).join(", ") : "no purchases"}) on fresh races: ${r.goal === "place" ? n2(r.duel.diff.mean) + " places" : pct(r.duel.diff.mean)} ± ${r.goal === "place" ? n2(r.duel.diff.ci95) : pct(r.duel.diff.ci95)}${r.duel.verdict === "tie" ? "; the one with the better estimate is kept (unspent SP is worth nothing to a finished uma)" : ""}.</p>` : "";
+    const pruned = r.pruned.length ? `<p class="mini"><b>Not bought, no gain shown:</b> ${r.pruned.map((x) => `${skillNameHTML(x.id)} (${x.cost} SP)`).join(", ")}: without it she won and placed at least as well.</p>` : "";
+    const rows = r.screened.map((x) => `<tr><th>${x.ids.length ? x.ids.map((id) => esc(skillInfo(id)[0])).join(", ") : "nothing"}</th><td class="num">${x.spent}</td><td class="num">${pct(x.win)}</td><td class="num">${n2(x.place)}</td></tr>`).join("");
+    const mix = Object.entries(r.mix).filter(([, n]) => n).map(([k, n]) => `${n} ${STYLE_LABEL[k]}`).join(", ");
+    return `<p><b>Buy for winning:</b> ${r.selected.length ? r.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing"}. ${r.spent} / ${b.sp} SP.</p><p>${goalLine}</p>${duel}${pruned}
+      <details><summary>Every set raced in the field</summary><p class="mini">The strongest sets from the lengths search, each on the same ${r.draws * 20} races (same gate draws and seeds). Win % and average place.</p><div class="table-wrap"><table><thead><tr><th>Set</th><th>SP</th><th>Win</th><th>Place</th></tr></thead><tbody>${rows}</tbody></table></div></details>
+      <details><summary>The field and how it's raced</summary><p class="mini">${r.field} runners in GlobalSim (Global's game, version 77, checked against official race recordings), with pacing, lane changes, blocking and position fights between runners. Her: your stats, aptitudes, mood${r.unique ? ", her unique at level " + b.uniqueLv : ""}. ${r.team ? r.team + " teammate" + (r.team > 1 ? "s" : "") + " from your saved builds. " : ""}Rivals: ${mix}, ${r.strength === "equal" ? "as strong as her (her stats)" : r.strength === "weaker" ? "10% weaker than her" : "10% stronger than her"}, A aptitudes, each with her style's best chart skills this cup has within about her SP, no debuffs and no own unique${r.rivalHeals ? ` (with chart picks they ran out of stamina in ${Math.round(r.outOf * 100)}% of races, so they carry the biggest heals that can fire for their style here first)` : ""}: <b>a modeled field, not real players' builds</b>. Their skills: ${Object.entries(r.picks).map(([k, ids]) => `${STYLE_LABEL[k]}: ${ids.map((id) => esc(skillInfo(id)[0])).join(", ") || "none"}`).join("; ")}. ${r.draws} gate draws, ${r.races} races in all: every set on the same draws and seeds, the top two head to head on fresh races, each purchase checked by racing without it, and the result on races no step used. ${r.showdownOff ? `<span class="warn">Stamina showdown isn't in this check: the field simulator's version is experimental and mishandles recovery skills, so it's left off (the lengths check above includes showdown).</span> ` : ""}${p.global.start > TODAY ? "Skills at Global's current versions (this cup is a forecast). " : ""}${r.missing.length ? `<span class="warn">Not in the field simulator's skill table, so they do nothing here: ${r.missing.map((id) => esc(skillInfo(id)[0])).join(", ")}.</span> ` : ""}${r.unsupported.length ? `<span class="warn">The field simulator can't run these skills' conditions yet, so they were taken out of every runner: ${r.unsupported.map((id) => esc(skillInfo(id)[0])).join(", ")}.</span> ` : ""}${r.legacy.length ? `Older skill definitions (not yet audited by the simulator) for: ${r.legacy.map((id) => esc(skillInfo(id)[0])).join(", ")}.` : ""}</p></details>`;
+  }
   function soResultHTML(b, p) {
     if (soJob.running) return `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`;
     if (soJob.error) return `<p class="mini warn">${esc(soJob.error)}</p>`;
     const r = soJob.result;
     if (!r) return `<p class="mini">Press <b>Race-check</b> to race the best sets head to head on this course (about a minute). The quick plan above adds up chart gains; the race check also catches skills that need each other, overlap, or need stamina she doesn't have.</p>`;
     const stale = soJob.key !== SO.encode(b);
+    if (r.fieldError) return `${stale ? `<p class="mini warn">Inputs changed since this check. <button type="button" class="linkish" data-so="race">Race-check again</button></p>` : ""}<p class="mini warn">Full-field check failed: ${esc(r.fieldError)}</p>`;
+    if (r.field2) return `${stale ? `<p class="mini warn">Inputs changed since this check. <button type="button" class="linkish" data-so="race">Race-check again</button></p>` : ""}${fieldResultHTML(r.field2, b, p)}<details><summary>The lengths result it started from</summary>${soLengthHTML(b, p, r)}</details>`;
+    return (stale ? `<p class="mini warn">Inputs changed since this check. <button type="button" class="linkish" data-so="race">Race-check again</button></p>` : "") + soLengthHTML(b, p, r);
+  }
+  function soLengthHTML(b, p, r) {
     const note = (id) => skillCaveat(id, r.conditions[id], p.id, b.style);
     const rows = (list, mode) => list.map((x) => `<tr><th>${skillNameHTML(x.id)}${note(x.id) ? `<div class="mini">${esc(note(x.id))}</div>` : ""}</th><td>${x.cost}${mode === "rank" && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${soNum((mode === "rank" ? x.result : x.marginal).mean)}</td><td>${soNum(x.per100)}</td></tr>`).join("");
     const plan = r.plan, spurt = plan.result.fullSpurt;
-    return `${stale ? `<p class="mini warn">Inputs changed since this check. <button type="button" class="linkish" data-so="race">Race-check again</button></p>` : ""}
+    return `
       ${r.staticReason ? `<p class="mini warn">Course-chart only: ${esc(r.staticReason)}</p>` : ""}
       <p><b>Buy:</b> ${plan.selected.length ? plan.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing: no purchase gains length"}. ${plan.spent} / ${plan.budget} SP, ${plan.unspent} left. <b>+${soNum(plan.result.mean)} L</b> on average${plan.result.ci95 ? ` (± ${soNum(plan.result.ci95)})` : ""} over what she has; worst 10% of races ${soNum(plan.result.low)} L.</p>
       ${duelHTML(plan)}${prunedHTML(plan)}
@@ -4342,6 +4420,8 @@
         ${quickHTML}
       </section>
       <section class="panel"><h3>Race check</h3>
+        <div class="row-wrap"><label class="field grow"><span>Goal</span><select data-so-field="goal"><option value="length"${b.goal !== "win" ? " selected" : ""}>Most lengths gained (fast)</option><option value="win"${b.goal === "win" ? " selected" : ""}>${p.kind === "loh" ? "Best finish" : "Win the race"} in a full field (about a minute)</option></select></label></div>
+        ${b.goal === "win" ? soFieldHTML(b, p) : ""}
         <button type="button" class="btn" data-so="race">${soJob.running ? "Restart race check" : "Race-check"}</button>
         <div id="soOut">${soResultHTML(b, p)}</div>
       </section>
@@ -4349,6 +4429,17 @@
         <div class="row-wrap"><button type="button" class="btn ghost small" data-so="share">Copy share link</button><label class="field grow"><span>Save as</span><input id="soName" placeholder="${esc((t ? t.n : "Build") + " · " + p.name)}"></label><button type="button" class="btn ghost small" data-so="save">Save</button></div>
         ${saved.length ? `<ul class="so-saved">${saved.map((s, i) => `<li><button type="button" class="linkish" data-so-load="${i}">${esc(s.name)}</button> <span class="mini">${esc(s.at || "")}</span> <button type="button" class="linkish" data-so-del="${i}" aria-label="Delete ${esc(s.name)}">✕</button></li>`).join("")}</ul>` : `<p class="mini">Saved builds stay in this browser. A share link carries the whole build.</p>`}
       </section></div>`;
+  }
+  function soFieldHTML(b, p) {
+    const why = fieldUnsupported(p);
+    if (why) return `<p class="mini warn">${esc(why)} The lengths check still runs.</p>`;
+    const mix = soMix(b, p), n = Object.values(mix).reduce((a, c) => a + c, 0), saved = state.soSaved || [];
+    const own = SO.encode(b);
+    return `<p class="mini">She races ${p.kind === "loh" ? "11" : "8"} rivals (and your teammates, if you pick them) in GlobalSim, a full-field simulator with blocking, lanes and position fights. ${p.kind === "loh" ? "League of Heroes scores by placing, so the goal is her best average place." : "The goal is her win rate (her team's, with teammates)."}</p>
+      <div class="row-wrap"><label class="field"><span>Rivals' strength</span><select data-so-field="strength">${[["weaker", "10% weaker than her"], ["equal", "As strong as her"], ["stronger", "10% stronger than her"]].map(([v, l]) => `<option value="${v}"${b.strength === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        ${FR.STYLES.map((k) => `<label class="field"><span>${STYLE_LABEL[k]} rivals</span><input type="number" min="0" max="17" inputmode="numeric" data-so-mix="${k}" value="${mix[k] || 0}"></label>`).join("")}</div>
+      <div class="row-wrap">${[0, 1].map((i) => `<label class="field grow"><span>Teammate ${i + 1}</span><select data-so-team="${i}"><option value="">None</option>${saved.filter((x) => x.code !== own).map((x) => `<option value="${esc(x.code)}"${b.team[i] === x.code ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>`).join("")}</div>
+      <p class="mini">${n} rivals${b.team.length ? ` + ${b.team.length} teammate${b.team.length > 1 ? "s" : ""}` : ""}${n + b.team.length + 1 !== soFieldSize(p) ? ` <span class="warn">(a real ${p.kind === "loh" ? "League of Heroes" : "CM"} race has ${soFieldSize(p)} runners)</span>` : ""}. Teammates come from your saved builds: save each ace's build first.</p>`;
   }
   function soChanged() { save(); renderTab(); }
   async function runSkillOpt() {
@@ -4385,8 +4476,40 @@
         return raceMemo.get(key);
       };
       const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available, learned, hints, sp: +b.sp, values, must: [], compare, scale: raceScale(p, b.style, available), maxEvaluations: 96, fastLearner: b.fast,
-        progress: (f) => { if (!same()) return; soJob.progress = f * 100; const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
+        progress: (f) => { if (!same()) return; soJob.progress = f * (b.goal === "win" && !fieldUnsupported(p) ? 40 : 100); const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
       if (same()) soJob.result = { plan, staticReason: unsupported, engineNote: soEngineNote(p), field: p.kind === "loh" ? 12 : 9, conditions: skillConditions(catalog, plan.ranking.map((x) => x.id).concat(available)) };
+      if (same() && b.goal === "win" && !fieldUnsupported(p)) {
+        let pool = null;
+        try {
+          const gs = await globalSim();
+          if (!same()) return;
+          const ctrl = new AbortController(); soJob.abort = ctrl;
+          pool = await gs.G.RacePool.create({ size: Math.max(1, Math.min(6, (navigator.hardwareConcurrency || 4) - 1)) });
+          const v = simVariant(p), tid = t && t.us && t.us[0] ? String(t.us[0]) : null;
+          const her = { style: b.style, stats: Object.fromEntries(SO.STATS.map((s) => [s, +b.stats[s]])), apt, mood: +b.mood, unique: tid && gs.table[tid] ? { id: tid, level: +b.uniqueLv } : null };
+          const ownCost = b.skills.filter((x) => x.have).reduce((n, x) => n + (SO.price(x.id, x.hint, b.fast) || 0), 0);
+          const rivalSp = Math.max(1200, +b.sp + ownCost), mix = soMix(b, p), picks = {};
+          FR.STYLES.forEach((k) => { if (mix[k]) picks[k] = rivalSkills(p, k, rivalSp, gs.table); });
+          const team = b.team.map((code) => teammate(code, p)).filter(Boolean);
+          let field = FR.rivals(her, { mix, strength: b.strength, skillsFor: (k) => picks[k] });
+          // If the rivals run out of stamina in more than 30% of races, they carry heals instead.
+          const unsupported = new Set(), runIt = (req, seeds) => pool.runResults(req, seeds, { signal: ctrl.signal });
+          const probe = await FR.runSafe({ preset: p, table: gs.table, settings: gs.settings, run: runIt }, [FR.runner(her)].concat(team.map(FR.runner), field.map(FR.runner)), FR.layouts(1 + team.length + field.length, 1)[0], Array.from({ length: 24 }, (_, i) => 777000 + i), unsupported);
+          const outOf = probe.reduce((n, r) => n + r.results.slice(1 + team.length).filter((x) => x.hpEmptyOnRace).length, 0) / (probe.length * field.length);
+          let rivalHeals = false;
+          if (outOf > 0.3) { rivalHeals = true; FR.STYLES.forEach((k) => { if (mix[k]) picks[k] = rivalHealSkills(p, k, rivalSp, gs.table); }); field = FR.rivals(her, { mix, strength: b.strength, skillsFor: (k) => picks[k] }); }
+          const mine = [...new Set(learned.concat(available))];
+          const field2 = await FR.search({ preset: p, kind: p.kind, her, learned, team, field, table: gs.table, settings: gs.settings,
+            // GlobalSim's showdown is an experimental option that mishandles recovery skills (a heal
+            // made runners run out of stamina in 90% of races); the validated setup leaves it off.
+            showdown: false, candidates: plan.shortlist.concat([[]], plan.shortlist[0].map((x) => plan.shortlist[0].filter((y) => y !== x))), familyOf: (id) => (window.UmaSkillBudget.DATA.skills[id] || [id])[0],
+            run: runIt, unsupported, signal: ctrl.signal,
+            progress: (f) => { if (!same()) return; soJob.progress = 40 + f * 60; const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing the field… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
+          if (same()) soJob.result.field2 = Object.assign(field2, { mix, strength: b.strength, team: team.length, unique: !!her.unique, rivalHeals, outOf, picks, showdownOff: !!(v.syoubu && p.course.distance >= 2101),
+            missing: mine.filter((id) => !gs.table[id]), legacy: mine.filter((id) => gs.legacy.has(id)) });
+        } catch (error) { if (same() && !/cancel|abort/i.test(error.message || "")) soJob.result.fieldError = error.message || String(error); }
+        finally { if (pool) pool.close(); soJob.abort = null; }
+      }
     } catch (error) { if (same() && !/cancelled/i.test(error.message || "")) soJob.error = error.message || String(error); }
     finally { if (worker) worker.close(); if (same()) { soJob.running = false; soJob.worker = null; if (state.tab === "skillopt") renderTab(); } }
   }
@@ -4427,7 +4550,7 @@
     }
     if (act === "clear") { b.skills = []; soChanged(); return true; }
     if (act === "race") { runSkillOpt(); return true; }
-    if (act === "stop") { if (soJob.worker) soJob.worker.close(); soJob.token = null; soJob.running = false; soJob.worker = null; renderTab(); return true; }
+    if (act === "stop") { if (soJob.abort) soJob.abort.abort(); if (soJob.worker) soJob.worker.close(); soJob.token = null; soJob.running = false; soJob.worker = null; renderTab(); return true; }
     if (act === "share") {
       const url = location.origin + location.pathname + "#so=" + SO.encode(b);
       try { navigator.clipboard.writeText(url).then(() => flash("Share link copied"), () => prompt("Copy this link", url)); } catch (err) { prompt("Copy this link", url); }
@@ -4448,6 +4571,8 @@
     else if (el.dataset.soApt) b.apt[el.dataset.soApt] = el.value;
     else if (el.dataset.soHint != null) b.skills[+el.dataset.soHint].hint = +el.value;
     else if (el.dataset.soHave != null) b.skills[+el.dataset.soHave].have = el.checked;
+    else if (el.dataset.soMix) { b.mix = Object.assign({}, soMix(b, presetById(b.cup)), { [el.dataset.soMix]: +el.value || 0 }); }
+    else if (el.dataset.soTeam != null) { const team = b.team.slice(); team[+el.dataset.soTeam] = el.value; b.team = team.filter(Boolean); }
     else if (el.dataset.soTrainee) {
       const t = traineeByLabel.get(el.value.trim());
       if (!t && el.value.trim()) { flash("Pick a trainee from the list."); return true; }

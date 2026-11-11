@@ -269,7 +269,10 @@
       ranking.push(Object.assign({},x,{result,per100:x.cost?result.mean*100/x.cost:null}));
     }
     ranking.sort((a,b)=>(b.per100||0)-(a.per100||0));
-    return { selected: rows, ranking, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
+    // The strongest distinct sets the search raced, for a full-field check of winning (field-race.js).
+    const shortlist = [best.selected].concat(checked.map(x => x.selected), [...cache.values()].filter(Boolean)
+      .sort((a, b) => b.required - a.required || b.result.mean - a.result.mean).slice(0, 12).map(x => x.selected));
+    return { selected: rows, ranking, shortlist, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
       evaluations: calls, failedSets, method, learned, duel, pruned, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
