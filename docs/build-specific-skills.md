@@ -106,3 +106,17 @@ saved settings, automatic deck predictions, future version guards and the 390px 
 `test/skill-access.test.js`, `test/cm-plan.test.js` and `test/family.test.js` cover typed
 wishes without sources, gold/white routes, six-slot inheritance, affordable SS purchases,
 purchase-driven parent ranking and decoded rental links, and duplicate access.
+
+## Brute-force checks (Nov 11, 2026)
+
+The lengths search was checked against racing every affordable combination of a real shop on
+192 fresh races each (`optimize` on the pinned workers, then all combinations of the charted skills):
+
+| Cup, style, SP | Simulator | Combinations | Optimizer's pick |
+|---|---|---:|---|
+| League of Heroes 1, Pace, 1500 | JP-dated (long-race showdown) | 144 | #1 |
+| CM 22, Late, 800 | JP-dated | 108 | #1 |
+| CM 21, Pace, 700 | Global | 108 | #1 |
+
+Before the full-set mode and pruning, the first check's pick was tied with #1 but spent 323 SP on a
+skill that added nothing; those changes came from it.

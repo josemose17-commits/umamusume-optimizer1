@@ -67,18 +67,31 @@
     for (let i = 0; i < o.count && umas.length; i++) {
       let r = rand() * total, u = umas[umas.length - 1];
       for (const x of umas) { r -= x.w; if (r <= 0) { u = x; break; } }
-      const k = [1, 0, 2, 3].reduce((b, j) => (rank(u.t.apt[6 + j]) > rank(u.t.apt[6 + b]) ? j : b), 1), style = STYLES[k];
+      // Her own players' build at this distance when the data has one (style split, stats, unique
+      // level, skills), else the distance's pool and her best style.
+      const own = (pool.builds || {})[u.id];
+      let k = [1, 0, 2, 3].reduce((b, j) => (rank(u.t.apt[6 + j]) > rank(u.t.apt[6 + b]) ? j : b), 1);
+      if (own && own.styles && own.styles.some((x) => x > 0)) {
+        let q = rand() * own.styles.reduce((a, x) => a + x, 0);
+        for (let j = 0; j < 4; j++) { q -= own.styles[j]; if (q <= 0) { k = j; break; } }
+      }
+      const style = STYLES[k], src = own || pool;
       const stats = {};
-      STATS.forEach((st) => { const q = pool.stats[st]; stats[st] = Math.round(q[lo] + rand() * (q[hi] - q[lo])); });
+      STATS.forEach((st) => { const q = src.stats[st]; stats[st] = Math.round(q[lo] + rand() * (q[hi] - q[lo])); });
+      let level = o.uniqueLevel || 4;
+      if (own && own.unique && own.unique.levels) {
+        let q = rand();
+        for (const [lv, share] of Object.entries(own.unique.levels)) { q -= share; if (q <= 0) { level = +lv; break; } }
+      }
       const picked = new Map(), familyOf = o.familyOf || ((id) => id);
-      pool.skills.forEach(([id, rate]) => {
+      src.skills.forEach(([id, rate]) => {
         if (/^1\d{5}$/.test(id) || !o.allowed(id) || !o.table[id] || !canFire(conditionsOf(o.table[id]), p, style) || rand() >= rate) return;
         const f = familyOf(id), had = picked.get(f);
         if (!had || +id < +had) picked.set(f, id); // a higher tier (lower ID) replaces the lower one
       });
       const uid = u.t.us && u.t.us[0] ? String(u.t.us[0]) : null;
       out.push({ name: u.t.n, uma: u.id, style, stats, apt: [u.t.apt[di], u.t.apt[si], u.t.apt[6 + k]], mood: o.mood || 0,
-        unique: uid && o.table[uid] ? { id: uid, level: o.uniqueLevel || 4 } : null, skills: [...picked.values()] });
+        unique: uid && o.table[uid] ? { id: uid, level } : null, skills: [...picked.values()], own: !!own });
     }
     return out;
   }
@@ -115,6 +128,27 @@
         bad.forEach((id) => unsupported.add(id));
       }
     }
+  }
+  // Every full affordable set from options (one per family; full: no other family still fits),
+  // or null when there are more than cap.
+  function fullSets(options, sp, cap) {
+    const fams = new Map();
+    options.forEach((x) => { if (!fams.has(x.family)) fams.set(x.family, []); fams.get(x.family).push(x); });
+    const groups = [...fams.values()];
+    let sets = [[]];
+    for (const g of groups) {
+      const next = sets.slice();
+      for (const set of sets) {
+        const spent = set.reduce((n, x) => n + x.cost, 0);
+        for (const x of g) if (spent + x.cost <= sp) { next.push(set.concat(x)); if (next.length > 20000) return null; }
+      }
+      sets = next;
+    }
+    const full = sets.filter((set) => {
+      const spent = set.reduce((n, x) => n + x.cost, 0), used = new Set(set.map((x) => x.family));
+      return !groups.some((g) => !used.has(g[0].family) && g.some((x) => spent + x.cost <= sp));
+    });
+    return full.length <= cap ? full : null;
   }
   // Mean and 95% interval (normal approximation) of a list.
   function summary(xs) {
@@ -167,6 +201,12 @@
     const spent = (set) => set.reduce((n, x) => n + x.cost, 0);
     const uniq = [];
     o.candidates.forEach((set) => { if (!uniq.some((u) => keyOf(u) === keyOf(set))) uniq.push(set); });
+    // A small shop: every full set her SP allows races too, so the best one can't be missed (the
+    // pruning step then drops purchases that don't help). Bigger shops get the swap search.
+    const cap = o.exhaustive == null ? 60 : o.exhaustive;
+    const full = o.options && o.options.length && cap > 0 && o.sp != null ? fullSets(o.options, o.sp, cap) : null;
+    if (full) full.forEach((set) => { if (!uniq.some((u) => keyOf(u) === keyOf(set))) uniq.push(set); });
+    const method = full ? "every full set" : "search";
     // Preflight: every skill in play on a few races per gate draw, so a condition the engine can't
     // run is found before any set is scored (it is raised only when that trigger comes up).
     const allIds = [...new Set(uniq.flat().map((x) => x.id))];
@@ -178,7 +218,7 @@
       cache.clear(); done = 0; // a skill was taken out mid-search: race every set again on the same field
     }
     async function body() {
-    total = draws.length * ((uniq.length + (o.options && o.options.length ? (o.moves == null ? 30 : o.moves) : 0)) * SCREEN + CHECK * 4 + Math.round(CHECK / 2) * ((o.candidates[0] || []).length + 2));
+    total = draws.length * ((uniq.length + (!full && o.options && o.options.length ? (o.moves == null ? 30 : o.moves) : 0)) * SCREEN + CHECK * 4 + Math.round(CHECK / 2) * ((o.candidates[0] || []).length + 2));
     // 1. Screen every candidate on the same races.
     const screened = [];
     for (const set of uniq) screened.push({ set, r: await races(set, 1, SCREEN) });
@@ -186,7 +226,7 @@
     // 1b. Swap search in the field itself, so the answer doesn't rest on the lengths search's
     // shortlist: from the best set, remove, add or exchange one purchase (o.options, most
     // promising first) on the same races; move on the first improvement, up to o.moves sets.
-    if (o.options && o.options.length) {
+    if (!full && o.options && o.options.length) {
       const limit = o.moves == null ? 30 : o.moves, budget = o.sp == null ? Infinity : o.sp;
       let center = screened[0], tried = 0, moved = true;
       while (moved && tried < limit) {
@@ -252,11 +292,11 @@
     if (o.progress) o.progress(1);
     return { selected: set, spent: spent(set), result: report(fin), baseline: report(none), gain: paired(fin, none), duel, pruned,
       screened: screened.map((x) => ({ ids: x.set.map((s) => s.id), spent: spent(x.set), score: score(x.r), win: summary(x.r.win).mean, place: summary(x.r.place).mean })),
-      unsupported: [...unsupported].sort(), races: done, draws: draws.length, screenRaces: draws.length * SCREEN, field: 1 + o.team.length + o.field.length, goal: loh ? "place" : o.team.length ? "team" : "win" };
+      method, fullSets: full ? full.length : 0, unsupported: [...unsupported].sort(), races: done, draws: draws.length, screenRaces: draws.length * SCREEN, field: 1 + o.team.length + o.field.length, goal: loh ? "place" : o.team.length ? "team" : "win" };
     }
   }
 
-  const api = { STYLES, MIX, STRENGTH, course, runner, rivals, topRivals, canFire, conditionsOf, layouts, request, runSafe, summary, search };
+  const api = { STYLES, MIX, STRENGTH, course, runner, rivals, topRivals, canFire, conditionsOf, layouts, request, runSafe, fullSets, summary, search };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFieldRace = api;
 })(typeof window !== "undefined" ? window : globalThis);
