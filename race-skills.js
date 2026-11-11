@@ -60,7 +60,10 @@
   const load = () => catalogPromise || (catalogPromise = fetch("data/race-skills.json" + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { catalogPromise = null; throw e; }));
   async function optimize(o) {
     const learned = ids(o.learned), values = Object.assign({}, o.values), excluded = [];
-    const available = ids(o.available).filter(id => {
+    // o.scale: { id: share } for skills the engine fires on a sampled timing but that need a rival
+    // ahead (a Front Runner): 0 drops them (she leads alone), a share keeps that part of their gain.
+    const scale = o.scale || {}, offPosition = ids(o.available).filter(id => scale[id] === 0 && !learned.includes(id));
+    const available = ids(o.available).filter(id => !offPosition.includes(id)).filter(id => {
       if (o.catalog.skills[id] && o.catalog.meta[id] || o.allowChartOnly && B.DATA.skills[id] && Number.isFinite(values[id])) { if (!Number.isFinite(values[id])) values[id] = 0; return true; }
       excluded.push(id); return false;
     });
@@ -82,12 +85,19 @@
         excluded.push(x.id); delete values[x.id];
       }
     }
+    // A scaled skill's simulated gain beyond its share, taken off any set that contains it
+    // (additive: its standalone gain from the equipped baseline).
+    const cut = list => list.reduce((n, x) => { const f = scale[x.id]; const alone = preflight.get(x.id); return f > 0 && f < 1 && alone ? n + (1 - f) * alone.mean : n; }, 0);
+    const adjust = (result, list) => { const c = cut(list); return c ? Object.assign({}, result, { mean: result.mean - c, median: result.median - c, low: result.low - c, min: result.min - c, max: result.max - c, scaledOff: c }) : result; };
     budget = B.create({ learned, available, skills: values, must: o.must || [], includeZero: true });
     // Unvalued must-haves are normally retained by the purchase solver; an unsupported
     // race effect cannot be restored that way.
-    const groups = budget.options(o.hints || {}).map(g=>g.filter(x=>!excluded.includes(x.id))).filter(g=>g.length), options = groups.flat();
+    // An upgrade of an available skill can also be dropped (scale 0) by position.
+    const dropped = id => excluded.includes(id) || scale[id] === 0 && !learned.includes(id);
+    budget.options(o.hints || {}).flat().forEach(x => { if (scale[x.id] === 0 && !learned.includes(x.id) && !offPosition.includes(x.id)) offPosition.push(x.id); });
+    const groups = budget.options(o.hints || {}).map(g=>g.filter(x=>!dropped(x.id))).filter(g=>g.length), options = groups.flat();
     const seed = budget.solve(o.hints || {}, o.sp);
-    seed.selected=seed.selected.filter(x=>!excluded.includes(x.id));
+    seed.selected=seed.selected.filter(x=>!dropped(x.id));
     excluded.push(...seed.unsupported.filter(id=>!excluded.includes(id)));
     const limit = o.maxEvaluations || 96, cache = new Map();
     let calls = 0, failedSets = 0;
@@ -99,7 +109,7 @@
       const set = ids(learned.concat(selected.map(s => s.id))), satisfied = new Set(learned.concat(selected.flatMap(x => x.required)));
       const required = (o.must || []).map(String).filter(id => satisfied.has(id)).length;
       let result;
-      try { result = selected.length ? await o.compare(learned, set, 24, 271828) : summary([0]); }
+      try { result = selected.length ? adjust(await o.compare(learned, set, 24, 271828), selected) : summary([0]); }
       catch(error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error;cache.set(key,null);calls++;failedSets++;return null; }
       const v = { selected: selected.slice(), spent, required, result };
       cache.set(key, v); calls++; if (o.progress) o.progress(Math.min(0.95, calls / limit)); return v;
@@ -142,26 +152,27 @@
     if (!finalists.includes(cache.get(ids(seed.selected.map(s=>s.id)).join(".")))) finalists.push(cache.get(ids(seed.selected.map(s=>s.id)).join(".")));
     best = null;
     for (const x of finalists.filter(Boolean)) {
-      const r = await o.compare(learned, ids(learned.concat(x.selected.map(s=>s.id))), 96, 314159);
+      const r = adjust(await o.compare(learned, ids(learned.concat(x.selected.map(s=>s.id))), 96, 314159), x.selected);
       const v = Object.assign({}, x, { result: r }); if (better(v, best)) best = v;
     }
     const rows = [];
     for (const x of best.selected) {
       const rest = ids(learned.concat(best.selected.filter(s => s.id !== x.id).map(s=>s.id)));
-      const marginal = await o.compare(rest, ids(learned.concat(best.selected.map(s=>s.id))), 96, 314159);
+      const raw = await o.compare(rest, ids(learned.concat(best.selected.map(s=>s.id))), 96, 314159);
+      const marginal = adjust(raw, [x]);
       rows.push(Object.assign({}, x, { marginal, per100: x.cost ? marginal.mean * 100 / x.cost : null }));
     }
     rows.sort((a,b) => (b.per100 || 0) - (a.per100 || 0));
     const ranking = [];
     for (const x of options) {
       const k=ids([x.id]).join("."), cached=cache.get(k);
-      const result=cached ? cached.result : preflight.get(x.id);
+      const result=cached ? cached.result : adjust(preflight.get(x.id), [x]);
       ranking.push(Object.assign({},x,{result,per100:x.cost?result.mean*100/x.cost:null}));
     }
     ranking.sort((a,b)=>(b.per100||0)-(a.per100||0));
     return { selected: rows, ranking, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
-      evaluations: calls, failedSets, method: "bounded paired race comparisons", learned };
+      evaluations: calls, failedSets, method: "bounded paired race comparisons", learned, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
   const api = { summary, supported, horse, request, runner, load, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;

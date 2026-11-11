@@ -52,6 +52,7 @@
       cm: k.cm || null,
       pcm: k.pcm || null,
       cmp: k.cmp || null,
+      contest: k.contest || {},
       pull: k.pull || null,
       // The Parents tab's plan spans careers (lineage, G1 wins, rating check).
       parents: k.parents || null,
@@ -838,6 +839,12 @@
         if (v > 0) tg[e.target.dataset.cmTarget] = v; else delete tg[e.target.dataset.cmTarget];
         save();
         return;
+      }
+      if (e.target.dataset.cmContest != null) {
+        state.contest = state.contest || {};
+        const v = +e.target.value;
+        if (v > 0) state.contest[e.target.dataset.cmContest] = v; else delete state.contest[e.target.dataset.cmContest];
+        skillLimit = 60; save(); renderCM(); return;
       }
       if (e.target.dataset.cm != null) { cmInput(e.target); return; }
       if (e.target.dataset.tier != null) { tierInput(e.target); return; }
@@ -2241,10 +2248,17 @@
   }
   // Which half of the pack each skill needs on this cup (parent-relevance.js positionsWith).
   const posCache = {};
+  // Front Runners fight for the lead in this cup: the share of races someone is ahead of her
+  // (state.contest[cup], 0 = she leads alone). An assumption you set, not a measured rate.
+  const CONTEST_SHARES = [0.15, 0.3, 0.5];
+  const contestShare = (pid) => { const v = state.contest && +state.contest[pid]; return v > 0 && v <= 1 ? v : 0; };
   function positionsFor(p) {
     const v = p ? simVariant(p) : {};
-    if (!v.positions) return window.UmaSkillPositions;
-    return posCache[p.id] || (posCache[p.id] = window.UmaParentRelevance.positionsWith(window.UmaSkillPositions, v.positions));
+    const base = !v.positions ? window.UmaSkillPositions : posCache[p.id] || (posCache[p.id] = window.UmaParentRelevance.positionsWith(window.UmaSkillPositions, v.positions));
+    const share = p ? contestShare(p.id) : 0;
+    if (!share) return base;
+    const key = p.id + "@" + share;
+    return posCache[key] || (posCache[key] = window.UmaParentRelevance.withContest(base, share));
   }
   function simNote(p) {
     const v = simVariant(p);
@@ -2288,7 +2302,9 @@
   // data/skill-positions.js, parent-relevance.js positionFits.
   function skillRows(pid, style) {
     const pos = positionsFor(presetById(pid));
-    return chartRows(pid, style).filter((r) => window.UmaParentRelevance.positionFits(pos, r.id, style));
+    const PR = window.UmaParentRelevance;
+    // A rival-ahead skill for a Front Runner fighting for the lead counts at that share.
+    return chartRows(pid, style).filter((r) => PR.positionFits(pos, r.id, style)).map((r) => { const k = PR.aheadScale(pos, r.id, style); return k < 1 ? Object.assign({}, r, { L: r.L * k, mean: r.mean == null ? null : r.mean * k, ahead: k }) : r; });
   }
   // The rows skillRows leaves out, by why: { ahead, back, front }, most valuable first.
   function skillsLeftOut(pid, style) {
@@ -2296,11 +2312,25 @@
     chartRows(pid, style).forEach((r) => { const why = window.UmaParentRelevance.positionMiss(pos, r.id, style); if (why) out[why].push(r); });
     return out;
   }
+  // For the race simulator's set search: { id: share } for rival-ahead skills, which it fires on a
+  // sampled timing. A Front Runner who leads alone gets 0 (dropped), one fighting for the lead
+  // the cup's share; every other style and skill is simulated as is.
+  function raceScale(p, style, list) {
+    if (style !== "Nige") return {};
+    const PR = window.UmaParentRelevance, pos = positionsFor(p), out = {}, SB = window.UmaSkillBudget.DATA.skills;
+    // Every tier of each listed skill (an upgrade or its gold can be bought from it).
+    const fams = new Set(list.map((id) => SB[id] && SB[id][0]).filter(Boolean));
+    const all = new Set(list.map(String).concat(Object.keys(SB).filter((id) => fams.has(SB[id][0]))));
+    all.forEach((id) => { if (PR.positionMiss(pos, id, style) === "ahead") out[id] = 0; else { const k = PR.aheadScale(pos, id, style); if (k < 1) out[id] = k; } });
+    return out;
+  }
   // Why a skill can't fire for this style, in a few words, or "".
   const MISS_SHORT = { ahead: "won't fire while she leads", back: "needs her in the back half", front: "needs her in the front half" };
   function positionNote(pid, id, style) {
-    const why = window.UmaParentRelevance.positionMiss(positionsFor(presetById(pid)), id, style);
-    return why ? MISS_SHORT[why] : "";
+    const pos = positionsFor(presetById(pid)), why = window.UmaParentRelevance.positionMiss(pos, id, style);
+    if (why) return MISS_SHORT[why];
+    const k = window.UmaParentRelevance.aheadScale(pos, id, style);
+    return k < 1 ? `needs a rival ahead: counted at ${Math.round(k * 100)}%` : "";
   }
 
   function skillMap(pid, style) {
@@ -2458,7 +2488,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over) {
     const c = Object.assign({}, cm(host), over || {});
-    return [c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2721,6 +2751,7 @@
       </div>
       ${c ? `<div class="row-wrap">
         <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
+        ${c.style === "Nige" ? `<label class="field"><span>Front Runners in this cup</span><select data-cm-contest="${esc(p.id)}"><option value="0"${contestShare(p.id) ? "" : " selected"}>She leads alone</option>${CONTEST_SHARES.map((v) => `<option value="${v}"${contestShare(p.id) === v ? " selected" : ""}>Fight for the lead: someone ahead ${Math.round(v * 100)}% of the race</option>`).join("")}</select></label>` : ""}
         <button type="button" class="btn ghost small" data-cm-build="${p.build}" ${state.build === p.build ? "disabled" : ""}>${state.build === p.build ? "Turn coach build: " + esc(E.BUILDS[p.build].label) : "Set the turn coach to " + esc(E.BUILDS[p.build].label)}</button>
       </div>` : ""}
       <p class="mini">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
@@ -3551,7 +3582,7 @@
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
           const must = c.must.indexOf(String(r.id)) !== -1;
-          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}${gateTag(r.id, c.style)}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}${gateTag(r.id, c.style)}${r.ahead ? ` <span class="pill" title="Needs a rival ahead of her. You set Front Runners in this cup to fight for the lead, so its simulated value is counted at ${Math.round(r.ahead * 100)}%.">needs a rival ahead: counted at ${Math.round(r.ahead * 100)}%</span>` : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       ${leftOutHTML(p, c, cut)}
@@ -3585,13 +3616,14 @@
     const names = (rows) => rows.slice(0, 3).map((r) => skillNameHTML(r.id)).join(", ") + (rows.length > 3 ? "…" : "");
     const count = (rows) => rows.length + (rows.length === 1 ? " skill" : " skills");
     const ahead = list("ahead"), back = list("back"), front = list("front"), parts = [];
-    if (ahead.length) parts.push(`${count(ahead)} that need a rival right ahead of her (${names(ahead)}), since the values have her leading, with nobody ahead`);
+    if (ahead.length) parts.push(`${count(ahead)} that need a rival right ahead of her (${names(ahead)}), since the values have her leading, with nobody ahead (set <b>Front Runners in this cup</b> above if she fights for the lead)`);
     if (back.length) parts.push(`${count(back)} that need her in the back half of the pack (${names(back)})`);
     if (front.length) parts.push(`${count(front)} that need her in the front half of the pack (${names(front)})`);
     const style = STYLE_NAME[c.style] || c.style;
-    const left = parts.length ? `<p class="mini cm-leftout">Left out for ${/^[AEIOU]/.test(style) ? "an" : "a"} ${esc(style)}: ${parts.join("; ")}. The Umalator runs one uma alone, so it would count them.</p>` : "";
+    const left = parts.length ? `<p class="mini cm-leftout">Left out for ${/^[AEIOU]/.test(style) ? "an" : "a"} ${esc(style)}: ${parts.join("; ")}. The Umalator runs one uma alone, so it would count them.</p>` : ""
+    const contest = c.style === "Nige" && contestShare(p.id) ? `<p class="mini">She fights for the lead here: skills that need a rival ahead of her are counted at ${Math.round(contestShare(p.id) * 100)}% of their value (your assumption, not a measured rate), here and in her deck, skill purchases and Parents.</p>` : "";
     const gate = c.style === "Nige" ? '<p class="mini cm-gate">Tagged <b>helps her lead</b> and <b>sets off Groundwork</b>: Concentration, Focus and greens are worth more to a Front Runner than their L. They fire at the gate, where they help her take the lead and, three together, set off Groundwork right away; the simulator can\'t put a number on either.</p>' : "";
-    return left + gate;
+    return left + contest + gate;
   }
 
   function parseUmalator(text) {
@@ -3603,7 +3635,7 @@
 
   const raceMemo = new Map();
   const skillPlanKey=c=>JSON.stringify([
-    c.preset,c.style,(c.cards||[]).map(x=>[x.id,x.lb,!!x.borrowed]),
+    c.preset,c.style,contestShare(c.preset),(c.cards||[]).map(x=>[x.id,x.lb,!!x.borrowed]),
     c.raceSkills?Object.assign({},c.raceSkills,{open:undefined}):null,
     ["targets","must","skillW","statsW","globalSkills","ownedOnly","borrow","independent","itRaces","itManual","eventSuccessRate","eventSongBoost","helloProcRate","helloUnlockRate","rankGoal"].map(k=>c[k]),
     c.family||{},c.predicted,ownedCode(),state.scenario,state.caps,state.sparks,euOver(),pasted[c.preset] && pasted[c.preset][c.style],D.DATA.meta.built
@@ -3665,7 +3697,7 @@
       ${!r.staticReason && (r.plan.result.fullSpurt||0)<0.95 ? `<p class="mini warn">With these skills she gets a full last spurt in only ${Math.round((r.plan.result.fullSpurt||0)*100)}% of simulated races (no stamina debuffers): raise stamina or add recovery skills.</p>` : ""}${sourceRowsHTML(r)}${table(r.plan.selected,false)}
       ${r.goals && r.goals.length ? `<p class="mini"><b>Parent targets:</b> ${[...new Set(r.goals.map(x=>ACCESS.white(x.id)).filter(Boolean))].map(id=>skillNameHTML(id)).join(", ")}. Targets to search or train for; these are not guaranteed purchases. <button type="button" class="linkish" data-goto-tab="parents">Plan their sources in Parents →</button></p>` : ""}
       <details><summary>Next skills from the equipped baseline</summary><p class="mini">Each is tested against equipped skills alone. The purchase list above tests combinations. Added L for its rows measures removing that purchase from the final set, so those rows do not add up.</p>${table(r.plan.ranking,true)}</details>
-      ${r.plan.excluded.length ? `<p class="mini warn">Race or purchase effects unavailable; excluded: ${r.plan.excluded.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${r.plan.failedSets ? `<p class="mini warn">${r.plan.failedSets} skill sets could not be simulated and were excluded.</p>` : ""}${r.plan.unmetMust.length ? `<p class="mini warn">Must-haves not purchased: ${r.plan.unmetMust.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}
+      ${(r.plan.offPosition||[]).length ? `<p class="mini">Left out because they need a rival ahead and she leads alone (change <b>Front Runners in this cup</b> above if she fights for the lead): ${r.plan.offPosition.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${(r.plan.scaled||[]).length ? `<p class="mini">Counted at ${Math.round(contestShare(p.id)*100)}% of their simulated gain (they need a rival ahead): ${r.plan.scaled.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${r.plan.excluded.length ? `<p class="mini warn">Race or purchase effects unavailable; excluded: ${r.plan.excluded.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${r.plan.failedSets ? `<p class="mini warn">${r.plan.failedSets} skill sets could not be simulated and were excluded.</p>` : ""}${r.plan.unmetMust.length ? `<p class="mini warn">Must-haves not purchased: ${r.plan.unmetMust.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}
       <details><summary>How these comparisons work</summary><p class="mini">${r.staticReason ? "Existing course-chart gains and legal SP costs are used. This mode does not measure new skill interactions or full-spurt frequency." : `${r.plan.evaluations} sets checked in a bounded search, 24 paired races each. Finalists and purchase contributions use another seed and 96 races. Full spurt in ${Math.round((r.plan.result.fullSpurt||0)*100)}% of validation races${(r.plan.result.fullSpurt||0)<0.95?' <span class="warn">(under 95%: she needs more stamina or recovery skills)</span>':""}. Wit checks are on. Positions, overtaking and opponents remain simplified.`} Mean gain ${num(r.plan.result.mean)} L${r.plan.result.ci95?` (± ${num(r.plan.result.ci95)} L, 95% interval from race-to-race noise; SD ${num(r.plan.result.sd)} L)`:""}; 10th percentile ${num(r.plan.result.low)} L. These are estimates, not CM win rates or LoH points.</p><p class="mini">Planning includes only sourced skills. Card offers and inheritance are sampled, with unknown spark hint levels conservatively taken as Lv1. Equipped planning targets condition on getting those sourced skills, and their SP is charged first. User-entered shop skills are accepted as observed only in finished-uma mode. Parent targets come from a separate conditional purchase plan; they do not grant skills to the ace. Predicted stats exclude inheritance unless entered. Fast Learner and scenario-specific price discounts are not modeled. The deck/parent search is bounded, not proof of a global optimum.</p></details>` : ""}</div>
     </details>`;
   }
@@ -3737,7 +3769,7 @@
           if(!raceMemo.has(key)) {const answer=await worker.run(RS.request(p,input,before,after,catalog,n,seed));raceMemo.set(key,Object.assign(RS.summary(answer.results.results),{fullSpurt:answer.results.runData.nspurt[1]/n}));if(raceMemo.size>2500)raceMemo.delete(raceMemo.keys().next().value);}
           return raceMemo.get(key);
         };
-        const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,compare,maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
+        const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,compare,scale:raceScale(p,c.style,available),maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
         if(q.mode === "plan" && plan.selected.some(row=>!access.byId[row.id]))throw new Error("A purchase lacks a verified skill source. Compare again after checking her deck and family.");
         // A separate, explicitly conditional purchase plan asks which white hints would be
         // worth seeking. These never enter the actual purchase list without a source.
@@ -3745,7 +3777,7 @@
           .filter(id=>released(id,p) && (unsupported || catalog.skills[id])).sort((a,b)=>(baseValues[b]||0)-(baseValues[a]||0)).slice(0,12);
         q.skills.forEach(x=>{const id=ACCESS.white(x.id);if(id && String(x.id)===id && !potential.includes(id))potential.push(id);});
         const goalHints=Object.assign({},hints);potential.forEach(id=>goalHints[id]=Math.max(1,goalHints[id]||0));
-        const goalPlan=q.mode==="plan"?await RS.optimize({catalog,allowChartOnly:!!unsupported,available:[...new Set(available.concat(potential))],learned,hints:goalHints,sp,values:baseValues,must:c.must,compare,maxEvaluations:24}):plan;
+        const goalPlan=q.mode==="plan"?await RS.optimize({catalog,allowChartOnly:!!unsupported,available:[...new Set(available.concat(potential))],learned,hints:goalHints,sp,values:baseValues,must:c.must,compare,scale:raceScale(p,c.style,[...new Set(available.concat(potential))]),maxEvaluations:24}):plan;
         const parentValues={};goalPlan.selected.forEach(row=>{
           const id=ACCESS.white(row.id);if(!id)return;
           const own=goalPlan.ranking.find(x=>x.id===id), gain=own?own.result.mean:baseValues[id]||0;
