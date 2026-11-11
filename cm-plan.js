@@ -78,8 +78,9 @@
       const rel = access ? access.parentRel(c.rel,c.skillPlan) : c.rel;
       const L = (rel && rel.L) || {};
       const uniques = Object.keys(L).filter((id) => /^9\d+$/.test(id) && owners.has(id)).map((id) => ({ id, L: L[id], owners: owners.get(id) }));
-      // gaps: the ace's shortfall per stat (CM & decks' prediction against her targets), or null.
-      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel, raceL: L, offers: c.skillPlan && c.skillPlan.deckCoverage || c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, gaps: c.gaps || null, chars: [], mine: [], uniques, fam: {}, skillPlan:c.skillPlan || null };
+      // gaps: the ace's shortfall per stat (CM & decks' prediction against her targets), or null;
+      // stats: that predicted stat line, or null.
+      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel, raceL: L, offers: c.skillPlan && c.skillPlan.deckCoverage || c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, gaps: c.gaps || null, stats: c.stats || null, chars: [], mine: [], uniques, fam: {}, skillPlan:c.skillPlan || null };
     }
     const wantMemo = new WeakMap();
     const want = (x) => { if (!wantMemo.has(x)) wantMemo.set(x, fam.lookFor(x)); return wantMemo.get(x); };
@@ -204,7 +205,9 @@
     // What it adds over the run where the ace is short (her gaps), else on the key stats.
     function blueExpected(x, aff, learning) {
       const w = want(x), pp = F.statPoints(x), per = (i) => ((learning && learning.blueStars && learning.blueStars[i]) || SS_STARS).reduce((n, d, k) => n + d * F.blueStats(k + 1, aff), 0);
-      return w.blue.reduce((n, b) => n + (w.gaps ? Math.min(per(b.i), b.gap) : per(b.i)) * pp[b.i], 0) / 5;
+      // With gaps known, any stat counts (past her target at F.PAST_TARGET); else the key stats.
+      if (w.gaps) return [0, 1, 2, 3, 4].reduce((n, i) => n + F.blueWorth(per(i), w.gaps[i] || 0, pp[i]), 0) / 5;
+      return w.blue.reduce((n, b) => n + per(b.i) * pp[b.i], 0) / 5;
     }
     // Her pink spark lands on one of her A-or-better aptitudes at random, 20/70/10% by stars: the
     // share that's one the ace needs, as the chance it fires and takes that aptitude a grade on.
@@ -273,7 +276,7 @@
       // Training a parent: every stat she gains counts. The ace: what fills her gaps (else key stats).
       // Training a parent: her own stats, at the flat rate. For the ace: lengths on her cup.
       const pp = training ? [1, 1, 1, 1, 1].map(() => 1 / F.STAT_PER_L) : F.statPoints(x);
-      const blue = stats.reduce((n, v, i) => n + (training ? v : w.gaps ? Math.min(v, w.gaps[i] || 0) : key.has(i) ? v : 0) * pp[i], 0);
+      const blue = stats.reduce((n, v, i) => n + (training ? v * pp[i] : w.gaps ? F.blueWorth(v, w.gaps[i] || 0, pp[i]) : key.has(i) ? v * pp[i] : 0), 0);
       const green = training ? 0 : s.green.filter(q => slots.includes(q.slot)).reduce((n, q) => n + q.p * q.L, 0);
       const pink = training ? 0 : w.pink.reduce((n, p) => n + F.pinkReach(p.grade, p.target, pinks[p.i] || []) * F.aptL(x, p.i, p.grade, p.target), 0);
       return { value: white + blue + green + pink, white, blue, green, pink, start, stats, hints: whites.reduce((n, q) => n + q.p, 0) };
