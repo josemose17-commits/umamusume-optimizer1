@@ -224,8 +224,8 @@ test("racing rank goals: S / SS count careers and preserve the best success rate
     const opts = { ...base, rankGoal, locked: start.slice(0, 4).map(c => c.id) };
     const r = runSearch(opts, { scenario: gl, build: 'medium' }, start, pool);
     const hits = r.after.finals.filter(f => R.statsScore(f.stats) + Math.round(f.sp * rankGoal.spRating) + rankGoal.unique >= rankGoal.ss).length;
-    assert.equal(r.after.finals.length, 16);
-    assert.equal(r.after.ssShare, hits / 16, label + ' uses its own threshold');
+    assert.equal(r.after.finals.length, r.validation.heldOut.runs);
+    assert.equal(r.after.ssShare, hits / r.validation.heldOut.runs, label + ' uses its own threshold');
     assert.ok(r.after.ssShare >= r.before.ssShare, 'no lower success rate, including final validation');
     assert.equal(r.after.rating, R.statsScore(r.after.stats) + Math.round(r.after.sp * rankGoal.spRating) + rankGoal.unique);
     assert.ok(opts.locked.every(id => r.cards.some(c => c.id === id)), 'locked cards stay');
@@ -240,4 +240,59 @@ test("simulated careers start with the cards' initial stats and skill points", (
   const r = O.simulate(O.buildCtx({ scenario: ura, build: "medium", runs: 2 }), [{ card: fuku, lb: 4 }]);
   assert.deepStrictEqual(r.initial, [9, 10, 11, 12, 13].map((i) => base[i] || 0));
   assert.ok(r.initial.every((v) => v === 30), "SSR Speed Fukukitaru: +30 to every stat");
+});
+
+// ---- Race scoring (stats and skills in lengths) ----
+const CURVES = require("../data/stat-curves.js");
+
+test("stat curves cover the simulated cups; showdown cups have none", () => {
+  for (const [id, c] of Object.entries(CURVES.cups)) {
+    if (c.status !== "ok") { assert.ok(["engine", "course"].includes(c.status), id); continue; }
+    for (const st of ["Nige", "Senkou", "Sasi", "Oikomi"]) {
+      const v = c.styles[st];
+      assert.equal(v.status, "ok", id + st);
+      assert.equal(v.curves.length, 5);
+      v.curves.forEach((pts) => { assert.ok(pts.length >= 5); pts.forEach((p, i) => { assert.ok(Number.isFinite(p[1])); if (i) assert.ok(p[0] > pts[i - 1][0]); }); });
+    }
+  }
+  assert.equal(O.raceValuesFor(CURVES, "cm27", "Senkou"), null, "stamina showdown");
+  assert.ok(O.raceValuesFor(CURVES, "cm22", "Senkou"));
+});
+
+test("race value: more speed is worth lengths, stamina past her need is worth nothing", () => {
+  const ctx = O.buildCtx({ scenario: ura, build: "mile", raceValues: O.raceValuesFor(CURVES, "cm22", "Senkou") });
+  const need = O.raceValuesFor(CURVES, "cm22", "Senkou").need;
+  const line = (sp, sta) => [sp, sta, 1200, 600, 1000];
+  assert.ok(O.raceL(ctx, line(1300, 900)) > O.raceL(ctx, line(1100, 900)));
+  const far = need + O.STAMINA_MARGIN + 400;
+  assert.ok(Math.abs(O.raceL(ctx, line(1200, far)) - O.raceL(ctx, line(1200, far + 300))) < 1e-9);
+  assert.ok(O.raceL(ctx, line(1200, need - 300)) < O.raceL(ctx, line(1200, need + O.STAMINA_MARGIN)) - 1, "short of her need loses lengths");
+});
+
+test("race scoring: used without targets, targets take over when typed, and the pick is rechecked on fresh careers", () => {
+  const pool = pool4();
+  const sim = { scenario: ura, build: "mile", raceValues: O.raceValuesFor(CURVES, "cm25", "Senkou") };
+  const opts = { scenario: "URA" };
+  const start = Tiers.buildDeck(opts, pool, []).cards;
+  const r = runSearch(opts, sim, start, pool);
+  assert.strictEqual(r.scoring, "race");
+  assert.strictEqual(r.cards.length, 6);
+  assert.strictEqual(new Set(r.cards.map((c) => D.card(c.id).cid)).size, 6);
+  assert.ok(r.validation.heldOut.runs >= 32 && r.validation.heldOut.decks >= 2);
+  assert.ok(r.after.value >= r.before.value - 1e-6, "never worse than Euophrys' pick on the recheck");
+  assert.ok(Number.isFinite(r.after.raceL) && Number.isFinite(r.after.skill));
+  if (r.close) assert.ok(r.close.gap < 2 * r.close.se && r.close.cards.length === 6);
+  const t = runSearch(opts, Object.assign({}, sim, { target: { speed: 1400 } }), start, pool);
+  assert.strictEqual(t.scoring, "targets");
+});
+
+test("race scoring buys skills with each career's SP outside Grand Concert too", () => {
+  const skills = {};
+  require("../data/skillvalues/cm25.json").Senkou.forEach((r) => { if (r[2] > 0) skills[r[0]] = r[2] / 100; });
+  const ctx = O.buildCtx({ scenario: ura, build: "mile", runs: 4, skills, raceValues: O.raceValuesFor(CURVES, "cm25", "Senkou") });
+  assert.ok(ctx.skillBudget);
+  const cards = pool4().slice(0, 40).map((c) => ({ card: D.card(c.id), lb: 4 })).filter((c, i, a) => a.findIndex((x) => x.card.cid === c.card.cid) === i).slice(0, 6);
+  const s = O.simulate(ctx, cards);
+  assert.ok(Number.isFinite(s.skillValue) && s.skillValue > 0, String(s.skillValue));
+  assert.strictEqual(s.skillBudget.careers, 4);
 });

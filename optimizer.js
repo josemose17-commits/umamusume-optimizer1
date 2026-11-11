@@ -80,7 +80,9 @@
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       learned: new Set((t ? t.us || [] : []).map(String)),
       available: (t ? [].concat(t.is || [], t.as || []) : []).map(String),
-      skillBudget: sc.id === "grandlive" && opts.skillBudget !== false,
+      // SP-limited skill purchases per simulated career (skill-budget.js): Grand Concert, and race
+      // scoring in every scenario (stats and skills both in lengths).
+      skillBudget: (sc.id === "grandlive" || !!raceOn(opts, target)) && opts.skillBudget !== false,
       coupledEvents: sc.id === "grandlive" && opts.coupledEvents !== false,
       runs: opts.runs || 10,
       seed: opts.seed || 12345,
@@ -90,7 +92,69 @@
       eventSongBoost: opts.eventSongBoost == null ? 0 : Math.max(0, Math.min(0.5, +opts.eventSongBoost)),
       must: (opts.must || []).map(String),
       independent: !!opts.independent,
+      // Race values (raceValuesFor): finished stats are scored in lengths on the cup's course
+      // for her style, unless you typed your own targets (then the targets decide, as before).
+      race: raceOn(opts, target),
+      userTarget: !!(opts.target && STATS.some((s) => opts.target[s] > 0)),
     };
+  }
+
+  // ---- Race value: finished stats in lengths (data/stat-curves.js) ----
+  // Each stat's L across its range on the cup's course for her style, measured one stat at a time
+  // in the race simulator (tools/build_stat_curves.js): no skills, Normal mood, against the cup's
+  // stat line. Between grid points the value is a straight line; past the ends it continues the
+  // last segment (stamina stays flat past the top: a full spurt needs no more). Stamina is read
+  // STAMINA_MARGIN lower, the same allowance for opponents' stamina debuffs the race build uses.
+  // The five are added up (checked against whole stat lines in test/optimizer.test.js). Cups
+  // with stamina showdown or no course data have no curves (null): targets decide there.
+  const STAMINA_MARGIN = 100;
+  function raceValuesFor(data, cupId, style) {
+    const cup = data && data.cups && data.cups[cupId];
+    const v = cup && cup.status === "ok" && cup.styles && cup.styles[style];
+    if (!v || v.status !== "ok" || !v.curves) return null;
+    return { cup: cupId, style, curves: v.curves, need: v.base.need };
+  }
+  // Race scoring is on with curves, no targets of yours, and a stamina target that covers her need
+  // for a full spurt (plus the margin). On long cups where it doesn't (the race build keeps the
+  // distance's stamina and asks for recovery skills), the curve can't see those heals, so a deck
+  // would be judged by a shortfall skills cover: targets decide there.
+  function raceOn(opts, target) {
+    const r = opts.raceValues;
+    if (!r || opts.target && STATS.some((s) => opts.target[s] > 0)) return null;
+    return r.need + STAMINA_MARGIN <= target.stamina + 1 ? r : null;
+  }
+  function onCurve(pts, x, flatTop) {
+    const n = pts.length;
+    if (n === 1) return pts[0][1];
+    let i = 1;
+    while (i < n - 1 && x > pts[i][0]) i++;
+    if (x >= pts[n - 1][0] && flatTop) return pts[n - 1][1];
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+  }
+  // L of a stat line against the cup's line (only differences between decks matter).
+  function raceL(ctx, stats) {
+    const r = ctx.race;
+    let L = 0;
+    for (let i = 0; i < 5; i++) {
+      const x = Math.max(0, +stats[i] || 0);
+      L += i === 1 ? onCurve(r.curves[1], x - STAMINA_MARGIN, true) : onCurve(r.curves[i], x, false);
+    }
+    return L;
+  }
+  // The stat part of a deck's score from its simulated careers (s: simulate's result), with each
+  // career's own value (for the noise check). Race values when the cup has them and you set no
+  // targets; otherwise target fit, as before.
+  function deckFit(ctx, s) {
+    const finals = s.finals || [];
+    if (ctx.race && !ctx.userTarget) {
+      const per = finals.map((f) => raceL(ctx, f.stats) * L_VALUE + (ctx.skillBudget ? 0 : f.sp * SP_VALUE));
+      const short = targetFit(ctx, s.stats, s.sp).short;
+      const value = per.length ? per.reduce((a, b) => a + b, 0) / per.length : raceL(ctx, s.stats) * L_VALUE;
+      return { value, short, L: value / L_VALUE, careers: per, scoring: "race" };
+    }
+    const fit = targetFit(ctx, s.stats, s.sp);
+    return Object.assign(fit, { careers: finals.map((f) => targetFit(ctx, f.stats, f.sp).value), scoring: "targets" });
   }
 
   // Independent Training's Training Focus, as uma.guide describes it: Balanced gives every stat
@@ -489,7 +553,7 @@
         if (ls.songCountAtLyrics >= 16) liveTotals.lyrics++;
         if (ls.songCountAtFinalDeadline >= 18) liveTotals.special++;
         for (let i = 0; i < 5; i++) { earnedTokens[i] += ls.earned[i]; spentTokens[i] += ls.spent[i]; finalTokens[i] += ls.tokens[i]; }
-      }
+      } else if (purchase) careers.push({ sp, hints: runHints, training: trainingLevels, events: eventLevels, eventTrace, hello: deck.map(() => ({})), exposure: 0 });
       total += statsValue(ctx, x) + (purchase ? 0 : sp * SP_VALUE);
       spTotal += sp;
       for (let i = 0; i < 5; i++) statSum[i] += x[i];
@@ -803,6 +867,7 @@
   // sim: buildCtx options (coach scenario, build, trainee, target, caps).
   // Returns a stepper so the page can show progress: next() does one slot, result() ends it.
   const FIT_RUNS = 6;
+  const HELD_OUT_DECKS = 5, HELD_OUT_RUNS = 32;
   const FIT_PER_TYPE = { friend: 2, group: 2 };
   const FIT_TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
   function targetSearch(opts, sim, start, pool, borrowPool) {
@@ -824,17 +889,19 @@
     const testedDecks = new Map();
     const evaluate = (deck, c) => {
       const s = simulate(c, deck.map((x) => ({ card: D.card(x.id), lb: x.lb })));
-      const fit = targetFit(c, s.stats, s.sp);
+      const fit = deckFit(c, s);
       const sk = Tr.deckSkills(opts, deck);
       const over = sk.value < floor - 1e-9 ? 1e9 : 0;
-      const skillScore = c.sc.id === "grandlive" && !opts.parent ? s.skillValue : sk.value;
+      // Race scoring counts skills as the SP-limited purchases of each simulated career (lengths, like
+      // the stats), as Grand Concert does; the tier list's skill score otherwise.
+      const skillScore = (c.sc.id === "grandlive" || fit.scoring === "race") && !opts.parent ? s.skillValue : sk.value;
       let value = (ss && ss.ignoreFit ? 0 : fit.value) + sw * skillScore + sk.mustValue - over, rating = null, ssShare = null;
       if (ss) {
         rating = Ra.statsScore(s.stats) + Math.round(s.sp * ss.spRating) + ss.unique;
         ssShare = s.finals.filter((f) => Ra.statsScore(f.stats) + Math.round(f.sp * ss.spRating) + ss.unique >= ss.ss).length / s.finals.length;
         value += 1e6 * ssShare - 10 * Math.max(0, ss.ss - rating);
       }
-      return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating, ssShare });
+      return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating, ssShare, scoring: fit.scoring, raceL: fit.L, fitCareers: fit.careers });
     };
     const better = (a, b) => ss && a.ssShare !== b.ssShare ? a.ssShare > b.ssShare : a.value > b.value + 1e-6;
     const score = (deck) => {
@@ -885,22 +952,37 @@
       const finalists = new Map(testedDecks);
       const put = d => finalists.set(d.map(x => x.id + ":" + x.lb).sort().join(","), d);
       put(start); put(deck);
-      const before = evaluate(start, full);
-      let winner = start.map(x => Object.assign({}, x));
-      let after = before;
-      finalists.forEach(candidate => {
-        const r = evaluate(candidate, full);
-        if (better(r, after)) {
-          winner = candidate.map(x => Object.assign({}, x));
-          after = r;
-        }
-      });
+      const ranked = [...finalists.values()].map((d) => ({ cards: d.map((x) => Object.assign({}, x)), r: evaluate(d, full) }));
+      ranked.sort((a, b) => (better(a.r, b.r) ? -1 : better(b.r, a.r) ? 1 : 0));
+      // The best few, plus Euophrys' pick, again on careers no step above used (another seed,
+      // more careers): picking the top of many noisy scores favors lucky decks. The winner is
+      // the best there, and a runner-up within twice the paired standard error is a close call.
+      const startKey = start.map((x) => x.id + ":" + x.lb).sort().join(",");
+      const keyOf = (d) => d.map((x) => x.id + ":" + x.lb).sort().join(",");
+      const top = ranked.slice(0, HELD_OUT_DECKS);
+      if (!top.some((x) => keyOf(x.cards) === startKey)) top.push(ranked.find((x) => keyOf(x.cards) === startKey));
+      const held = buildCtx(Object.assign({}, sim, { runs: HELD_OUT_RUNS, seed: ((sim.seed || 12345) ^ 0x5bd1e995) >>> 0, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
+      const checked = top.filter(Boolean).map((x) => ({ cards: x.cards, r: evaluate(x.cards, held) }));
+      checked.sort((a, b) => (better(a.r, b.r) ? -1 : better(b.r, a.r) ? 1 : 0));
+      const winner = checked[0].cards;
+      const after = checked[0].r;
+      const before = (checked.find((x) => keyOf(x.cards) === startKey) || { r: evaluate(start, held) }).r;
+      let close = null;
+      if (checked[1]) {
+        const a = checked[0].r, b = checked[1].r, n = Math.min(a.fitCareers.length, b.fitCareers.length);
+        const d = Array.from({ length: n }, (_, i) => a.fitCareers[i] - b.fitCareers[i]);
+        const mean = d.reduce((x, y) => x + y, 0) / Math.max(1, n);
+        const se = n > 1 ? Math.sqrt(d.reduce((x, y) => x + (y - mean) * (y - mean), 0) / (n - 1) / n) : Infinity;
+        const gap = a.value - b.value;
+        if (!(ss && a.ssShare !== b.ssShare) && gap < 2 * se) close = { cards: checked[1].cards, gap, se, est: b };
+      }
       const finalSwaps = [];
       const removed = start.filter(x => !winner.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
       const added = winner.filter(x => !start.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
       removed.forEach((x, i) => { if (added[i]) finalSwaps.push({out:x.id, in:added[i].id, inLb:added[i].lb}); });
       return { cards: winner, startCards: start.map((x) => Object.assign({}, x)), swaps: finalSwaps, before, after, target: ctx.target, caps: ctx.caps,
-        validation: { runs:16, candidates:finalists.size, method:"rescore-all-tested" } };
+        scoring: after.scoring, close,
+        validation: { runs:16, candidates:finalists.size, heldOut: { runs: HELD_OUT_RUNS, decks: checked.length }, method:"rescore-all-tested, best few on held-out careers" } };
     }
     return { next, result, progress: () => (slots.length ? Math.min(1, step / (slots.length * 2)) : 1) };
   }
@@ -930,7 +1012,7 @@
       const ctx = buildCtx(Object.assign({}, sim, defaults, job.profile, { seed: job.seed, runs }));
       const scores = candidates.map((candidate) => {
         const result = simulate(ctx, candidate.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
-        return targetFit(ctx, result.stats, result.sp).value + ctx.skillWeight * result.skillValue;
+        return deckFit(ctx, result).value + ctx.skillWeight * result.skillValue;
       });
       comparisons[job.i].forEach((comparison, i) => comparison.deltas.push(scores[0] - scores[i + 1]));
       return at < jobs.length;
@@ -1054,7 +1136,7 @@
     };
   }
 
-  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
