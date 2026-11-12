@@ -2360,6 +2360,17 @@
     return (id) => !only[String(id)] || only[String(id)] === style;
   }
   const g8Picks = (pid, style) => G8.picks(g8Entry(pid), g8Fits(pid, style));
+  // Names game8 may use: the cup's valued skills, then every other skill in the game data (lane
+  // skills such as Dodging Danger have no chart value but are still game8 picks).
+  const g8Names = (p) => { const have = new Set(soCupNames(p).map(([id]) => String(id))); return soCupNames(p).concat(Object.entries(D.DATA.skills).filter(([id]) => !have.has(String(id)))); };
+  // game8's pairings broken by a skill set (bought plus held): "Dodging Danger needs Prudent
+  // Positioning or Ignited Spirit WIT".
+  function g8PairHTML(pid, ids) {
+    const bad = G8.unpaired(g8Entry(pid), ids);
+    return bad.length ? `<p class="mini warn">game8 pairs ${bad.map((x) => `${skillNameHTML(x.id)} with ${x.with.map((id) => skillNameHTML(id)).join(" or ")}`).join("; ")}: without one, it doesn't pay off. Add the partner or skip it.</p>` : "";
+  }
+  // A lane skill (lane move speed or a lane change, effect types 28 and 35 in the simulator's data).
+  const laneSkill = (cat, id) => !!(cat && cat.skills[id] && cat.skills[id].alternatives.some((a) => (a.effects || []).some((e) => e.type === 28 || e.type === 35)));
   function g8Pill(pid, style, id) {
     const kind = g8Picks(pid, style)[String(id)];
     if (!kind) return "";
@@ -2394,13 +2405,16 @@
   }
   // Why a skill's chart value may not tell the whole story, in a few words (the mechanics doc's
   // field conditions, greens and heals, game8's own note).
-  function g8Why(p, style, id, cat) {
+  function g8Why(p, style, id, cat, valued) {
     const k = String(id), out = [], kind = window.UmaSkillKinds && window.UmaSkillKinds.skills[k];
     const cav = skillCaveat(k, cat ? skillConditions(cat, [k])[k] : "", p.id, style);
     if (cav) out.push(cav);
     if (kind && kind[0] === "green") out.push("a green: the chart counts only its stat boost");
     if (kind && kind[0] === "recovery") out.push("a heal: the chart was run with stamina for a full spurt, so it's worth more if she's short or debuffed");
     if (MECHANIC_ONLY[k]) out.push(MECHANIC_ONLY[k]);
+    if (laneSkill(cat, k)) out.push((valued ? "its lane movement isn't simulated (one runner, no lanes or blocking)" : "lane movement: the one-runner simulator has no lanes or blocking, so it can't value it") + ". In a race, changing lanes while a lane-speed skill is on adds √(0.0002 × Power) m/s to her target speed (race-mechanics document)");
+    const pair = ((g8Entry(p.id) || {}).pairs || []).find((x) => x.id === k);
+    if (pair) out.push("game8 pairs it with " + pair.with.map((id) => skillInfo(id)[0]).join(" or "));
     const e = g8Entry(p.id), x = e && e.must.concat(e.rec).find((y) => y.id === k);
     if (x && x.note) out.push("game8: " + x.note);
     return out.join("; ");
@@ -2416,7 +2430,7 @@
     const rows = skillRows(p.id, c.style).filter((r) => released(String(r.id), p));
     if (!rows.length) return `<p class="mini">The comparison with the simulator shows once this cup's skill values load.</p>`;
     const cat = raceCatalog(p), picks = g8Picks(p.id, c.style), rank = new Map(rows.map((r, i) => [String(r.id), { i: i + 1, L: r.L }]));
-    const item = (id) => { const r = rank.get(id), why = g8Why(p, c.style, id, cat); return `<li>${skillNameHTML(id)} <span class="mini">${r ? `#${r.i}, ${r.L.toFixed(2)} L` : "no chart value for her style"}${why ? " · " + esc(why) : ""}</span></li>`; };
+    const item = (id) => { const r = rank.get(id), why = g8Why(p, c.style, id, cat, !!r); return `<li>${skillNameHTML(id)} <span class="mini">${r ? `#${r.i}, ${r.L.toFixed(2)} L` : "no chart value for her style"}${why ? " · " + esc(why) : ""}</span></li>`; };
     const low = Object.keys(picks).filter((id) => !rank.has(id) || rank.get(id).i > G8_LOW_RANK);
     const fam = (id) => { const f = window.UmaSkillBudget.DATA.skills[id]; return f ? f[0] : id; };
     const pickFams = new Set(Object.keys(picks).map(fam));
@@ -2427,7 +2441,8 @@
   }
   function g8BoxHTML(c) {
     const p = presetById(c.preset), e = g8Entry(p.id), fits = g8Fits(p.id, c.style);
-    const chip = (x) => `<span class="chip${fits(x.id) ? "" : " warnchip"}">${skillNameHTML(x.id)}${x.note ? ` <span class="mini">${esc(x.note)}</span>` : ""}${fits(x.id) ? "" : ` <span class="mini">not for a ${esc(STYLE_NAME[c.style] || c.style)}</span>`}</span>`;
+    const pairOf = (id) => ((e && e.pairs) || []).find((x) => x.id === id);
+    const chip = (x) => `<span class="chip${fits(x.id) ? "" : " warnchip"}">${skillNameHTML(x.id)}${pairOf(x.id) ? ` <span class="mini">+ ${pairOf(x.id).with.map((id) => esc(skillInfo(id)[0])).join(" or ")}</span>` : ""}${x.note ? ` <span class="mini" title="${esc(x.note)}">${esc(x.note.length > 60 ? x.note.slice(0, 57) + "…" : x.note)}</span>` : ""}${fits(x.id) ? "" : ` <span class="mini">not for a ${esc(STYLE_NAME[c.style] || c.style)}</span>`}</span>`;
     return `<details class="pred-help g8-box" data-cmp-open="cm-g8"><summary>game8's skills for this cup${e ? ` (${e.must.length} must-have, ${e.rec.length} recommended)` : ""}</summary>
       <p class="mini">Copy the skill lists from <a href="${G8_GUIDE}" target="_blank" rel="noopener">game8's guide for this cup</a> (Champions Meeting → the cup → Recommended Skills) and paste them here: must-haves in the first box, the rest in the second. Paste the page as it copies: "・" and ★ bullets (a ★ line counts as a must-have), the "Icon" labels, "A / B" lines (both skills; the second counts as recommended), inherited uniques after their card, notes in brackets and headings ending in ":". game8 doesn't rank its picks, so the simulator still values them: must-haves become this deck's must-have skills (✕ drops one for this ace), and the others get a <span class="pill g8">game8</span> tag and win close calls in <b>Skills for this build</b> and the Skill optimizer.</p>
       <div class="row-wrap"><label class="field grow"><span>Must-have</span><textarea id="g8Must" rows="4" placeholder="Left-Handed ◯&#10;Tokyo Racecourse ◯">${esc(e ? e.text.must : "")}</textarea></label>
@@ -3886,7 +3901,7 @@
       ${q.skills.map((x,i)=>`<div class="row-wrap"><b>${skillNameHTML(x.id)}</b><label class="chip-toggle"><input type="checkbox" data-race-equipped="${i}"${x.learned?" checked":""}> Equipped</label><label class="field"><span>Hint</span><select data-race-hint="${i}">${[0,1,2,3,4,5].map(n=>`<option value="${n}"${+x.hint===n?" selected":""}>Lv${n}</option>`).join("")}</select></label><button type="button" class="linkish" data-race-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></div>`).join("")}
       <p class="mini">Her own unique is equipped automatically. Planning targets need a card, trainee or parent source; equipped purchases are charged first. For a finished uma, enter SP remaining after those purchases. Edits update an existing comparison automatically.</p>
       <button type="button" class="btn ghost small" id="cmRaceRun">${j.raceRunning ? "Restart skill comparison" : "Compare skills"}</button>
-      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini warn">Course-chart fallback: ${esc(r.staticReason)} This uses the chart and SP costs, without a new race simulation.</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. Mean +${num(r.plan.result.mean)} L against equipped skills. Lower 10% result: ${num(r.plan.result.low)} L.</p>${duelHTML(r.plan)}${prunedHTML(r.plan)}<p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. ${["Normal","Good","Great"][Math.max(0,Math.min(2,+(q.mood||0)))]} mood.</p>
+      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini warn">Course-chart fallback: ${esc(r.staticReason)} This uses the chart and SP costs, without a new race simulation.</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. Mean +${num(r.plan.result.mean)} L against equipped skills. Lower 10% result: ${num(r.plan.result.low)} L.</p>${duelHTML(r.plan)}${prunedHTML(r.plan)}${g8PairHTML(p.id, r.plan.selected.map((x) => x.id).concat(q.skills.filter((x) => x.learned).map((x) => String(x.id))))}<p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. ${["Normal","Good","Great"][Math.max(0,Math.min(2,+(q.mood||0)))]} mood.</p>
       ${!r.staticReason && (r.plan.result.fullSpurt||0)<0.95 ? `<p class="mini warn">With these skills she gets a full last spurt in only ${Math.round((r.plan.result.fullSpurt||0)*100)}% of simulated races (no stamina debuffers): raise stamina or add recovery skills.</p>` : ""}${sourceRowsHTML(r)}${table(r.plan.selected,false)}
       ${r.goals && r.goals.length ? `<p class="mini"><b>Parent targets:</b> ${[...new Set(r.goals.map(x=>ACCESS.white(x.id)).filter(Boolean))].map(id=>skillNameHTML(id)).join(", ")}. Targets to search or train for; these are not guaranteed purchases. <button type="button" class="linkish" data-goto-tab="parents">Plan their sources in Parents →</button></p>` : ""}
       <details><summary>Next skills from the equipped baseline</summary><p class="mini">Each is tested against equipped skills alone. The purchase list above tests combinations. Added L for its rows measures removing that purchase from the final set, so those rows do not add up.</p>${table(r.plan.ranking,true)}</details>
@@ -4104,7 +4119,7 @@
     if (hit("#g8Save")) {
       const p = presetById(c.preset);
       if (!state.game8) state.game8 = {};
-      const e = G8.entry(q("#g8Must").value, q("#g8Rec").value, soCupNames(p), TODAY);
+      const e = G8.entry(q("#g8Must").value, q("#g8Rec").value, g8Names(p), TODAY);
       if (!e.must.length && !e.rec.length && !e.missed.length) delete state.game8[p.id]; else state.game8[p.id] = e;
       g8Sync(c); save(); renderCM();
       flash(`game8's picks saved for ${presetLabel(p)}: ${e.must.length} must-have, ${e.rec.length} recommended${e.missed.length ? `, ${e.missed.length} not matched` : ""}.`);
@@ -4500,7 +4515,7 @@
     return `
       ${r.staticReason ? `<p class="mini warn">Course-chart only: ${esc(r.staticReason)}</p>` : ""}
       <p><b>Buy:</b> ${plan.selected.length ? plan.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing: no purchase gains length"}. ${plan.spent} / ${plan.budget} SP, ${plan.unspent} left. <b>+${soNum(plan.result.mean)} L</b> on average${plan.result.ci95 ? ` (± ${soNum(plan.result.ci95)})` : ""} over what she has; worst 10% of races ${soNum(plan.result.low)} L.</p>
-      ${duelHTML(plan)}${prunedHTML(plan)}
+      ${duelHTML(plan)}${prunedHTML(plan)}${g8PairHTML(p.id, plan.selected.map((x) => x.id).concat(b.skills.filter((x) => x.have).map((x) => x.id)))}
       ${(plan.unmetMust || []).length ? `<p class="mini warn">game8 must-haves her SP can't cover: ${plan.unmetMust.map((id) => skillNameHTML(id)).join(", ")}.</p>` : plan.selected.some((x) => g8Picks(p.id, b.style)[x.id] === "must") ? `<p class="mini">game8's must-haves in her shop are bought first, then the rest by lengths.</p>` : ""}
       ${!r.staticReason && Number.isFinite(spurt) && spurt < 0.95 ? `<p class="mini warn">With these skills she reaches a full last spurt in only ${Math.round(spurt * 100)}% of races: more stamina or a recovery skill would help.</p>` : ""}
       <div class="table-wrap"><table><thead><tr><th>Buy</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows(plan.selected, "buy") || '<tr><td colspan="4">No purchase.</td></tr>'}</tbody></table></div>
