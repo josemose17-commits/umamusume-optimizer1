@@ -240,7 +240,7 @@
       if (sel.uma) add("uma", "trainee", "$20.99 Uma selector", SELECTOR_PRICE);
     });
     const bonus = selectors.filter((s) => s.carats).map((s) => ({ date: s.date, carats: s.carats, label: s.label }));
-    const inSupportPool = (c, cut) => c.r === 3 && c.src === "gacha" && !!c.jp && c.jp <= cut && scorable(c.id);
+    const inSupportPool = (c, cut) => !(D.isHidden && D.isHidden(c.id)) && c.r === 3 && c.src === "gacha" && !!c.jp && c.jp <= cut && scorable(c.id);
 
     // ---- the route so far ----
     // key → { k, copies: Map(card → new copies), got: Set(trainee), spark: [ids], notes: [] }
@@ -268,7 +268,7 @@
       ids.forEach((id) => { const n = copiesBy(id, pair.date); if (card(id) && n > 0 && scorable(id)) pool.push({ id, lb: lbOf(n) }); });
       return pool;
     };
-    const borrowFor = (pair) => D.DATA.supports.filter((c) => c.r === 3 && cardOut(c, pair.date) && scorable(c.id)).map((c) => ({ id: c.id, lb: 4 }));
+    const borrowFor = (pair) => D.DATA.supports.filter((c) => !(D.isHidden && D.isHidden(c.id)) && c.r === 3 && cardOut(c, pair.date) && scorable(c.id)).map((c) => ({ id: c.id, lb: 4 }));
     // Each type's best few alone, so the deck search stays quick (the rest rarely make a deck).
     function shortlist(opts, pool, n) {
       const by = {};
@@ -675,7 +675,7 @@
         }));
       }
       if (parentsOn) selectors.filter((s) => s.kind === "trainee").forEach((s) => {
-        D.DATA.trainees.filter((t) => t.r === 3 && t.jp && t.jp <= s.cut && !umas.has(t.id))
+        D.DATA.trainees.filter((t) => !(D.isHiddenTrainee && D.isHiddenTrainee(t.id)) && t.r === 3 && t.jp && t.jp <= s.cut && !umas.has(t.id))
           .map((t) => ({ t, v: pairs.reduce((a, pair) => a + (pair.date > s.date ? Math.max(0, parentValue(pair, t) - bestParent(pair)) : 0), 0) }))
           .filter((x) => x.v > 0).sort((a, b) => b.v - a.v).slice(0, UMA_SHORT).forEach(({ t }) => {
             const it = { key: "x" + s.id + ":" + t.id, kind: "selector", pick: "trainee", sel: s, id: t.id, date: s.date, group: "x" + s.id, most: 1, pullsAt: () => 0 };

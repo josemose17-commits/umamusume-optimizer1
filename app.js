@@ -136,6 +136,15 @@
   const OWN_KEY = "uma-owned-v1";
   let owned = {};
   try { owned = JSON.parse(localStorage.getItem(OWN_KEY)) || {}; } catch (e) { owned = {}; }
+  // Cards and outfits you won't use (deck.js keeps them out of every search and suggestion).
+  const hiddenList = () => (state.hidden = state.hidden || { cards: [], trainees: [] });
+  function setHidden(kind, ids, on) {
+    const h = hiddenList(), set = new Set(h[kind].map(Number));
+    ids.forEach((id) => { if (on) set.add(+id); else set.delete(+id); });
+    h[kind] = [...set].sort((a, b) => a - b);
+    D.setHidden(h); save();
+  }
+  D.setHidden(state.hidden);
   function saveOwned() { try { localStorage.setItem(OWN_KEY, JSON.stringify(owned)); } catch (e) { /* ignore */ } }
   // Cards you've marked as out on Global before the card data has their Global date (saved in
   // this browser): { id: date marked }. A date from the data always wins.
@@ -157,7 +166,7 @@
   }
   const ownedLb = (id) => (owned[id] != null ? +owned[id] : null);
   const ownedIds = () => Object.keys(owned).map(Number).filter((id) => D && D.card(id));
-  const ownedCode = () => D.encodeOwned(owned);
+  const ownedCode = () => D.encodeOwned(owned, state.hidden);
   const readOwnedCode = (text) => D.decodeOwned(text);
   let rec = null;
   // Lists inside the Grand Concert section stay open or closed across re-renders.
@@ -772,6 +781,17 @@
         $("#ownAddName").focus();
         return;
       }
+      const hc = e.target.closest("[data-hide-card]");
+      if (hc) { const id = +hc.dataset.hideCard, on = !D.isHidden(id); setHidden("cards", [id], on); flash(D.card(id).n + " [" + D.card(id).t + "] " + (on ? "won't be used: it's left out of deck searches and suggestions." : "can be used again.")); renderTab(); return; }
+      const ht = e.target.closest("[data-hide-trainee]");
+      if (ht) { const id = +ht.dataset.hideTrainee; setHidden("trainees", [id], !D.isHiddenTrainee(id)); renderTab(); return; }
+      if (e.target.closest("#hideHalloween")) {
+        const h = D.halloween();
+        setHidden("cards", h.cards, true); setHidden("trainees", h.trainees, true);
+        flash(`Hidden: ${h.cards.length} Halloween support cards and ${h.trainees.length} outfits. They're listed under My cards, where ✕ brings one back.`);
+        renderTab(); return;
+      }
+      if (e.target.closest("#unhideAll")) { state.hidden = { cards: [], trainees: [] }; D.setHidden(state.hidden); save(); renderTab(); return; }
       if (e.target.closest("#ownExport")) {
         const code = ownedCode();
         const box = $("#ownCodeOut");
@@ -786,7 +806,9 @@
         if (!got) { flash("That isn't a backup code. It starts with UMA1:"); return; }
         owned = got;
         saveOwned();
-        flash("Restored " + Object.keys(got).length + " cards");
+        const hid = D.decodeHidden($("#ownImportCode").value);
+        if (hid) { state.hidden = hid; D.setHidden(hid); save(); }
+        flash("Restored " + Object.keys(got).length + " cards" + (hid ? ", and " + (hid.cards.length + hid.trainees.length) + " cards and outfits you don't use" : ""));
         renderTab();
         fillLists();
         return;
@@ -1671,7 +1693,7 @@
       list.sort((a, b) => a.n.localeCompare(b.n));
       el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}. Tick <b>Own</b> on the umas you have (${mine.size} ticked): CM &amp; decks picks your team from them and Parents picks Parent 1. Importing your veterans ticks the versions you've trained.</p>
         <div class="table-wrap"><table class="trainees"><thead><tr><th>Own</th><th>Trainee</th><th>Aptitudes (surface · distance · style)</th><th>Growth</th><th>Unique skill</th><th></th></tr></thead><tbody>
-        ${list.map((t) => `<tr${state.deck.trainee === t.id ? ' class="cur"' : ""}><td><input type="checkbox" data-own-trainee="${t.id}" aria-label="I own ${esc(t.n)} [${esc(t.t)}]"${mine.has(t.id) ? " checked" : ""}></td><td><b>${esc(t.n)}</b><div class="jp">${esc(t.t)} · ${"★".repeat(t.r)}${t.en ? " · Global " + t.en : " · JP " + t.jp}</div></td><td>${aptChips(t)}</td><td>${growthText(t)}</td><td>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</td><td><button type="button" class="btn ghost small" data-use-trainee="${t.id}">Use</button></td></tr>`).join("")}
+        ${list.map((t) => `<tr${state.deck.trainee === t.id ? ' class="cur"' : ""}><td><input type="checkbox" data-own-trainee="${t.id}" aria-label="I own ${esc(t.n)} [${esc(t.t)}]"${mine.has(t.id) ? " checked" : ""}></td><td><b>${esc(t.n)}</b><div class="jp">${esc(t.t)} · ${"★".repeat(t.r)}${t.en ? " · Global " + t.en : " · JP " + t.jp}</div></td><td>${aptChips(t)}</td><td>${growthText(t)}</td><td>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</td><td><button type="button" class="btn ghost small" data-use-trainee="${t.id}">Use</button> <button type="button" class="linkish" data-hide-trainee="${t.id}" title="${D.isHiddenTrainee(t.id) ? "Suggest this outfit again" : "Leave this outfit out of parent training and the Pull planner"}">${D.isHiddenTrainee(t.id) ? "use again" : "don't use"}</button></td></tr>`).join("")}
         </tbody></table></div>`;
     }
   }
@@ -1705,8 +1727,21 @@
           <button type="button" class="btn ghost small" id="ownImport">Restore</button>
         </div>
         <textarea id="ownCodeOut" class="codebox" readonly hidden aria-label="Backup code"></textarea>
+        ${hiddenPanelHTML()}
       </div>
     </details>`;
+  }
+  // Cards and outfits you won't use: left out of deck searches, upgrades, borrowed cards, the tier
+  // list, parent training and the Pull planner, still findable in these tabs.
+  function hiddenPanelHTML() {
+    const h = hiddenList(), cards = h.cards.map((id) => D.card(id)).filter(Boolean), outs = h.trainees.map((id) => D.trainee(id)).filter(Boolean);
+    const chip = (label, attr, id) => `<span class="chip">${esc(label)} <button type="button" class="linkish" ${attr}="${id}" aria-label="Use ${esc(label)} again">✕</button></span>`;
+    return `<div class="hidden-cards"><h3>Cards and outfits I won't use</h3>
+      <p class="mini">Left out of deck searches, upgrade suggestions, borrowed cards, the tier list, parent training and the Pull planner. You can still find them here and in the Support cards and Trainees tabs. Hide a card from its details (<b>Don't use this card</b>), or all Halloween-themed ones at once: the cards and outfits from JP's yearly Halloween banner (opens around Sept 29) and anything with a Halloween word in its title. ✕ brings one back.</p>
+      <div class="row-wrap"><button type="button" class="btn ghost small" id="hideHalloween">Hide Halloween cards and outfits</button>${cards.length || outs.length ? '<button type="button" class="linkish" id="unhideAll">Use them all again</button>' : ""}</div>
+      ${cards.length ? `<div class="row-wrap"><span class="mini"><b>Support cards (${cards.length}):</b></span>${cards.map((c) => chip(c.n + " · " + c.t, "data-hide-card", c.id)).join("")}</div>` : ""}
+      ${outs.length ? `<div class="row-wrap"><span class="mini"><b>Outfits (${outs.length}):</b></span>${outs.map((t) => chip(t.n + " [" + t.t + "]", "data-hide-trainee", t.id)).join("")}</div>` : ""}
+    </div>`;
   }
 
   function raiseOwned(cards) {
@@ -1752,7 +1787,8 @@
         <p class="mini"><b>Hint skills:</b> ${sk(c.hs)}</p>
         <p class="mini"><b>Event skills:</b> ${sk(c.es)}</p>
         <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) + (c.enMarked ? " (marked by you)" : "") : ", not on Global yet in the card data (" + esc(D.DATA.meta.built) + ")"} · ${esc(c.src || "")}
-          ${!c.en || c.enMarked ? `<button type="button" class="btn ghost small" data-mark-global="${c.id}">${c.enMarked ? "Unmark: not out on Global" : "Mark as out on Global"}</button>` : ""}</p>
+          ${!c.en || c.enMarked ? `<button type="button" class="btn ghost small" data-mark-global="${c.id}">${c.enMarked ? "Unmark: not out on Global" : "Mark as out on Global"}</button>` : ""}
+          <button type="button" class="btn ghost small" data-hide-card="${c.id}">${D.isHidden(c.id) ? "Use this card again" : "Don't use this card"}</button></p>
       </div>`;
     }
     const own = ownedLb(c.id);
@@ -2377,20 +2413,13 @@
     const e = g8Entry(pid), x = e.must.concat(e.rec).find((y) => y.id === String(id)), note = x && x.note;
     return ` <span class="pill g8" title="game8's ${kind === "must" ? "must-have" : "recommended"} skill for this cup${note ? " (" + esc(note) + ")" : ""}. game8 doesn't rank its picks: the simulator values them, and a game8 pick wins a close call.">game8${kind === "must" ? " must-have" : ""}</span>`;
   }
-  // Keeps a racing ace's must-haves in step with game8's for her cup and style: adds the ones she
-  // hasn't dropped, and takes back the ones it added that no longer apply (another cup or style).
+  // game8's must-haves were once added to the ace's must-have skills; they're white sparks for her
+  // parents now (g8ParentWhites), so ones added that way are taken back out once.
   function g8Sync(c) {
-    if (!G8) return;
-    const e = g8Entry(c.preset), fits = g8Fits(c.preset, c.style), picks = G8.picks(e, fits);
-    c.g8added = (c.g8added || []).filter((id) => { if (picks[id] === "must") return true; c.must = c.must.filter((x) => x !== id); return false; });
-    G8.mustToAdd(e, c.must, c.g8drop, fits).forEach((id) => { c.must.push(id); c.g8added.push(id); });
-  }
-  // A game8 must-have removed by hand stays out for this ace; added back, it's hers again.
-  function g8Drop(c, id, dropped) {
-    if (g8Picks(c.preset, c.style)[id] !== "must") return;
-    c.g8drop = (c.g8drop || []).filter((x) => x !== id);
-    if (dropped) c.g8drop.push(id);
-    c.g8added = (c.g8added || []).filter((x) => x !== id);
+    if (!c.g8added) return;
+    const added = new Set(c.g8added.map(String));
+    c.must = c.must.filter((id) => !added.has(String(id)));
+    delete c.g8added; delete c.g8drop;
   }
   // The race simulator's skill data (conditions, Wit checks, scaling), loaded once per simulator
   // for notes and the Skill optimizer's quick plan; the page redraws when it arrives.
@@ -2439,16 +2468,22 @@
       ${low.length ? `<p class="mini">game8 picks the chart ranks low (past #${G8_LOW_RANK}) or can't value:</p><ul class="mini">${low.map(item).join("")}</ul>` : `<p class="mini">Every game8 pick is in the chart's top ${G8_LOW_RANK}.</p>`}
       ${top.length ? `<p class="mini">The chart's strongest skills game8 doesn't list:</p><ul class="mini">${top.map(item).join("")}</ul>` : ""}</div>`;
   }
+  // Which whites her parents will look for from game8's must-haves, in words.
+  function g8WhitesNote(e, c) {
+    const fits = g8Fits(c.preset, c.style), w = [...new Set(e.must.filter((x) => fits(x.id)).map((x) => ACCESS.white(x.id)).filter(Boolean))];
+    const none = e.must.filter((x) => fits(x.id) && !ACCESS.white(x.id));
+    return (w.length ? ` White sparks for her parents: ${w.map((id) => skillNameHTML(id)).join(", ")} <button type="button" class="linkish" data-goto-tab="parents">Parents →</button>.` : "") + (none.length ? ` No white spark: ${none.map((x) => skillNameHTML(x.id)).join(", ")} (an inherited unique comes from a parent who is that character).` : "");
+  }
   function g8BoxHTML(c) {
     const p = presetById(c.preset), e = g8Entry(p.id), fits = g8Fits(p.id, c.style);
     const pairOf = (id) => ((e && e.pairs) || []).find((x) => x.id === id);
     const chip = (x) => `<span class="chip${fits(x.id) ? "" : " warnchip"}">${skillNameHTML(x.id)}${pairOf(x.id) ? ` <span class="mini">+ ${pairOf(x.id).with.map((id) => esc(skillInfo(id)[0])).join(" or ")}</span>` : ""}${x.note ? ` <span class="mini" title="${esc(x.note)}">${esc(x.note.length > 60 ? x.note.slice(0, 57) + "…" : x.note)}</span>` : ""}${fits(x.id) ? "" : ` <span class="mini">not for a ${esc(STYLE_NAME[c.style] || c.style)}</span>`}</span>`;
     return `<details class="pred-help g8-box" data-cmp-open="cm-g8"><summary>game8's skills for this cup${e ? ` (${e.must.length} must-have, ${e.rec.length} recommended)` : ""}</summary>
-      <p class="mini">Copy the skill lists from <a href="${G8_GUIDE}" target="_blank" rel="noopener">game8's guide for this cup</a> (Champions Meeting → the cup → Recommended Skills) and paste them here: must-haves in the first box, the rest in the second. Paste the page as it copies: "・" and ★ bullets (a ★ line counts as a must-have), the "Icon" labels, "A / B" lines (both skills; the second counts as recommended), inherited uniques after their card, notes in brackets and headings ending in ":". game8 doesn't rank its picks, so the simulator still values them: must-haves become this deck's must-have skills (✕ drops one for this ace), and the others get a <span class="pill g8">game8</span> tag and win close calls in <b>Skills for this build</b> and the Skill optimizer.</p>
+      <p class="mini">Copy the skill lists from <a href="${G8_GUIDE}" target="_blank" rel="noopener">game8's guide for this cup</a> (Champions Meeting → the cup → Recommended Skills) and paste them here: must-haves in the first box, the rest in the second. Paste the page as it copies: "・" and ★ bullets (a ★ line counts as a must-have), the "Icon" labels, "A / B" lines (both skills; the second counts as recommended), inherited uniques after their card, notes in brackets and headings ending in ":". game8 doesn't rank its picks, so the simulator still values them: must-haves become <b>white-spark targets for her parents</b> (the white version of each: a gold's white; inherited uniques have none) at the top of Parents' list, first in both uma.moe searches. Every pick gets a <span class="pill g8">game8</span> tag and wins close calls in <b>Skills for this build</b> and the Skill optimizer. To make the racing deck cover one too, star it in the skills table.</p>
       <div class="row-wrap"><label class="field grow"><span>Must-have</span><textarea id="g8Must" rows="4" placeholder="Left-Handed ◯&#10;Tokyo Racecourse ◯">${esc(e ? e.text.must : "")}</textarea></label>
         <label class="field grow"><span>Recommended</span><textarea id="g8Rec" rows="4" placeholder="・ Solid Steps (requires 1000+ Power)&#10;・ Restraint">${esc(e ? e.text.rec : "")}</textarea></label></div>
       <div class="row-wrap"><button type="button" class="btn small" id="g8Save">Save for ${esc(presetLabel(p))}</button>${e ? '<button type="button" class="btn ghost small" id="g8Clear">Clear</button>' : ""}</div>
-      ${e ? `<p class="mini">Saved ${esc(fmtDate(e.at))}, for every ace racing this cup.</p>${e.must.length ? `<div class="row-wrap"><span class="mini"><b>Must-have:</b></span>${e.must.map(chip).join("")}</div>` : ""}${e.rec.length ? `<div class="row-wrap"><span class="mini"><b>Recommended:</b></span>${e.rec.map(chip).join("")}</div>` : ""}` : ""}
+      ${e ? `<p class="mini">Saved ${esc(fmtDate(e.at))}, for every ace racing this cup.${g8WhitesNote(e, c)}</p>${e.must.length ? `<div class="row-wrap"><span class="mini"><b>Must-have:</b></span>${e.must.map(chip).join("")}</div>` : ""}${e.rec.length ? `<div class="row-wrap"><span class="mini"><b>Recommended:</b></span>${e.rec.map(chip).join("")}</div>` : ""}` : ""}
       ${e && e.missed.length ? `<p class="mini warn">Not matched to a skill (check the spelling, or it's not out on Global by this cup): ${e.missed.map(esc).join("; ")}.</p>` : ""}
       ${g8CompareHTML(c)}
     </details>`;
@@ -2518,7 +2553,26 @@
   const released = (id, p) => window.UmaSkillRelease.outBy(SV.skills[id], skillsBy(p));
   // The parent's relevant skills for a race and style (parent-relevance.js): { targets, why },
   // why naming the rule ("L", "green", "recovery"). Global releases only if set.
+  // game8's must-haves for the ace's cup, as white sparks for her parents: each one's white
+  // (a gold's white; inherited uniques have none), at the top of her relevant skills (valued like
+  // her best one), why "game8". Only skills her style can use.
+  function g8ParentWhites(out, p, style) {
+    const e = g8Entry(p.id);
+    if (!e || !e.must.length || !out) return out;
+    const fits = g8Fits(p.id, style), top = Math.max(0, ...Object.values(out.targets || {}));
+    out.targets = Object.assign({}, out.targets); out.why = Object.assign({}, out.why);
+    e.must.filter((x) => fits(x.id)).forEach((x) => {
+      const w = ACCESS.white(x.id);
+      if (!w) return;
+      out.targets[w] = Math.max(out.targets[w] || 0, top || 1, (out.L && out.L[w]) || 0);
+      out.why[w] = "game8";
+    });
+    return out;
+  }
   function parentTargetsFor(c, p) {
+    return g8ParentWhites(parentTargetsBase(c, p), p, c.style);
+  }
+  function parentTargetsBase(c, p) {
     const sv = skillMap(p.id, c.style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
     const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(p) });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id, p)) { delete out.targets[id]; delete out.why[id]; } });
@@ -2590,8 +2644,9 @@
     save();
   }
 
-  const cardAvailable = (card, c) => CARD_RELEASE.available(card, presetById(c.preset));
-  const cardPools = c => CARD_RELEASE.pools(D.DATA.supports, owned, c, presetById(c.preset), (id, lb) => !!T.entry(id, lb));
+  // Cards you won't use (D.isHidden) never enter a deck search, upgrade or borrow.
+  const cardAvailable = (card, c) => !D.isHidden(card.id) && CARD_RELEASE.available(card, presetById(c.preset));
+  const cardPools = c => CARD_RELEASE.pools(D.DATA.supports.filter((x) => !D.isHidden(x.id)), owned, c, presetById(c.preset), (id, lb) => !!T.entry(id, lb));
   const optPool = c => cardPools(c).pool;
   const borrowPool = c => cardPools(c).borrow;
   function cardReleaseHTML(card) {
@@ -3091,7 +3146,7 @@
     const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
     const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(race.preset) });
     if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x, race.preset)) { delete out.targets[x]; delete out.why[x]; } });
-    return Object.assign(out, { L });
+    return g8ParentWhites(Object.assign(out, { L }), race.preset, race.style);
   }
 
   // The CM planner's decks, built the quick way CM & decks starts (Euophrys' scoring plus the
@@ -3519,7 +3574,7 @@
         return `<div class="opt-card ty-${card.ty}">
         <span class="tydot" aria-hidden="true"></span>
         <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>${cardReleaseHTML(card)}
-          <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
+          <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""} · <button type="button" class="linkish" data-hide-card="${x.id}" title="Leave this card out of every deck search from now on (My cards lists it)">don't use</button>${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
           ${x.it ? `<div class="mini">${itPartsText(x.it)}</div>` : ""}
           ${r.goal === "race" && x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => skillNameHTML(id)).join(", ")}</div>` : ""}
           ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)}${cardReleaseHTML(D.card(x.alt.id))} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? (r.goal === "race" ? ", but no must-have" : ", lower modeled must-have coverage") : ""})</div>` : ""}</div>
@@ -4115,7 +4170,7 @@
       return true;
     }
     const md = hit("[data-must-del]");
-    if (md) { g8Drop(c, md.dataset.mustDel, true); c.must = c.must.filter((id) => id !== md.dataset.mustDel); save(); renderCM(); return true; }
+    if (md) { c.must = c.must.filter((id) => id !== md.dataset.mustDel); save(); renderCM(); return true; }
     if (hit("#g8Save")) {
       const p = presetById(c.preset);
       if (!state.game8) state.game8 = {};
@@ -4129,7 +4184,6 @@
     const mt = hit("[data-must]");
     if (mt) {
       const id = String(mt.dataset.must);
-      g8Drop(c, id, c.must.indexOf(id) !== -1);
       c.must = c.must.indexOf(id) === -1 ? c.must.concat([id]) : c.must.filter((x) => x !== id);
       save();
       renderCM();
@@ -4187,7 +4241,7 @@
 
   function tierCandidates(t) {
     const types = [t.type];
-    let cards = D.DATA.supports.filter((c) => (!t.global || D.onGlobal(c, TODAY) || owned[c.id] != null) && types.indexOf(c.ty) !== -1 && c.r >= +t.rarity);
+    let cards = D.DATA.supports.filter((c) => !D.isHidden(c.id) && (!t.global || D.onGlobal(c, TODAY) || owned[c.id] != null) && types.indexOf(c.ty) !== -1 && c.r >= +t.rarity);
     if (t.ownedOnly) cards = cards.filter((c) => owned[c.id] != null);
     const out = [];
     cards.forEach((c) => {

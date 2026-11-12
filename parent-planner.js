@@ -11,7 +11,7 @@
   // (1.21; hint discounts raise it). Used only for rough "or this many more SP" readouts.
   const SP_RATING = 1.2;
   const RANK_SHARE = 0.75;
-  const WHY = { L: "race skill", green: "green", recovery: "recovery", position: "lane/vision" };
+  const WHY = { L: "race skill", green: "green", recovery: "recovery", position: "lane/vision", game8: "game8 must-have", purchase: "her purchase plan" };
 
   function ratingGoal(value, R) {
     const label = value === "S" ? "S" : value === "" || value === false ? "" : "SS";
@@ -67,7 +67,8 @@
     chars.forEach((n, cid) => { if (onGlobal.has(cid)) charByName.set(n.toLowerCase(), cid); });
     const charName = (cid) => (cid ? chars.get(+cid) || "#" + cid : "");
     const trainee = (id) => D.DATA.trainees.find((t) => t.id === +id) || null;
-    const versions = (cid) => D.DATA.trainees.filter((t) => t.cid === +cid);
+    // Her versions, without outfits you won't use (unless that leaves none).
+    const versions = (cid) => { const all = D.DATA.trainees.filter((t) => t.cid === +cid), mine = all.filter((t) => !(D.isHiddenTrainee && D.isHiddenTrainee(t.id))); return mine.length ? mine : all; };
     const g1 = A.g1Races().sort((a, b) => a.turns[0] - b.turns[0] || a.name.localeCompare(b.name));
     // The family section (family-planner.js), ace down; it shares this tab's lists and redraws.
     const fp = root.UmaFamilyPlanner && root.UmaFamily ? root.UmaFamilyPlanner.create(Object.assign({}, ctx, {

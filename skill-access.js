@@ -72,6 +72,8 @@
       if(!plan || !plan.parentValues)return rel;
       const targets={},why={};
       Object.entries(plan.parentValues).forEach(([id,value])=>{const base=white(id);if(base && value>0){targets[base]=Math.max(targets[base]||0,value);why[base]="purchase";}});
+      // Whites you asked for (game8's must-haves) stay, whatever the purchase plan says.
+      Object.keys((rel && rel.why)||{}).forEach(id=>{if(rel.why[id]==="game8"){targets[id]=Math.max(targets[id]||0,rel.targets[id]||0);why[id]="game8";}});
       return {targets,why,L:Object.assign({},rel.L||{},plan.raceL||{})};
     }
     // Parent buys: SS first, then expected useful white-spark value. The race model's
