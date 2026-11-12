@@ -53,3 +53,19 @@ test("a game8 pick wins a close call and isn't pruned for a small, unclear gain"
   const liked = await R.optimize(Object.assign({}, base, { prefer: [b] }));
   assert.deepEqual(liked.selected.map((x) => x.id).sort(), [a, b].sort(), "kept: it doesn't lose lengths");
 });
+
+test("game8's page as copied: image labels, ★ top picks, A / B lines and inherited uniques", () => {
+  const text = `★ Groundwork Icon Groundwork
+★ Early Lead Icon Early Lead / Taking the Lead Icon Taking the Lead
+★ Seiun Sky (Reeling in the Big One) Angling and Scheming Icon Angling and Scheming
+★ El Condor Pasa (El Numero 1) Victoria por Plancha ☆ Icon Victoria por Plancha ☆
+・ Got the Spirit! Icon Got the Spirit! / Be the Center! Icon Be the Center!
+・ Second Wind Icon Second Wind (drains stamina)
+・ Focus Icon Focus / Concentration Icon Concentration (Late Start mitigation/RNG Groundwork trigger)`;
+  const e = G.entry("", text, names, "2026-11-12");
+  assert.deepEqual(e.missed, []);
+  const n = (list) => list.map((x) => SV.skills[x.id][0]);
+  assert.deepEqual(n(e.must), ["Groundwork", "Early Lead", "Angling and Scheming (inherited)", "Victoria por plancha ☆ (inherited)"]);
+  assert.deepEqual(n(e.rec), ["Taking the Lead", "Got the Spirit!", "Be the Center!", "Second Wind", "Focus", "Concentration"]);
+  assert.equal(e.rec.find((x) => SV.skills[x.id][0] === "Second Wind").note, "drains stamina");
+});
