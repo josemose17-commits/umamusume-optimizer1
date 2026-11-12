@@ -155,6 +155,10 @@ A3. Racing decks are scored in lengths: each stat's value measured across its ra
     ~ +0.23 L. Is there a real game mechanic behind a power step like that (dirt, position keep, lane
     or lead competition)? Does a single-runner sim over- or under-value any stat vs a 9-runner field?
     Any published lengths per +100 of each stat by distance/style to compare against?
+A3b. Conserve Power (足を貯める): does the ground modifier lower the power that counts? KuromiAK's
+    race-mechanics document uses base power (no ground modifier), so the line is 1200 shown power on
+    every course; alpha123's Umalator adds the ground modifier first (dirt -100, non-Firm turf -50),
+    so its line is 1300 on dirt. Which matches JP verification posts or packet captures?
 A4. Guts matters little except in stamina-showdown races (CM 27+ equivalents, LoH). How much does guts
     matter in showdown, per 100 guts, by distance?
 A5. Card dealing: each card appears at one training per turn, weighted by specialty priority, with

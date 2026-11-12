@@ -72,6 +72,10 @@
   const DUEL_RACES = 240, DUEL_SEED = 161803, CONFIRM_SEED = 577215, PRUNE_SEED = 141421;
   async function optimize(o) {
     const learned = ids(o.learned), values = Object.assign({}, o.values), excluded = [];
+    // o.prefer: skills a guide recommends (game8's picks). They don't change any score; in a tie
+    // (no clear difference) the set with more of them is kept, and pruning keeps one unless the
+    // set does at least as well without it.
+    const prefer = new Set(ids(o.prefer || [])), liked = x => x.selected.filter(s => prefer.has(String(s.id))).length;
     // o.scale: { id: share } for skills the engine fires on a sampled timing but that need a rival
     // ahead (a Front Runner): 0 drops them (she leads alone), a share keeps that part of their gain.
     const scale = o.scale || {}, offPosition = ids(o.available).filter(id => scale[id] === 0 && !learned.includes(id));
@@ -224,10 +228,13 @@
         const d = Object.assign({}, raw), shift = cut(runner.selected) - cut(best.selected);
         ["mean","median","low","min","max"].forEach(k => { d[k] += shift; });
         let verdict = Math.abs(d.mean) <= d.ci95 ? "tie" : d.mean > 0 ? "best" : "swapped";
-        // No clear difference: the set that spends less SP is kept (an interval containing zero
-        // shows no clear advantage, not that the two are equal).
-        if (verdict === "swapped" || verdict === "tie" && runner.spent < best.spent) { const t = best; best = runner; Object.keys(d).forEach(k => { if (["mean","median","low","min","max"].includes(k)) d[k] = -d[k]; }); duel = { verdict, other: t.selected.map(x=>x.id), diff: d }; }
+        // No clear difference: the set with more recommended skills (o.prefer), then the one that
+        // spends less SP, is kept (an interval containing zero shows no clear advantage, not that
+        // the two are equal).
+        const tieToRunner = liked(runner) !== liked(best) ? liked(runner) > liked(best) : runner.spent < best.spent;
+        if (verdict === "swapped" || verdict === "tie" && tieToRunner) { const t = best; best = runner; Object.keys(d).forEach(k => { if (["mean","median","low","min","max"].includes(k)) d[k] = -d[k]; }); duel = { verdict, other: t.selected.map(x=>x.id), diff: d }; }
         else duel = { verdict, other: runner.selected.map(x=>x.id), diff: d };
+        if (verdict === "tie") duel.rule = liked(runner) !== liked(best) ? "prefer" : "sp";
       } catch (error) { if (/cancelled|too long|load|busy/i.test(error.message)) throw error; }
     }
     // The reported gain comes from races the search and the head-to-head never used.
@@ -244,7 +251,7 @@
         const without = best.selected.filter(s => s !== x);
         const raw = await o.compare(setOf({ selected: without }), setOf(best), DUEL_RACES, PRUNE_SEED);
         const d = adjust(raw, [x]);
-        if (d.mean <= d.ci95 && (!weakest || d.mean < weakest.d.mean)) weakest = { x, d };
+        if (prefer.has(String(x.id)) ? d.mean <= 0 : d.mean <= d.ci95) { if (!weakest || d.mean < weakest.d.mean) weakest = { x, d }; }
       }
       if (!weakest) break;
       pruned.push({ id: weakest.x.id, cost: weakest.x.cost, diff: weakest.d });

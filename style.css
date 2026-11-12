@@ -196,6 +196,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .pill { font-size: .75rem; border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; color: var(--muted); }
 .pill.c-clear-pick { border-color: var(--accent); color: var(--accent); }
+.pill.g8 { border-color: #2f9e6e; color: #2f9e6e; }
 .pill.c-close-call { border-color: var(--warn); color: var(--warn); }
 .why { margin: 0; padding-left: 18px; }
 .versus, .after { font-size: .9rem; }
