@@ -6,35 +6,51 @@
 (function (root) {
   const SO = root.UmaSkillOpt || (typeof require !== "undefined" ? require("./skill-opt.js") : null);
 
-  // Copied text -> one skill per line. game8 writes "・ Left-Handed ◯" and adds notes in brackets
-  // ("Solid Steps (requires 1000+ Power)"); a heading ends with ":" ("Track-based Conditionals:").
+  // Copied text -> one skill line per entry: { text, star }. game8 writes "・ Left-Handed ◯" or
+  // "★ Groundwork" (★: a top pick, taken as a must-have), adds notes in brackets ("Solid Steps
+  // (requires 1000+ Power)"), and a heading ends with ":" ("Track-based Conditionals:").
   function lines(text) {
-    return String(text || "").split(/\r?\n|・|•|;/)
-      .map((l) => l.replace(/^\s*(?:[-*–—]|\d+[.)])\s*/, "").trim())
-      .filter((l) => l && !/:\s*$/.test(l));
+    return String(text || "").split(/\r?\n|(?=★)|・|•|;/)
+      .map((l) => { const star = /^\s*[★☆]/.test(l); return { text: l.replace(/^\s*(?:[★☆]|[-*–—]|\d+[.)])\s*/, "").trim(), star }; })
+      .filter((l) => l.text && !/:\s*$/.test(l.text));
   }
-  // Pasted text -> { found: [{ id, note, line }], missed: [line] }. names: [[id, name], ...].
-  // A note in brackets is kept and shown next to the skill.
+  // One name as game8's page copies it: its image label gives "Groundwork Icon Groundwork", and an
+  // inherited unique comes after its card ("Seiun Sky (Reeling in the Big One) Angling and
+  // Scheming Icon Angling and Scheming"): the name after the last "Icon" is the skill.
+  const nameOf = (part) => { const i = part.lastIndexOf(" Icon "); return (i >= 0 ? part.slice(i + 6) : part.replace(/^Icon\s+/, "")).trim(); };
+  function find(name, names) {
+    let hit = SO.parsePaste(name, names).found[0];
+    // "Racing Spirit: Mood" style lines: try the part before the colon too.
+    if (!hit && name.indexOf(":") > 0) hit = SO.parsePaste(name.slice(0, name.indexOf(":")), names).found[0];
+    return hit ? String(hit.id) : null;
+  }
+  // Pasted text -> { found: [{ id, note, line, star, alt }], missed: [line] }. names: [[id, name], ...].
+  // A note in brackets is kept and shown next to the skill. "A / B" lists either skill: both are
+  // found, and B (alt) counts as recommended even on a ★ line.
   function parse(text, names) {
     const found = [], missed = [], seen = new Set();
-    lines(text).forEach((line) => {
+    lines(text).forEach(({ text: line, star }) => {
       const m = /^(.*?)\s*[([（]([^)\]）]*)[)\]）]\s*$/.exec(line);
-      const name = (m ? m[1] : line).trim(), note = m ? m[2].trim() : "";
-      let hit = SO.parsePaste(name, names).found[0];
-      // "Racing Spirit: Mood" style lines: try the part before the colon too.
-      if (!hit && name.indexOf(":") > 0) hit = SO.parsePaste(name.slice(0, name.indexOf(":")), names).found[0];
-      if (!hit) { missed.push(line); return; }
-      if (seen.has(hit.id)) return;
-      seen.add(hit.id);
-      found.push({ id: String(hit.id), note, line });
+      const body = (m ? m[1] : line).trim(), note = m ? m[2].trim() : "";
+      const parts = body.split(/\s+\/\s+/).map(nameOf).filter(Boolean);
+      parts.forEach((name, k) => {
+        const id = find(name, names);
+        if (!id) { missed.push(parts.length > 1 ? name : line); return; }
+        if (seen.has(id)) return;
+        seen.add(id);
+        found.push({ id, note, line, star, alt: k > 0 });
+      });
     });
     return { found, missed };
   }
-  // A cup's saved picks from the two pasted lists. A skill in both counts as a must-have.
+  // A cup's saved picks from the two pasted lists. A skill in both counts as a must-have, and so
+  // does a ★ line's first skill in the recommended list.
   function entry(mustText, recText, names, today) {
     const must = parse(mustText, names), rec = parse(recText, names);
-    const mustIds = new Set(must.found.map((x) => x.id));
-    return { must: must.found.map(({ id, note }) => ({ id, note })), rec: rec.found.filter((x) => !mustIds.has(x.id)).map(({ id, note }) => ({ id, note })),
+    const musts = must.found.filter((x) => !x.alt).concat(rec.found.filter((x) => x.star && !x.alt));
+    const mustIds = new Set(musts.map((x) => x.id));
+    const recs = must.found.filter((x) => x.alt).concat(rec.found).filter((x) => !mustIds.has(x.id));
+    return { must: musts.map(({ id, note }) => ({ id, note })), rec: recs.filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).map(({ id, note }) => ({ id, note })),
       missed: must.missed.concat(rec.missed), text: { must: String(mustText || ""), rec: String(recText || "") }, at: today || null };
   }
   // { id: "must" | "rec" } for a saved entry, only skills that fit her style (fits(id) false: a
