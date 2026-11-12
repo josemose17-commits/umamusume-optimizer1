@@ -80,7 +80,7 @@
       const uniques = Object.keys(L).filter((id) => /^9\d+$/.test(id) && owners.has(id)).map((id) => ({ id, L: L[id], owners: owners.get(id) }));
       // gaps: the ace's shortfall per stat (CM & decks' prediction against her targets), or null;
       // stats: that predicted stat line, or null.
-      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel, raceL: L, offers: c.skillPlan && c.skillPlan.deckCoverage || c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, gaps: c.gaps || null, stats: c.stats || null, chars: [], mine: [], uniques, fam: {}, skillPlan:c.skillPlan || null };
+      return { ace: { cid: c.ace.cid, tid: c.ace.tid, apt: c.ace.apt || (t ? t.apt : null) }, race: c.race, rel, relAll: c.rel || rel, raceL: L, offers: c.skillPlan && c.skillPlan.deckCoverage || c.offers || null, innate: t ? [].concat(t.is || [], t.as || []) : [], build: c.build, gaps: c.gaps || null, stats: c.stats || null, chars: [], mine: [], uniques, fam: {}, skillPlan:c.skillPlan || null };
     }
     const wantMemo = new WeakMap();
     const want = (x) => { if (!wantMemo.has(x)) wantMemo.set(x, fam.lookFor(x)); return wantMemo.get(x); };
@@ -184,19 +184,30 @@
     // anyway: skill ids one of her deck's events gives on every choice (most gold-skill events do):
     // they come whatever the AI picks, so they take no slot (listed apart, with .anyway).
     let famMembers = null;
+    // Independent Training's prioritized skills: whites only (a parent's white spark is the point;
+    // a gold's spark carries its white, but the white is what to prioritize), her purchase plan's
+    // first (x.rel), then the race's other relevant whites her deck can hint (x.relAll), each by
+    // value × chance, up to n. Random-event gambles only when there's no purchase plan.
     function itSkills(x, offers, n = 10, anyway = new Set(), cover = {}) {
       if (!famMembers) { famMembers = {}; Object.keys(meta).forEach((id) => { (famMembers[meta[id][0]] = famMembers[meta[id][0]] || []).push(id); }); }
-      const fams = fam.families(x.rel), eff = fam.worthOf(x), o2 = offers || {}, rows = [];
-      Object.keys(fams).forEach((f) => {
-        if (!(eff[f] > 0)) return;
-        if (o.outNow && !fams[f].ids.concat(famMembers[f] || []).some((id) => o.outNow(id))) return; // she can only learn what's out now
-        const all = famMembers[f] || fams[f].ids, p = Math.min(1, Math.max(0, ...all.map((id) => o2[id] || 0)));
-        const gold = all.filter((id) => meta[id] && meta[id][3] === 2 && o2[id] > 0).sort((a, b) => o2[b] - o2[a])[0];
-        const white = fam.baseWhite(fams[f].ids[0]), id = String(gold || white);
-        const c = cover[f] || 0;
-        rows.push({ family: f, id, white: String(white), gold: !!gold, p, L: eff[f], cover: c, score: eff[f] * p * (1 - c), gamble: !(p > 0), anyway: anyway.has(id) || (gold && anyway.has(String(gold))) || false });
-      });
-      const offered = rows.filter((r) => !r.gamble && !r.anyway).sort((a, b) => b.score - a.score || b.L - a.L);
+      const o2 = offers || {}, rows = [], seen = new Set();
+      const add = (rel, xx, extra) => {
+        const fams = fam.families(rel), eff = fam.worthOf(xx);
+        Object.keys(fams).forEach((f) => {
+          if (seen.has(f) || !(eff[f] > 0)) return;
+          if (o.outNow && !fams[f].ids.concat(famMembers[f] || []).some((id) => o.outNow(id))) return; // she can only learn what's out now
+          const all = famMembers[f] || fams[f].ids, p = Math.min(1, Math.max(0, ...all.map((id) => o2[id] || 0)));
+          if (extra && !(p > 0)) return;
+          seen.add(f);
+          const white = String(fam.baseWhite(fams[f].ids[0])), c = cover[f] || 0;
+          const golds = all.filter((id) => meta[id] && meta[id][3] === 2).map(String);
+          rows.push({ family: f, id: white, white, gold: false, p, L: eff[f], cover: c, extra, score: eff[f] * p * (1 - c), gamble: !(p > 0), anyway: anyway.has(white) || golds.some((g) => anyway.has(g)) });
+        });
+      };
+      add(x.rel, x, false);
+      if (x.relAll && x.relAll !== x.rel) add(x.relAll, Object.assign({}, x, { rel: x.relAll }), true);
+      const byScore = (a, b) => b.score - a.score || b.L - a.L;
+      const offered = rows.filter((r) => !r.gamble && !r.anyway && !r.extra).sort(byScore).concat(rows.filter((r) => !r.gamble && !r.anyway && r.extra).sort(byScore));
       const rest = x.skillPlan ? [] : rows.filter((r) => r.gamble).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
       return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L) });
     }
