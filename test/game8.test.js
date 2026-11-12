@@ -69,3 +69,19 @@ test("game8's page as copied: image labels, ★ top picks, A / B lines and inher
   assert.deepEqual(n(e.rec), ["Taking the Lead", "Got the Spirit!", "Be the Center!", "Second Wind", "Focus", "Concentration"]);
   assert.equal(e.rec.find((x) => SV.skills[x.id][0] === "Second Wind").note, "drains stamina");
 });
+
+test("game8's pairs (A + B or C) and ⓘ notes, matched against every skill in the game", () => {
+  const D = require("../deck.js");
+  const all = Object.entries(Object.assign({}, D.DATA.skills, Object.fromEntries(names)));
+  const text = `・ Dodging Danger Icon Dodging Danger + Prudent Positioning Icon Prudent Positioning or Ignited Spirit WIT Icon Ignited Spirit WIT
+ⓘ Dodging Danger must be paired with either Prudent Positioning or Ignited Spirit Wit. Do not learn Dodging Danger if you do not have either skills.`;
+  const e = G.entry("", text, all, "2026-11-12");
+  assert.deepEqual(e.missed, []);
+  assert.deepEqual(e.rec.map((x) => x.id), ["201262", "200452", "210052"]);
+  assert.ok(/must be paired/.test(e.rec[0].note), "the ⓘ line is kept as a note");
+  assert.equal(e.rec[1].note, "", "on the first skill only");
+  assert.deepEqual(e.pairs, [{ id: "201262", with: ["200452", "210052"] }]);
+  assert.equal(G.unpaired(e, ["201262"]).length, 1, "Dodging Danger alone");
+  assert.equal(G.unpaired(e, ["201262", "210052"]).length, 0);
+  assert.equal(G.unpaired(e, ["200452"]).length, 0, "a partner alone is fine");
+});

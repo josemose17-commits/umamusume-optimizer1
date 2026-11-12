@@ -9,10 +9,11 @@
   // Copied text -> one skill line per entry: { text, star }. game8 writes "・ Left-Handed ◯" or
   // "★ Groundwork" (★: a top pick, taken as a must-have), adds notes in brackets ("Solid Steps
   // (requires 1000+ Power)"), and a heading ends with ":" ("Track-based Conditionals:").
+  // A line starting with ⓘ is game8's note on the line above.
   function lines(text) {
-    return String(text || "").split(/\r?\n|(?=★)|・|•|;/)
-      .map((l) => { const star = /^\s*[★☆]/.test(l); return { text: l.replace(/^\s*(?:[★☆]|[-*–—]|\d+[.)])\s*/, "").trim(), star }; })
-      .filter((l) => l.text && !/:\s*$/.test(l.text));
+    return String(text || "").split(/\r?\n|(?=★)|(?=ⓘ)|・|•|;/)
+      .map((l) => { const star = /^\s*[★☆]/.test(l), info = /^\s*ⓘ/.test(l); return { text: l.replace(/^\s*(?:[★☆ⓘ]|[-*–—]|\d+[.)])\s*/, "").trim(), star, info }; })
+      .filter((l) => l.text && (l.info || !/:\s*$/.test(l.text)));
   }
   // One name as game8's page copies it: its image label gives "Groundwork Icon Groundwork", and an
   // inherited unique comes after its card ("Seiun Sky (Reeling in the Big One) Angling and
@@ -24,24 +25,29 @@
     if (!hit && name.indexOf(":") > 0) hit = SO.parsePaste(name.slice(0, name.indexOf(":")), names).found[0];
     return hit ? String(hit.id) : null;
   }
-  // Pasted text -> { found: [{ id, note, line, star, alt }], missed: [line] }. names: [[id, name], ...].
-  // A note in brackets is kept and shown next to the skill. "A / B" lists either skill: both are
-  // found, and B (alt) counts as recommended even on a ★ line.
+  // Pasted text -> { found: [{ id, note, line, star, alt }], missed: [line], pairs: [{ id, with }] }.
+  // names: [[id, name], ...]. A note in brackets, or an ⓘ line under it, is kept and shown next to
+  // the skill. "A / B" or "A or B" lists either skill: both are found, and B (alt) counts as
+  // recommended even on a ★ line. "A + B or C" pairs A with B or C: A only pays off with one of
+  // them (game8: "Dodging Danger must be paired with either Prudent Positioning or Ignited Spirit WIT").
   function parse(text, names) {
-    const found = [], missed = [], seen = new Set();
-    lines(text).forEach(({ text: line, star }) => {
+    const found = [], missed = [], pairs = [], seen = new Set();
+    let last = [];
+    lines(text).forEach(({ text: line, star, info }) => {
+      if (info) { last.slice(0, 1).forEach((x) => { x.note = x.note ? x.note + "; " + line : line; }); return; }
       const m = /^(.*?)\s*[([（]([^)\]）]*)[)\]）]\s*$/.exec(line);
       const body = (m ? m[1] : line).trim(), note = m ? m[2].trim() : "";
-      const parts = body.split(/\s+\/\s+/).map(nameOf).filter(Boolean);
-      parts.forEach((name, k) => {
-        const id = find(name, names);
-        if (!id) { missed.push(parts.length > 1 ? name : line); return; }
-        if (seen.has(id)) return;
-        seen.add(id);
-        found.push({ id, note, line, star, alt: k > 0 });
+      const sides = body.split(/\s+\+\s+/).map((side) => side.split(/\s+\/\s+|\s+or\s+/i).map(nameOf).filter(Boolean));
+      const ids = sides.map((side) => side.map((name) => { const id = find(name, names); if (!id) missed.push(sides.flat().length > 1 ? name : line); return id; }).filter(Boolean));
+      last = [];
+      ids.flat().forEach((id, k) => {
+        let x = found.find((y) => y.id === id);
+        if (!x && !seen.has(id)) { seen.add(id); x = { id, note, line, star, alt: k > 0 }; found.push(x); }
+        if (x) last.push(x);
       });
+      if (ids.length > 1) ids[0].forEach((id) => { const w = ids.slice(1).flat(); if (w.length) pairs.push({ id, with: w }); });
     });
-    return { found, missed };
+    return { found, missed, pairs };
   }
   // A cup's saved picks from the two pasted lists. A skill in both counts as a must-have, and so
   // does a ★ line's first skill in the recommended list.
@@ -51,7 +57,7 @@
     const mustIds = new Set(musts.map((x) => x.id));
     const recs = must.found.filter((x) => x.alt).concat(rec.found).filter((x) => !mustIds.has(x.id));
     return { must: musts.map(({ id, note }) => ({ id, note })), rec: recs.filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).map(({ id, note }) => ({ id, note })),
-      missed: must.missed.concat(rec.missed), text: { must: String(mustText || ""), rec: String(recText || "") }, at: today || null };
+      missed: must.missed.concat(rec.missed), pairs: must.pairs.concat(rec.pairs), text: { must: String(mustText || ""), rec: String(recText || "") }, at: today || null };
   }
   // { id: "must" | "rec" } for a saved entry, only skills that fit her style (fits(id) false: a
   // skill another style's chart has and hers doesn't, such as Front Runner Savvy for a Pace Chaser).
@@ -67,7 +73,12 @@
     const p = picks(e, fits), h = new Set((have || []).map(String)), d = new Set((dropped || []).map(String));
     return Object.keys(p).filter((id) => p[id] === "must" && !h.has(id) && !d.has(id));
   }
-  const api = { lines, parse, entry, picks, mustToAdd };
+  // Skills bought or held without a partner game8 pairs them with: [{ id, with }].
+  function unpaired(e, have) {
+    const h = new Set((have || []).map(String));
+    return ((e && e.pairs) || []).filter((p) => h.has(p.id) && !p.with.some((w) => h.has(w)));
+  }
+  const api = { lines, parse, entry, picks, mustToAdd, unpaired };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaGame8 = api;
 })(typeof window !== "undefined" ? window : globalThis);
