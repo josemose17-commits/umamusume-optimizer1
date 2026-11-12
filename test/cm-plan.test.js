@@ -443,7 +443,7 @@ test("Parent 2's blue goes to the gap her known family leaves open", () => {
   assert.equal(plan.rentalSearch(x, none).blue[0].i, 1, "a family with no blue there leaves the biggest gap first");
 });
 
-test("Independent Training's prioritized skills: offered race whites by value × chance, gold when offered, then random-event gambles, 10 at most", () => {
+test("Independent Training's prioritized skills: offered race whites by value × chance, whites only, then random-event gambles, 10 at most", () => {
   const x = x0();
   const w = plan.want(x).white;
   const offers = {}; offers[w[0].id] = 0.3; offers[w[1].id] = 0.9; offers[w[2].id] = 0.9;
@@ -455,7 +455,7 @@ test("Independent Training's prioritized skills: offered race whites by value ×
   assert.equal(offered.length, 3, "only the whites her deck offers count as offered");
   assert.deepEqual(offered.map(k => k.score), offered.map(k => k.score).slice().sort((a, b) => b - a), "most valuable × likely first");
   assert.ok(list.findIndex(k => k.gamble) === -1 || list.findIndex(k => k.gamble) >= offered.length, "gambles only after every offered one");
-  if (gold) { const g = list.find(k => SB.DATA.skills[k.id][0] === SB.DATA.skills[w[2].id][0]); assert.equal(g.id, gold); assert.ok(g.gold); }
+  if (gold) { const g = list.find(k => SB.DATA.skills[k.id][0] === SB.DATA.skills[w[2].id][0]); assert.equal(SB.DATA.skills[g.id][3], 1, "the white, even when a card gives the gold"); assert.ok(!g.gold); }
   assert.equal(plan.itSkills(x, offers, 2).length, 2);
 });
 
@@ -536,4 +536,16 @@ test("searches and the parent's skill list only use whites out on Global today",
   assert.ok(q.whites.length && q.whites.every(w => out(w.id)), "only whites a rental can have now");
   const offers = {}; planNow.want(x).white.forEach(w => { offers[w.id] = 0.5; });
   assert.ok(planNow.itSkills(x, offers, 10).every(k => out(k.id) || out(k.white)));
+});
+
+test("with a purchase plan, its whites come first and the race's other offered whites fill the 10 slots", () => {
+  const x = x0(), w = plan.want(x).white;
+  const offers = {}; w.forEach((k) => { offers[k.id] = 0.5; });
+  const keep = new Set(w.slice(0, 2).map((k) => String(k.id)));
+  const narrow = { targets: Object.fromEntries(Object.entries(x.rel.targets).filter(([id]) => keep.has(String(id)))), why: x.rel.why, L: x.rel.L };
+  const planned = Object.assign({}, x, { rel: narrow, relAll: x.rel, skillPlan: { parentValues: {} } });
+  const list = plan.itSkills(planned, offers, 10);
+  assert.ok(list.length > 2 && list.length <= 10, String(list.length));
+  assert.deepEqual(new Set(list.slice(0, 2).map((k) => String(k.white))), keep, "the plan's whites first");
+  assert.ok(list.every((k) => !k.gamble && !k.gold));
 });
