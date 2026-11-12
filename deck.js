@@ -259,12 +259,44 @@
     return { stats: [all, all, all, all, all], sp: 0, energy: 0, bond: 5, known: false };
   }
 
+  // ---- Cards and outfits you won't use ----
+  // Left out of every deck search, upgrade, borrow, tier list and pull plan (set by the page from
+  // your saved list). Support card ids and trainee (outfit) ids.
+  const hidden = { cards: new Set(), trainees: new Set() };
+  function setHidden(h) {
+    hidden.cards = new Set(((h && h.cards) || []).map(Number));
+    hidden.trainees = new Set(((h && h.trainees) || []).map(Number));
+  }
+  const isHidden = (id) => hidden.cards.has(+id);
+  const isHiddenTrainee = (id) => hidden.trainees.has(+id);
+  // Halloween-themed cards and outfits: JP's Halloween banner opens around Sept 26-Oct 1 each year
+  // (Tamamo Cross "Beware! Halloween Night!", Mejiro Palmer "Moonlit Devil ♪", Rice Shower
+  // "Vampire Makeover!", Meisho Doto "Dot-o'-Lantern"), plus Halloween words in a title. R cards
+  // and promo cards from those days aren't themed. "Witch" alone isn't Halloween (Sweep Tosho).
+  const HALLOWEEN_WORDS = /hallow|trick ?☆|trick or treat|pumpkin|ghost|vampire|nosferatu|mummy|jiangshi|lantern|ハロウィン|おばけ|かぼちゃ|吸血鬼/i;
+  const halloweenDay = (jp) => /^\d{4}-(09-(2[6-9]|30)|10-01)$/.test(jp || "");
+  function halloween() {
+    return {
+      cards: DATA.supports.filter((c) => HALLOWEEN_WORDS.test(c.t || "") || (halloweenDay(c.jp) && c.r >= 2 && c.src !== "promo")).map((c) => c.id),
+      trainees: DATA.trainees.filter((t) => HALLOWEEN_WORDS.test(t.t || "") || halloweenDay(t.jp)).map((t) => t.id),
+    };
+  }
+
   // Backup code for the cards you own: "UMA1:" then base-36 card id + limit break digit per card.
-  function encodeOwned(owned) {
-    return "UMA1:" + Object.keys(owned).map(Number).filter((id) => byId.has(id)).sort((a, b) => a - b).map((id) => id.toString(36) + owned[id]).join(".");
+  // Cards and outfits you won't use follow as "~x" and "~t" lists of base-36 ids (older codes have none).
+  function encodeOwned(owned, hide) {
+    const list = (ids) => [...new Set((ids || []).map(Number))].sort((a, b) => a - b).map((id) => id.toString(36)).join(".");
+    const extra = hide && ((hide.cards || []).length || (hide.trainees || []).length) ? "~x" + list(hide.cards) + "~t" + list(hide.trainees) : "";
+    return "UMA1:" + Object.keys(owned).map(Number).filter((id) => byId.has(id)).sort((a, b) => a - b).map((id) => id.toString(36) + owned[id]).join(".") + extra;
+  }
+  function decodeHidden(text) {
+    const m = String(text || "").trim().match(/^UMA1:[0-9a-z.]*~x([0-9a-z.]*)~t([0-9a-z.]*)$/i);
+    if (!m) return null;
+    const ids = (s) => s.split(".").filter(Boolean).map((t) => parseInt(t, 36));
+    return { cards: ids(m[1]).filter((id) => byId.has(id)), trainees: ids(m[2]).filter((id) => traineeById.has(id)) };
   }
   function decodeOwned(text) {
-    const m = String(text || "").trim().match(/^UMA1:([0-9a-z.]*)$/i);
+    const m = String(text || "").trim().replace(/~x[0-9a-z.]*~t[0-9a-z.]*$/i, "").match(/^UMA1:([0-9a-z.]*)$/i);
     if (!m) return null;
     const out = {};
     m[1].split(".").filter(Boolean).forEach((t) => {
@@ -325,6 +357,7 @@
   }
 
   const api = {
+    setHidden, isHidden, isHiddenTrainee, halloween, decodeHidden, hidden,
     DATA, STATS, RARITY, BOND_FRIENDSHIP, BOND_PER_TRAINING, BOND_PER_HINT, BOND_PER_DATE,
     card, trainee, skillCost, addSkillCosts, levelFor, effectTable, baseEffects, effectsIn, conditionalUniques, effectName, formatEffect, uniqueText,
     onGlobal, label, typeLabel, encodeOwned, decodeOwned, eventRewards, initialBond, isRainbow, trainingGain, suggestBuild, skillOffers

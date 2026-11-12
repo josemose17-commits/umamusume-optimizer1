@@ -12,7 +12,8 @@
     const fam = F.create({ A, skills: ctx.SB.DATA.skills });
     const g1 = A.g1Races().map((r) => r.name).sort();
     const trainee = (id) => D.DATA.trainees.find((t) => t.id === +id) || null;
-    const versions = (cid) => D.DATA.trainees.filter((t) => t.cid === +cid);
+    // Her versions, without outfits you won't use (unless that leaves none).
+    const versions = (cid) => { const all = D.DATA.trainees.filter((t) => t.cid === +cid), mine = all.filter((t) => !(D.isHiddenTrainee && D.isHiddenTrainee(t.id))); return mine.length ? mine : all; };
     // Inherited unique (green spark) of a version: her unique's 9... id.
     const uniqueOf = (t) => (t && t.us && t.us.length ? "9" + String(t.us[0]).slice(1) : null);
     const owners = new Map();
@@ -357,7 +358,8 @@
     function lookForHTML(f, w) {
       const name = ctx.charName;
       const top = w.white.slice(0, 10), rest = w.white.slice(10);
-      const whiteRow = (s) => `<li><b>${esc(ctx.skillName(s.id))}</b> <span class="mini">${s.L.toFixed(2)} L · ${WHY[s.why] || s.why}${s.deck != null ? ` · her deck offers it ${Math.round(s.deck * 100)}%` : ""}${s.own ? " · she has it (innate/awakening)" : ""}</span></li>`;
+      // game8's must-haves are ranked with her best skill; their weight isn't a simulated L.
+      const whiteRow = (s) => `<li><b>${esc(ctx.skillName(s.id))}</b> <span class="mini">${s.why === "game8" ? "ranked first" : s.L.toFixed(2) + " L"} · ${WHY[s.why] || s.why}${s.deck != null ? ` · her deck offers it ${Math.round(s.deck * 100)}%` : ""}${s.own ? " · she has it (innate/awakening)" : ""}</span></li>`;
       const greens = w.green.slice(0, 6);
       const text = [
         w.pairs[0] ? `Parents: ${w.pairs.slice(0, 3).map((p) => name(p.p1) + " + " + name(p.p2)).join(" / ")}` : "",
@@ -495,7 +497,7 @@
 
   const VETS_KEY = "uma-veterans-v1", UMAS_KEY = "uma-my-umas-v1", RENTALS_KEY = "uma-rentals-v1";
   const FROM = { p1: "Parent 1", p2: "Parent 2", g11: "P1's parent", g12: "P1's parent", g21: "P2's parent", g22: "P2's parent" };
-  const WHY = { L: "race skill", green: "green", recovery: "recovery", position: "lane/vision" };
+  const WHY = { L: "race skill", green: "green", recovery: "recovery", position: "lane/vision", game8: "game8 must-have", purchase: "her purchase plan" };
   const api = { create };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamilyPlanner = api;
