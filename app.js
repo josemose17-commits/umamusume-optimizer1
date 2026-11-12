@@ -2224,6 +2224,7 @@
     if (c.reachSS === true) c.reachSS = "SS";
     if (c.reachSS === false) c.reachSS = "";
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
+    if (host === "cm" && c.goal === "race") g8Sync(c);
     return c;
   }
   // Independent Training's race agenda: the Parents tab's G1 plan when you've sent it over
@@ -2344,6 +2345,98 @@
     const costs = {};
     skillRows(pid, style).forEach((r) => { map[r.id] = r.L; costs[r.id] = skillInfo(r.id)[1]; });
     return { map, costs };
+  }
+
+  // ---- game8's picks per cup (game8.js), pasted by hand from game8's Global cup guide ----
+  // Must-haves join each racing ace's must-have skills for that cup (✕ drops one for her);
+  // recommended ones get a tag and win ties in the skill-set comparisons. game8 doesn't rank its
+  // picks, so the simulator still values them.
+  const G8 = window.UmaGame8, G8_GUIDE = "https://game8.co/games/Umamusume-Pretty-Derby/archives/541155";
+  const g8Entry = (pid) => (state.game8 && state.game8[pid]) || null;
+  // A pick fits her style unless it's another style's skill (Front Runner Savvy for a Pace
+  // Chaser): data/skill-styles.js, every version of the skill needing that running style.
+  function g8Fits(pid, style) {
+    const only = window.UmaSkillStyles || {};
+    return (id) => !only[String(id)] || only[String(id)] === style;
+  }
+  const g8Picks = (pid, style) => G8.picks(g8Entry(pid), g8Fits(pid, style));
+  function g8Pill(pid, style, id) {
+    const kind = g8Picks(pid, style)[String(id)];
+    if (!kind) return "";
+    const e = g8Entry(pid), x = e.must.concat(e.rec).find((y) => y.id === String(id)), note = x && x.note;
+    return ` <span class="pill g8" title="game8's ${kind === "must" ? "must-have" : "recommended"} skill for this cup${note ? " (" + esc(note) + ")" : ""}. game8 doesn't rank its picks: the simulator values them, and a game8 pick wins a close call.">game8${kind === "must" ? " must-have" : ""}</span>`;
+  }
+  // Keeps a racing ace's must-haves in step with game8's for her cup and style: adds the ones she
+  // hasn't dropped, and takes back the ones it added that no longer apply (another cup or style).
+  function g8Sync(c) {
+    if (!G8) return;
+    const e = g8Entry(c.preset), fits = g8Fits(c.preset, c.style), picks = G8.picks(e, fits);
+    c.g8added = (c.g8added || []).filter((id) => { if (picks[id] === "must") return true; c.must = c.must.filter((x) => x !== id); return false; });
+    G8.mustToAdd(e, c.must, c.g8drop, fits).forEach((id) => { c.must.push(id); c.g8added.push(id); });
+  }
+  // A game8 must-have removed by hand stays out for this ace; added back, it's hers again.
+  function g8Drop(c, id, dropped) {
+    if (g8Picks(c.preset, c.style)[id] !== "must") return;
+    c.g8drop = (c.g8drop || []).filter((x) => x !== id);
+    if (dropped) c.g8drop.push(id);
+    c.g8added = (c.g8added || []).filter((x) => x !== id);
+  }
+  // The race simulator's skill data (conditions, Wit checks, scaling), loaded once per simulator
+  // for notes and the Skill optimizer's quick plan; the page redraws when it arrives.
+  const g8Catalogs = {};
+  function raceCatalog(p) {
+    const RS = window.UmaRaceSkills;
+    if (!RS) return null;
+    const kind = RS.engine(p, SV.meta.sims).catalog || "global";
+    if (g8Catalogs[kind] && g8Catalogs[kind] !== "loading") return g8Catalogs[kind];
+    if (!g8Catalogs[kind]) { g8Catalogs[kind] = "loading"; RS.load(RS.engine(p, SV.meta.sims).catalog).then((cat) => { g8Catalogs[kind] = cat; if (["cm", "parents", "skillopt"].includes(state.tab)) renderTab(); }).catch(() => { delete g8Catalogs[kind]; }); }
+    return null;
+  }
+  // Why a skill's chart value may not tell the whole story, in a few words (the mechanics doc's
+  // field conditions, greens and heals, game8's own note).
+  function g8Why(p, style, id, cat) {
+    const k = String(id), out = [], kind = window.UmaSkillKinds && window.UmaSkillKinds.skills[k];
+    const cav = skillCaveat(k, cat ? skillConditions(cat, [k])[k] : "", p.id, style);
+    if (cav) out.push(cav);
+    if (kind && kind[0] === "green") out.push("a green: the chart counts only its stat boost");
+    if (kind && kind[0] === "recovery") out.push("a heal: the chart was run with stamina for a full spurt, so it's worth more if she's short or debuffed");
+    if (MECHANIC_ONLY[k]) out.push(MECHANIC_ONLY[k]);
+    const e = g8Entry(p.id), x = e && e.must.concat(e.rec).find((y) => y.id === k);
+    if (x && x.note) out.push("game8: " + x.note);
+    return out.join("; ");
+  }
+  // game8's picks against the simulator for her style: picks the chart ranks low (or can't value),
+  // and the chart's strongest skills game8 doesn't list. Neither side is the answer on its own.
+  const G8_LOW_RANK = 40, G8_TOP = 8;
+  // Skills whose worth is a race mechanic the lengths chart barely sees (mechanics.js).
+  const MECHANIC_ONLY = { 202161: "lowers her Rushed chance by 3 points; the chart doesn't count Rushed races avoided", 200431: "start delay ×0.4: fewer late starts, a better position early", 200432: "start delay ×0.9: fewer late starts" };
+  function g8CompareHTML(c) {
+    const p = presetById(c.preset), e = g8Entry(p.id);
+    if (!e) return "";
+    const rows = skillRows(p.id, c.style).filter((r) => released(String(r.id), p));
+    if (!rows.length) return `<p class="mini">The comparison with the simulator shows once this cup's skill values load.</p>`;
+    const cat = raceCatalog(p), picks = g8Picks(p.id, c.style), rank = new Map(rows.map((r, i) => [String(r.id), { i: i + 1, L: r.L }]));
+    const item = (id) => { const r = rank.get(id), why = g8Why(p, c.style, id, cat); return `<li>${skillNameHTML(id)} <span class="mini">${r ? `#${r.i}, ${r.L.toFixed(2)} L` : "no chart value for her style"}${why ? " · " + esc(why) : ""}</span></li>`; };
+    const low = Object.keys(picks).filter((id) => !rank.has(id) || rank.get(id).i > G8_LOW_RANK);
+    const fam = (id) => { const f = window.UmaSkillBudget.DATA.skills[id]; return f ? f[0] : id; };
+    const pickFams = new Set(Object.keys(picks).map(fam));
+    const top = rows.slice(0, 30).map((r) => String(r.id)).filter((id) => !pickFams.has(fam(id))).slice(0, G8_TOP);
+    return `<div class="g8-compare"><p class="mini"><b>game8 vs the simulator</b> (${esc(STYLE_NAME[c.style] || c.style)}, the chart's ranking on this course${cat ? "" : "; loading skill conditions…"}). Neither is the answer on its own: game8 sees real races and fields, the simulator measures lengths alone.</p>
+      ${low.length ? `<p class="mini">game8 picks the chart ranks low (past #${G8_LOW_RANK}) or can't value:</p><ul class="mini">${low.map(item).join("")}</ul>` : `<p class="mini">Every game8 pick is in the chart's top ${G8_LOW_RANK}.</p>`}
+      ${top.length ? `<p class="mini">The chart's strongest skills game8 doesn't list:</p><ul class="mini">${top.map(item).join("")}</ul>` : ""}</div>`;
+  }
+  function g8BoxHTML(c) {
+    const p = presetById(c.preset), e = g8Entry(p.id), fits = g8Fits(p.id, c.style);
+    const chip = (x) => `<span class="chip${fits(x.id) ? "" : " warnchip"}">${skillNameHTML(x.id)}${x.note ? ` <span class="mini">${esc(x.note)}</span>` : ""}${fits(x.id) ? "" : ` <span class="mini">not for a ${esc(STYLE_NAME[c.style] || c.style)}</span>`}</span>`;
+    return `<details class="pred-help g8-box" data-cmp-open="cm-g8"><summary>game8's skills for this cup${e ? ` (${e.must.length} must-have, ${e.rec.length} recommended)` : ""}</summary>
+      <p class="mini">Copy the skill lists from <a href="${G8_GUIDE}" target="_blank" rel="noopener">game8's guide for this cup</a> (Champions Meeting → the cup → Recommended Skills) and paste them here: must-haves in the first box, the rest in the second. game8's "・" bullets, notes in brackets and headings ending in ":" are fine. game8 doesn't rank its picks, so the simulator still values them: must-haves become this deck's must-have skills (✕ drops one for this ace), and the others get a <span class="pill g8">game8</span> tag and win close calls in <b>Skills for this build</b> and the Skill optimizer.</p>
+      <div class="row-wrap"><label class="field grow"><span>Must-have</span><textarea id="g8Must" rows="4" placeholder="Left-Handed ◯&#10;Tokyo Racecourse ◯">${esc(e ? e.text.must : "")}</textarea></label>
+        <label class="field grow"><span>Recommended</span><textarea id="g8Rec" rows="4" placeholder="・ Solid Steps (requires 1000+ Power)&#10;・ Restraint">${esc(e ? e.text.rec : "")}</textarea></label></div>
+      <div class="row-wrap"><button type="button" class="btn small" id="g8Save">Save for ${esc(presetLabel(p))}</button>${e ? '<button type="button" class="btn ghost small" id="g8Clear">Clear</button>' : ""}</div>
+      ${e ? `<p class="mini">Saved ${esc(fmtDate(e.at))}, for every ace racing this cup.</p>${e.must.length ? `<div class="row-wrap"><span class="mini"><b>Must-have:</b></span>${e.must.map(chip).join("")}</div>` : ""}${e.rec.length ? `<div class="row-wrap"><span class="mini"><b>Recommended:</b></span>${e.rec.map(chip).join("")}</div>` : ""}` : ""}
+      ${e && e.missed.length ? `<p class="mini warn">Not matched to a skill (check the spelling, or it's not out on Global by this cup): ${e.missed.map(esc).join("; ")}.</p>` : ""}
+      ${g8CompareHTML(c)}
+    </details>`;
   }
 
   // Which cards can give each skill (hint or event), among the cards the optimizer may use.
@@ -2895,9 +2988,10 @@
         const note = known.has(String(id)) ? "available to your trainee" : n ? n + (mine ? " of your cards" : " cards") : mine ? "none of your cards" : "no support card";
         // A must-have she can't fire in her place in the pack (No Stopping Me! for a Front Runner).
         const miss = positionNote(c.preset, id, c.style);
-        return `<span class="chip lockchip${(n || known.has(String(id))) && !miss ? "" : " warnchip"}"${miss ? ` title="The skill values leave it out for ${/^[AEIOU]/.test(STYLE_NAME[c.style] || "") ? "an" : "a"} ${esc(STYLE_NAME[c.style] || c.style)}: ${esc(miss)}."` : ""}>${skillNameHTML(id)} <span class="mini">${note}${miss ? " · " + esc(miss) : ""}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
+        return `<span class="chip lockchip${(n || known.has(String(id))) && !miss ? "" : " warnchip"}"${miss ? ` title="The skill values leave it out for ${/^[AEIOU]/.test(STYLE_NAME[c.style] || "") ? "an" : "a"} ${esc(STYLE_NAME[c.style] || c.style)}: ${esc(miss)}."` : ""}>${skillNameHTML(id)}${c.goal === "race" ? g8Pill(c.preset, c.style, id) : ""} <span class="mini">${note}${miss ? " · " + esc(miss) : ""}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
       }).join("")}</div>` : ""}
       <p class="mini">${c.goal === "race" ? "The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts." : "Parent must-haves prioritize cards with a direct hint/event source or a canonical gold prerequisite route. A gold route makes the white purchasable, without granting its hint discount."} Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
+      ${c.goal === "race" ? g8BoxHTML(c) : ""}
     </div>`;
   }
   const skillIdByName = (name, c = cm("cm")) => {
@@ -3505,7 +3599,7 @@
         <tr><th>Predicted</th>${g.stats.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr>
         <tr><th>Short</th>${g.short.map((v, i) => `<td class="num ${v > 0 ? "short" : "over"}">${v > 0 ? "−" + v : "+" + (g.stats[i] - g.target[i])}</td>`).join("")}</tr></tbody></table></div>
       <p class="mini">${short.length ? `<b>Her gaps: ${short.join(" · ")}.</b> Parents turns them into the blue sparks to look for.` : "<b>No gaps:</b> every target is reached."} ${host === "cm" ? `<button type="button" class="linkish" data-goto-tab="parents" data-goto-section="gaps">Fill them in Parents →</button>` : ""}</p>`;
-      return gapTable + `<p class="mini">Skill points: about ${r.est.sp}.</p>
+      return gapTable + powerLineHTML(presetById(r.preset), r.style, g.stats[2]) + (rushedLine(g.stats[4], 0, false) ? `<p class="mini">${rushedLine(g.stats[4], 0, false).trim()}</p>` : "") + `<p class="mini">Skill points: about ${r.est.sp}.</p>
       ${fitNoteHTML(r)}
       ${simulationDiagnosticsHTML(r)}${predictedIncludesHTML(r)}</div>`;
     }
@@ -3527,6 +3621,16 @@
       ${fitNoteHTML(r)}
       ${simulationDiagnosticsHTML(r)}${predictedIncludesHTML(r)}
     </div>`;
+  }
+  // Conserve Power (mechanics.js): past a power line she builds up acceleration for her last spurt.
+  // The race simulator and KuromiAK's mechanics document put the line in different places on a
+  // course with a power penalty; both are shown until it's settled.
+  function powerLineHTML(p, style, power) {
+    const M = window.UmaMechanics;
+    if (!M || !p) return "";
+    const l = M.conservationLine(p), at = (line) => power > line ? `she's past it (+${power - line})` : `she's ${line - power + 1} short`;
+    const where = l.penalty ? `the race simulator puts it at <b>${l.sim}</b> here (${esc(l.ground)} ${esc(l.surface.toLowerCase())} takes ${l.penalty} off power first), KuromiAK's race-mechanics document at <b>1200</b> (no ground penalty for this): ${at(l.sim)} of the first, ${at(l.doc)} of the second. Not settled; the deck scoring uses the simulator's` : `at <b>1200</b> on this course (no power penalty on ${esc(l.ground)} ${esc(l.surface.toLowerCase())}): ${at(1200)}`;
+    return `<p class="mini"><b>Power line (Conserve Power):</b> past it she builds up extra acceleration for her last spurt, a big step in lengths. It's ${where}. Predicted power: ${power}.</p>`;
   }
   // How the deck search scored and picked the deck: target fit, or race value (lengths), with the
   // held-out recheck and a close call when the runner-up is within the noise.
@@ -3614,7 +3718,7 @@
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
           const must = c.must.indexOf(String(r.id)) !== -1;
-          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}${gateTag(r.id, c.style)}${r.ahead ? ` <span class="pill" title="Needs a rival ahead of her. You set Front Runners in this cup to fight for the lead, so its simulated value is counted at ${Math.round(r.ahead * 100)}%.">needs a rival ahead: counted at ${Math.round(r.ahead * 100)}%</span>` : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}${g8Pill(c.preset, c.style, r.id)}${gateTag(r.id, c.style)}${r.ahead ? ` <span class="pill" title="Needs a rival ahead of her. You set Front Runners in this cup to fight for the lead, so its simulated value is counted at ${Math.round(r.ahead * 100)}%.">needs a rival ahead: counted at ${Math.round(r.ahead * 100)}%</span>` : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       ${leftOutHTML(p, c, cut)}
@@ -3744,7 +3848,7 @@
     if (!d) return "";
     const other = d.other.length ? d.other.map((id) => skillNameHTML(id)).join(", ") : "no purchases";
     const by = `${num(Math.abs(d.diff.mean))} ± ${num(d.diff.ci95)} L over ${d.diff.samples} paired races`;
-    if (d.verdict === "tie") return `<p class="mini"><b>No clear difference</b> from the next-best set (${other}): ${by}. That shows no clear advantage either way, not that they're equal; the set that spends less SP is kept. Pick by hints you already have if you prefer.</p>`;
+    if (d.verdict === "tie") return `<p class="mini"><b>No clear difference</b> from the next-best set (${other}): ${by}. That shows no clear advantage either way, not that they're equal; ${d.rule === "prefer" ? "the set with more of game8's picks is kept, then the one that spends less SP" : "the set that spends less SP is kept"}. Pick by hints you already have if you prefer.</p>`;
     return `<p class="mini"><b>Checked head-to-head:</b> this set beats the next-best (${other}) by ${by}${d.verdict === "swapped" ? ". The search had ranked that one first, but it lost the head-to-head" : ""}.</p>`;
   }
   // Purchases dropped because they didn't clearly add lengths (race-skills.js pruning).
@@ -3771,7 +3875,7 @@
     const pairs = [["distanceAptitude", "Distance"], ["surfaceAptitude", "Surface"], ["strategyAptitude", "Style"]];
     const num = x => Number.isFinite(x) ? x.toFixed(2) : "–";
     const dependency = id => skillCaveat(id, r && r.conditions[id], c.preset, c.style);
-    const table = (rows, ranking) => `<div class="table-wrap"><table><thead><tr><th>Skill</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows.map(x=>`<tr><th>${skillNameHTML(x.id)}${dependency(x.id) ? `<div class="mini">${esc(dependency(x.id))}</div>` : ""}</th><td>${x.cost}${ranking && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${num((ranking ? x.result : x.marginal).mean)}</td><td>${num(x.per100)}</td></tr>`).join("") || '<tr><td colspan="4">No additional purchase fits.</td></tr>'}</tbody></table></div>`;
+    const table = (rows, ranking) => `<div class="table-wrap"><table><thead><tr><th>Skill</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows.map(x=>`<tr><th>${skillNameHTML(x.id)}${g8Pill(c.preset, c.style, x.id)}${dependency(x.id) ? `<div class="mini">${esc(dependency(x.id))}</div>` : ""}</th><td>${x.cost}${ranking && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${num((ranking ? x.result : x.marginal).mean)}</td><td>${num(x.per100)}</td></tr>`).join("") || '<tr><td colspan="4">No additional purchase fits.</td></tr>'}</tbody></table></div>`;
     return `<details class="pred-help" id="cmRaceInputs"${q.open ? " open" : ""}><summary>Skills for this build: equipped skills, hints and SP</summary>
       <p class="mini">Compares affordable skill sets on this course. A new equipped skill changes the baseline and the remaining recommendations.</p>
       <div class="row-wrap"><label class="field"><span>Inputs</span><select data-race-field="mode"><option value="plan"${q.mode === "plan" ? " selected" : ""}>Plan from this deck</option><option value="finished"${q.mode === "finished" ? " selected" : ""}>Finished uma: enter stats and SP left</option></select></label><label class="field"><span>Unique level</span><select data-race-field="uniqueLv">${[1,2,3,4,5,6].map(n=>`<option value="${n}"${+(q.uniqueLv || 1)===n?" selected":""}>${n}</option>`).join("")}</select></label><label class="field"><span>Mood</span><select data-race-field="mood">${[["0","Normal (CM rounds)"],["1","Good"],["2","Great (finals)"]].map(([v,l])=>`<option value="${v}"${String(q.mood||"0")===v?" selected":""}>${l}</option>`).join("")}</select></label><label class="field"><span>SP left (finished uma)</span><input type="number" min="0" max="20000" data-race-field="sp" value="${esc(q.sp)}"></label></div>
@@ -3860,7 +3964,7 @@
           if(!raceMemo.has(key)) {const answer=await worker.run(RS.request(p,input,before,after,catalog,n,seed));raceMemo.set(key,Object.assign(RS.summary(answer.results.results),{fullSpurt:answer.results.runData.nspurt[1]/n}));if(raceMemo.size>2500)raceMemo.delete(raceMemo.keys().next().value);}
           return raceMemo.get(key);
         };
-        const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,compare,scale:raceScale(p,c.style,available),maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
+        const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,prefer:Object.keys(g8Picks(p.id,c.style)),compare,scale:raceScale(p,c.style,available),maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
         if(q.mode === "plan" && plan.selected.some(row=>!access.byId[row.id]))throw new Error("A purchase lacks a verified skill source. Compare again after checking her deck and family.");
         // A separate, explicitly conditional purchase plan asks which white hints would be
         // worth seeking. These never enter the actual purchase list without a source.
@@ -3996,10 +4100,21 @@
       return true;
     }
     const md = hit("[data-must-del]");
-    if (md) { c.must = c.must.filter((id) => id !== md.dataset.mustDel); save(); renderCM(); return true; }
+    if (md) { g8Drop(c, md.dataset.mustDel, true); c.must = c.must.filter((id) => id !== md.dataset.mustDel); save(); renderCM(); return true; }
+    if (hit("#g8Save")) {
+      const p = presetById(c.preset);
+      if (!state.game8) state.game8 = {};
+      const e = G8.entry(q("#g8Must").value, q("#g8Rec").value, soCupNames(p), TODAY);
+      if (!e.must.length && !e.rec.length && !e.missed.length) delete state.game8[p.id]; else state.game8[p.id] = e;
+      g8Sync(c); save(); renderCM();
+      flash(`game8's picks saved for ${presetLabel(p)}: ${e.must.length} must-have, ${e.rec.length} recommended${e.missed.length ? `, ${e.missed.length} not matched` : ""}.`);
+      return true;
+    }
+    if (hit("#g8Clear")) { if (state.game8) delete state.game8[c.preset]; g8Sync(c); save(); renderCM(); return true; }
     const mt = hit("[data-must]");
     if (mt) {
       const id = String(mt.dataset.must);
+      g8Drop(c, id, c.must.indexOf(id) !== -1);
       c.must = c.must.indexOf(id) === -1 ? c.must.concat([id]) : c.must.filter((x) => x !== id);
       save();
       renderCM();
@@ -4380,12 +4495,13 @@
   }
   function soLengthHTML(b, p, r) {
     const note = (id) => skillCaveat(id, r.conditions[id], p.id, b.style);
-    const rows = (list, mode) => list.map((x) => `<tr><th>${skillNameHTML(x.id)}${note(x.id) ? `<div class="mini">${esc(note(x.id))}</div>` : ""}</th><td>${x.cost}${mode === "rank" && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${soNum((mode === "rank" ? x.result : x.marginal).mean)}</td><td>${soNum(x.per100)}</td></tr>`).join("");
+    const rows = (list, mode) => list.map((x) => `<tr><th>${skillNameHTML(x.id)}${g8Pill(p.id, b.style, x.id)}${note(x.id) ? `<div class="mini">${esc(note(x.id))}</div>` : ""}</th><td>${x.cost}${mode === "rank" && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${soNum((mode === "rank" ? x.result : x.marginal).mean)}</td><td>${soNum(x.per100)}</td></tr>`).join("");
     const plan = r.plan, spurt = plan.result.fullSpurt;
     return `
       ${r.staticReason ? `<p class="mini warn">Course-chart only: ${esc(r.staticReason)}</p>` : ""}
       <p><b>Buy:</b> ${plan.selected.length ? plan.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing: no purchase gains length"}. ${plan.spent} / ${plan.budget} SP, ${plan.unspent} left. <b>+${soNum(plan.result.mean)} L</b> on average${plan.result.ci95 ? ` (± ${soNum(plan.result.ci95)})` : ""} over what she has; worst 10% of races ${soNum(plan.result.low)} L.</p>
       ${duelHTML(plan)}${prunedHTML(plan)}
+      ${(plan.unmetMust || []).length ? `<p class="mini warn">game8 must-haves her SP can't cover: ${plan.unmetMust.map((id) => skillNameHTML(id)).join(", ")}.</p>` : plan.selected.some((x) => g8Picks(p.id, b.style)[x.id] === "must") ? `<p class="mini">game8's must-haves in her shop are bought first, then the rest by lengths.</p>` : ""}
       ${!r.staticReason && Number.isFinite(spurt) && spurt < 0.95 ? `<p class="mini warn">With these skills she reaches a full last spurt in only ${Math.round(spurt * 100)}% of races: more stamina or a recovery skill would help.</p>` : ""}
       <div class="table-wrap"><table><thead><tr><th>Buy</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows(plan.selected, "buy") || '<tr><td colspan="4">No purchase.</td></tr>'}</tbody></table></div>
       <p class="mini">Added L: what she loses if that one skill is left out of the set, so rows don't add up to the total.</p>
@@ -4394,11 +4510,38 @@
       ${plan.excluded.length ? `<p class="mini warn">The simulator can't run these, so they were left out: ${plan.excluded.map((id) => skillNameHTML(id)).join(", ")}.</p>` : ""}
       <details><summary>How the race check works</summary><p class="mini">${r.staticReason ? "Chart gains and real SP costs only." : `${plan.method === "every full affordable combination" ? `Every full combination her SP allows was raced (${plan.evaluations} sets; full: nothing else still fits), 24 paired races each, so this is the best set under the simulator, not just the best a search found.` : `Her shop has too many combinations to race them all, so ${plan.evaluations} sets were raced in a search (several starting sets, additions, removals, one-for-one and two-for-two swaps), 24 paired races each: the best set found, not a guaranteed best.`} The best few again on 96 fresh races; then the top two head to head on 240 races; then each purchase raced against the set without it (240 races), dropping ones that don't clearly add lengths; and the final gain on 96 races no step used. "${r.field} runners" only sets the placing ranges her style assumes: the simulator races her against a copy of herself, not a field. Full spurt in ${Math.round((spurt || 0) * 100)}% of races.`} ${esc(r.engineNote)} Blocking, lane changes, rivals' skills and real opponents' debuffs aren't modeled; skills tagged "depends on the field" or "debuff" need your judgment. A ± range containing zero means no clear difference, not proof they're equal. Prices use hint discounts${b.fast ? " and Fast Learner" : ""}; a gold skill needs its white bought first (or owned), and that is counted.</p></details>`;
   }
+  // The quick plan's chart values for her own stats (mechanics.js): skills with a Wit check fire
+  // before the race max(100 - 9000 / base Wit, 20)% of the time, and the chart was run at the cup's
+  // Wit; a few skills scale with her stats. The race check runs her real stats instead.
+  // Her Rushed chance before each race (mechanics.js), and with Restraint (−3 points).
+  function rushedLine(wit, mood, has) {
+    const M = window.UmaMechanics;
+    if (!M || !(wit > 0)) return "";
+    const r = M.rushed(wit, mood || 0, false), w = M.rushed(wit, mood || 0, true);
+    return ` Rushed (掛かり) chance at her Wit: <b>${Math.round(r * 100)}%</b> of races${has ? `, ${Math.round(w * 100)}% with Restraint, which she has` : `; Restraint would make it ${Math.round(w * 100)}%`}. Rushed burns 60% more HP for up to 12 s and costs part of her conserved power.`;
+  }
+  const soRushedHTML = (b) => { const line = rushedLine(+b.stats.wisdom, +b.mood, b.skills.some((x) => x.id === "202161" && x.have)); return line ? `</p><p class="mini">${line.trim()}` : ""; };
+  function soAdjust(p, b, base) {
+    const M = window.UmaMechanics, cat = raceCatalog(p), out = { values: Object.assign({}, base), notes: {}, wit: null };
+    if (!M || !cat) return out;
+    const her = SO.STATS.map((s) => +b.stats[s] || 0), chart = SO.STATS.map((s) => +p.stats[s] || 0), ground = M.groundSpeed(p.course.surface, M.groundOf(p));
+    const wit = her[4] > 0 ? { her: M.activation(her[4], +b.mood || 0), chart: M.activation(chart[4], 0) } : null;
+    out.wit = wit;
+    Object.keys(out.values).forEach((id) => {
+      const sk = cat.skills[id];
+      if (!sk) return;
+      if (wit && sk.wisdomCheck) out.values[id] *= wit.her / wit.chart;
+      const sc = her.every((x) => x > 0) ? M.statScale(sk, her, chart, ground) : null;
+      if (sc && sc.k != null) { out.values[id] *= sc.k; if (sc.k !== 1) out.notes[id] = `scales with her ${sc.type === 13 ? "highest stat" : "speed"}: ×${sc.k.toFixed(2)} of the chart's value`; }
+      else if (sc) out.notes[id] = `scales with her speed: the chart's stats gave it nothing, so the race check values it`;
+    });
+    return out;
+  }
   function renderSkillOpt(body) {
     const b = soBuild(), p = presetById(b.cup), t = soTrainee(b);
     loadSkillValues(p.id);
     const loaded = typeof svCache[p.id] === "object";
-    const values = loaded ? skillMap(p.id, b.style).map : {};
+    const adj = soAdjust(p, b, loaded ? skillMap(p.id, b.style).map : {}), values = adj.values;
     const names = soCupNames(p), apt = soApt(b, p);
     let quick = null;
     try { if (loaded && b.sp !== "") quick = SO.quickPlan({ skills: b.skills, values, sp: +b.sp, fast: b.fast }); } catch (e) { quick = null; }
@@ -4408,14 +4551,14 @@
     const shopRows = b.skills.map((x, i) => {
       const L = values[x.id], own = SO.price(x.id, x.hint, b.fast), chain = window.UmaSkillBudget.create().chain(x.id) || [x.id];
       const lower = chain.slice(0, -1).filter((id) => !b.skills.some((r) => r.id === id && r.have));
-      const note = positionNote(p.id, x.id, b.style);
-      return `<tr class="${buy.has(x.id) && !x.have ? "so-buy" : ""}"><th>${skillNameHTML(x.id)}${releasePill(SV.skills[x.id], p, window.UmaSkillRelease.cutoff(p, TODAY))}${note ? `<div class="mini">${esc(note)}</div>` : ""}${lower.length && !x.have ? `<div class="mini">needs ${lower.map((id) => esc(skillInfo(id)[0])).join(" + ")}</div>` : ""}</th>
+      const note = [positionNote(p.id, x.id, b.style), adj.notes[x.id]].filter(Boolean).join(" · ");
+      return `<tr class="${buy.has(x.id) && !x.have ? "so-buy" : ""}"><th>${skillNameHTML(x.id)}${g8Pill(p.id, b.style, x.id)}${releasePill(SV.skills[x.id], p, window.UmaSkillRelease.cutoff(p, TODAY))}${note ? `<div class="mini">${esc(note)}</div>` : ""}${lower.length && !x.have ? `<div class="mini">needs ${lower.map((id) => esc(skillInfo(id)[0])).join(" + ")}</div>` : ""}</th>
         <td><select data-so-hint="${i}" aria-label="Hint level">${[0, 1, 2, 3, 4, 5].map((n) => `<option value="${n}"${x.hint === n ? " selected" : ""}>${n ? "Lv" + n : "–"}</option>`).join("")}</select></td>
         <td class="num">${x.have ? "–" : own == null ? "?" : own}</td><td class="num">${loaded ? (Number.isFinite(L) ? soNum(L) : '<span class="mini">no value</span>') : "…"}</td>
         <td><label class="chip-toggle"><input type="checkbox" data-so-have="${i}"${x.have ? " checked" : ""}> Has it</label></td>
         <td><button type="button" class="linkish" data-so-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></td></tr>`;
     }).join("");
-    const quickHTML = !loaded ? `<p class="mini">Loading this cup's skill values…</p>` : b.sp === "" ? `<p class="mini">Enter her SP to see what to buy.</p>` : !b.skills.length ? `<p class="mini">Add the skills her shop offers.</p>` : quick ? `<p><b>Quick plan:</b> ${quick.selected.length ? quick.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing affordable gains length"}. ${quick.spent} / ${quick.budget} SP, ${quick.unspent} left. About <b>+${soNum(quick.L)} L</b> by the course chart.</p><p class="mini">Highlighted in the list. Chart gains added up for her running style, with hint${b.fast ? " and Fast Learner" : ""} discounts and gold prerequisites counted. Race-check it below: skills that overlap or need stamina change the answer.</p>` : `<p class="mini warn">Couldn't price this list.</p>`;
+    const quickHTML = !loaded ? `<p class="mini">Loading this cup's skill values…</p>` : b.sp === "" ? `<p class="mini">Enter her SP to see what to buy.</p>` : !b.skills.length ? `<p class="mini">Add the skills her shop offers.</p>` : quick ? `<p><b>Quick plan:</b> ${quick.selected.length ? quick.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing affordable gains length"}. ${quick.spent} / ${quick.budget} SP, ${quick.unspent} left. About <b>+${soNum(quick.L)} L</b> by the course chart.</p><p class="mini">Highlighted in the list. Chart gains added up for her running style, with hint${b.fast ? " and Fast Learner" : ""} discounts and gold prerequisites counted${adj.wit ? `, and each Wit-checked skill valued at her Wit: it passes its pre-race Wit check in ${Math.round(adj.wit.her * 100)}% of races (the chart assumed ${Math.round(adj.wit.chart * 100)}%)` : ""}. Race-check it below: skills that overlap or need stamina change the answer.${soRushedHTML(b)}</p>` : `<p class="mini warn">Couldn't price this list.</p>`;
     const saved = state.soSaved || [];
     body.innerHTML = `<div class="skillopt">
       <section class="panel"><h2>Skill optimizer</h2>
@@ -4500,7 +4643,9 @@
         if (!raceMemo.has(key)) { const answer = await worker.run(RS.request(p, input, before, after, catalog, n, seed)); raceMemo.set(key, Object.assign(RS.summary(answer.results.results), { fullSpurt: answer.results.runData.nspurt[1] / n })); if (raceMemo.size > 2500) raceMemo.delete(raceMemo.keys().next().value); }
         return raceMemo.get(key);
       };
-      const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available, learned, hints, sp: +b.sp, values, must: [], compare, scale: raceScale(p, b.style, available), maxEvaluations: 96, fastLearner: b.fast,
+      // game8's must-haves in her shop are bought first; all its picks win close calls.
+      const g8 = g8Picks(p.id, b.style), g8Must = available.filter((id) => g8[id] === "must" && !learned.includes(id));
+      const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available, learned, hints, sp: +b.sp, values, must: g8Must, prefer: Object.keys(g8), compare, scale: raceScale(p, b.style, available), maxEvaluations: 96, fastLearner: b.fast,
         progress: (f) => { if (!same()) return; soJob.progress = f * (b.goal === "win" && !fieldUnsupported(p) ? 40 : 100); const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
       if (same()) soJob.result = { plan, staticReason: unsupported, engineNote: soEngineNote(p), field: p.kind === "loh" ? 12 : 9, conditions: skillConditions(catalog, plan.ranking.map((x) => x.id).concat(available)) };
       if (same() && b.goal === "win" && !fieldUnsupported(p)) {
