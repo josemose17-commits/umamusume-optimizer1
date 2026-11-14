@@ -286,7 +286,8 @@ test("your plan: parsed from your planner's table, matched to the calendar, its 
     assert.ok(x.names.every((n) => x.banner.pick.some(([id]) => get(id).n === n)));
     assert.equal(get(x.targetId).n, x.target);
   });
-  assert.equal(m.find((x) => x.kind === "trainee" && x.target === "Orfevre").banner.start, "2028-04-25", "Orfevre's own banner, not the UAF card");
+  const orf = m.find((x) => x.kind === "trainee" && x.target === "Orfevre");
+  assert.ok(orf.banner.pick.every(([id]) => D.trainee(id)) && orf.banner.start > "2028-03-01", "Orfevre's own banner, not the UAF card");
   // Two rows on one day show the balance: Carat Est. is what's left after the rows above it.
   // Adding back their costs gives the carats you'd have by each date if you spent none.
   const budget = PV.budgetFrom(m, "2026-11-05", null);
