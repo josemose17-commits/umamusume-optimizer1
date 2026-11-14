@@ -95,8 +95,6 @@
     // What the decks rest on (a re-plan with the same keeps them), and everything the route does.
     const deckKey = (p) => JSON.stringify([ctx.today, until(p), p.teams, ctx.ownedCode(), ctx.settingsKey(), [...ctx.myUmas()].sort(), p.usePlan && p.plan, p.selUma && p.selPicks]);
     const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma, p.selPicks, p.done]);
-    const relT = (B && B.release && B.release.trainees) || {};
-    const traineeOutDate = (t) => t.en || relT[t.id] || null;
     const cardName = (id) => { const c = D.card(id); return c ? c.n + " (" + RARITY[c.r] + " " + c.ty + ")" : "#" + id; };
     const cardShort = (id) => { const c = D.card(id); return c ? c.n + " " + c.ty : "#" + id; };
     const umaName = (id) => { const t = D.trainee(id); return t ? tLabel(t) : "#" + id; };
@@ -111,7 +109,7 @@
     async function build(p, o) {
       const end = until(p), label = o.label || "";
       const v = PV.create({
-        D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(),
+        D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(), umaValues: root.UmaUmaValues || null,
         minCups: +p.minCups || 2, minPct: (+p.minPct || 10) / 100, fade: (+p.fade || 0) / 100, locked: o.locked, freePulls: o.freePulls,
         yours: o.yours, lockedPicks: o.lockedPicks, done: o.done,
         selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma },
@@ -289,8 +287,7 @@
           const d = yours.get(t.id), ev = (B.events || []).find((e) => e.start === d && p.selPicks && +p.selPicks[e.id] === t.id);
           return { date: d, why: ev ? "your " + ev.name + " Uma selector pick" : "her banner in your plan" };
         }
-        const out = traineeOutDate(t);
-        return out && out > ctx.today ? { date: out, why: "out on Global then" } : { date: null, why: "on Global" };
+        return null; // not yours yet: no plan row or selector pick, and not in My umas
       };
       const row = (g, i) => {
         const m = (p.teams[g] || [])[i] || { id: null, style: "Senkou" };
@@ -298,9 +295,9 @@
         const flex = `<label class="chip-toggle"><input type="checkbox" data-pull-rotate="${g}" data-i="${i}" ${m.rotate ? "checked" : ""}> Flex in CM &amp; LoH</label>`;
         let status = "";
         if (t) {
-          const s = since(t), from = s.date ? "from ~" + fmtDate(s.date) + " (" + s.why + ")" : "now (" + s.why + ")";
-          status = m.rotate ? "Yours " + from + "; in CM & LoH this slot takes a fresh uma of yours each cup (she's one of them when she fits)."
-            : "Races every cup of her track " + (s.date ? from + "; until then the slot is a flex." : from + ".");
+          const s = since(t), from = !s ? null : s.date ? "from ~" + fmtDate(s.date) + " (" + s.why + ")" : "now (" + s.why + ")";
+          status = (from ? "One of your 3, yours " + from + "." : "One of your 3, not yours yet: she isn't in your plan or a selector pick, so tick her in My umas when you get her.")
+            + (m.rotate ? " This slot is the flex in CM & LoH: a fresh uma of yours each cup; she can still race in the other two." : " Each cup, the 2 of your 3 worth the most there race (her own unique and aptitudes, measured on the cup).");
         } else if (m.rotate) status = "A fresh uma of yours each cup.";
         return `<div class="row-wrap pull-team-row">
           <label class="field grow"><span>Uma ${i + 1}</span><input list="pullTrainees" data-pull-team="${g}" data-i="${i}" value="${esc(t ? tLabel(t) : "")}" placeholder="Name [version]" autocomplete="off"></label>
@@ -590,8 +587,9 @@
         const teamOf = (slot) => ((S().teams || {})[g] || [])[slot] || {};
         return `<h4>${esc(PV.GROUPS[g].label)}</h4>${[...bySlot.entries()].map(([slot, list]) => { const m = teamOf(slot); return `<div class="pull-decks">${m.rotate || !m.id
           ? `<b>Flex slot</b> <span class="mini">a fresh uma of yours each cup in CM &amp; LoH</span>`
-          : `<b>${esc(umaName(m.id))}</b> <span class="mini">${esc(styleName(m.style))}</span>`}<ul class="mini">${list.map((x) => {
-          const who = x.rotating ? `<b>${esc(x.trainee.n)}</b> (${esc(styleName(x.member.style))}${x.member.waiting ? ", until " + esc((D.trainee(x.member.waiting) || {}).n || "she") + " is yours" : ""}): ` : "";
+          : `<b>Core slot ${slot + 1}</b> <span class="mini">the ${slot === 0 ? "best" : "next best"} of your 3 for each cup, no two in one running style when another fits</span>`}<ul class="mini">${list.map((x) => {
+          const val = x.member.value != null ? ", +" + x.member.value.toFixed(1) + " L from her unique and aptitudes" : "";
+          const who = `<b>${esc(x.trainee.n)}</b> (${esc(styleName(x.member.style))}${val}${x.rotating && !m.rotate ? ", none of your 3 free yet" : ""}): `;
           if (!x.base) return `<li>${esc(est(x.cup.global) + fmtDate(x.date))} ${esc(x.cup.name)}${era(x)}: ${who}${esc(x.error || "no deck")}</li>`;
           const now = new Set(x.base.map((c) => c.id + ":" + c.lb)), after = x.deck.filter((c) => !now.has(c.id + ":" + c.lb));
           const sm = side.get(x.key) || new Map(), extra = after.filter((c) => !c.borrowed && sm.get(c.id) === true), picked = after.filter((c) => extra.indexOf(c) === -1);
