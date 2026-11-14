@@ -105,14 +105,15 @@
   // stat line. Between grid points the value is a straight line; past the ends it continues the
   // last segment (stamina stays flat past the top: a full spurt needs no more). Stamina is read
   // STAMINA_MARGIN lower, the same allowance for opponents' stamina debuffs the race build uses.
-  // The five are added up (checked against whole stat lines in test/optimizer.test.js). Cups
-  // with stamina showdown or no course data have no curves (null): targets decide there.
+  // The five are added up (checked against whole stat lines). Stamina-showdown cups were measured
+  // on their JP-dated simulator, where stamina past a full spurt still counts (showdown). Cups
+  // without course data have no curves (null): targets decide there.
   const STAMINA_MARGIN = 100;
   function raceValuesFor(data, cupId, style) {
     const cup = data && data.cups && data.cups[cupId];
     const v = cup && cup.status === "ok" && cup.styles && cup.styles[style];
     if (!v || v.status !== "ok" || !v.curves) return null;
-    return { cup: cupId, style, curves: v.curves, need: v.base.need };
+    return { cup: cupId, style, curves: v.curves, need: v.base.need, showdown: !!v.showdown };
   }
   // Race scoring is on with curves, no targets of yours, and a stamina target that covers her need
   // for a full spurt (plus the margin). On long cups where it doesn't (the race build keeps the
@@ -138,7 +139,9 @@
     let L = 0;
     for (let i = 0; i < 5; i++) {
       const x = Math.max(0, +stats[i] || 0);
-      L += i === 1 ? onCurve(r.curves[1], x - STAMINA_MARGIN, true) : onCurve(r.curves[i], x, false);
+      // Stamina stops counting past a full spurt, except with stamina showdown (JP-dated cups over
+      // 2100 m), where its curve runs to 2000.
+      L += i === 1 ? onCurve(r.curves[1], x - STAMINA_MARGIN, !r.showdown || x - STAMINA_MARGIN >= r.curves[1][r.curves[1].length - 1][0]) : onCurve(r.curves[i], x, false);
     }
     return L;
   }

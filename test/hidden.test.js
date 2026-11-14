@@ -36,3 +36,18 @@ test("game8's must-have whites stay among her parents' targets after the purchas
   assert.equal(out.targets[201601], 3);
   assert.equal(out.why[200331], undefined, "other whites follow the purchase plan");
 });
+
+test("the Halloween rule: every Halloween card and outfit, except the ones you kept, and the backup code keeps it", () => {
+  const hw = D.halloween();
+  D.setHidden({ cards: [30001], trainees: [], halloween: true, keep: { cards: [hw.cards[0]], trainees: [] } });
+  assert.ok(D.isHidden(30001), "your own list");
+  assert.ok(!D.isHidden(hw.cards[0]), "kept");
+  assert.ok(hw.cards.slice(1).every(D.isHidden) && hw.trainees.every(D.isHiddenTrainee), "the rest, from the current data");
+  const code = D.encodeOwned({ 30001: 4 }, { cards: [30001], trainees: [], halloween: true, keep: { cards: [hw.cards[0]], trainees: [] } });
+  const back = D.decodeHidden(code);
+  assert.equal(back.halloween, true);
+  assert.deepEqual(back.keep.cards, [hw.cards[0]]);
+  assert.deepEqual(D.decodeOwned(code), { 30001: 4 });
+  assert.equal(D.decodeHidden(D.encodeOwned({}, { cards: [30001], trainees: [] })).halloween, undefined, "no rule: a plain list");
+  D.setHidden(null);
+});
