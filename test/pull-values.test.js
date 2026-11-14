@@ -18,7 +18,8 @@ const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647
 const owned = {};
 D.DATA.supports.filter((c) => D.onGlobal(c, today) && c.r >= 2).forEach((c) => { if (rnd() < 0.5) owned[c.id] = Math.floor(rnd() * 5); });
 const teams = { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou" }] };
-const make = (extra) => PV.create(Object.assign({ D, T, A, B, P, today, until, teams, owned, umas: new Set([101401]),
+const UV = require("../data/uma-values.js");
+const make = (extra) => PV.create(Object.assign({ D, T, A, B, P, today, until, teams, owned, umas: new Set([101401]), umaValues: UV,
   deckOpts: (p, style, tid, scen) => ({ scenario: scen || "GM", trainee: tid, skills: skills(p, style), costs: {}, skillWeight: 1, borrow: true }),
   whites: () => [1, 0.8, 0.6], skillL: (p, style, id) => skills(p, style)[id] || 0 }, extra || {}));
 // One prepared run, shared (decks are the slow part).
@@ -31,17 +32,40 @@ const prepared = () => {
   return base;
 };
 
-test("your team counts as yours, from when you'll have her: every Dirt cup has its three, a flex until then", () => {
+test("your team: 2 of your 3 race each cup (by what each brings there), the third slot a flex; one you aren't pulling for isn't yours", () => {
   const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today)).map((t) => t.id));
-  const v = make({ umas: mine });
+  const dirt = [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou", rotate: true }];
+  const v = make({ teams: { sm: [], ml: [], dirt }, umas: mine });
   const dirtCups = P.list.filter((p) => p.global.start > today && p.global.start <= until && PV.groupOf(p) === "dirt");
   assert.equal(v.pairs.length + v.unrotated.length, dirtCups.length * 3);
-  // Valentine Yukino Bijin isn't out on Global until her release: her slot is a flex before it.
-  const out = B.release.trainees["102902"];
-  assert.ok(v.pairs.filter((x) => x.trainee.id === 102902 && !x.rotating).every((x) => x.date > out));
-  assert.ok(v.pairs.some((x) => x.member.waiting === 102902 && x.date <= out && x.rotating), "a flex in her slot before");
+  // Valentine Yukino Bijin isn't in your plan or My umas: never assumed yours from her release.
+  assert.ok(!v.pairs.some((x) => x.trainee.id === 102902));
   assert.ok(v.items.every((it) => it.kind !== "trainee" || it.feat.every((f) => !v.team.has(f.id))), "no carats go to a team uma");
+  dirtCups.forEach((cup) => {
+    const core = v.pairs.filter((x) => x.cup.id === cup.id && !x.rotating);
+    assert.equal(core.length, 2, cup.id);
+    assert.deepEqual(core.map((x) => x.trainee.id).sort(), [101401, 109801]);
+    // Both are Pace Chasers by your settings; Copano Rickey also has A as a Front Runner, so
+    // where values exist they don't run one style.
+    if (UV.cups[cup.id] && UV.cups[cup.id].status === "ok") {
+      assert.notEqual(core[0].member.style, core[1].member.style, cup.id + ": one running style each");
+    }
+  });
   assert.ok(v.items.every((it) => !it.required));
+});
+
+test("2 of your 3: the ones worth the most lengths on the cup, from her own unique and aptitudes", () => {
+  const mine = new Set([101401, 109801, 102902]);
+  const v = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou", rotate: true }] }, umas: mine });
+  const cup = P.list.find((p) => p.id === "cm22"), c = UV.cups.cm22;
+  assert.ok(c && c.status === "ok");
+  // El Condor Pasa's dirt B costs her the measured B->A on dirt, and her unique more than makes up for it.
+  const el = D.trainee(101401);
+  assert.equal(el.apt[1], "B");
+  const core = v.pairs.filter((x) => x.cup.id === "cm22" && !x.rotating);
+  assert.ok(core.some((x) => x.trainee.id === 101401), "El Condor Pasa races CM 22 despite her dirt B");
+  core.forEach((x) => assert.ok(Math.abs(x.member.value - (c.umas[x.trainee.id][x.member.style] - (x.trainee.apt[1] === "B" ? c.apt[x.member.style].surface.BA : 0)
+    + (x.member.style === "Senkou" ? 0.05 : 0))) < 0.6, x.trainee.n));
 });
 
 test("banners are 200 or 400 pulls; the $20.99 packs bring 1,500 carats each", () => {
@@ -217,24 +241,28 @@ test("copies after the pulls: the spark plus the binomial, capped at LB4", () =>
   assert.equal(v.copiesDist(0.0075, 400, 3, 2)[5], 1, "two sparks from LB2 always reach LB4");
 });
 
-test("a rotating slot: each cup the uma of yours that fits it, a fresh one when another fits; no parent value", () => {
+test("a flex slot: each cup your best other uma there, in a style the others don't run, a fresh one when the gap is small", () => {
   const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today)).map((t) => t.id));
   const v = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { rotate: true }] }, umas: mine });
   const rot = v.pairs.filter((p) => p.rotating);
   const cups = [...new Set(v.pairs.map((p) => p.cup.id))];
-  assert.equal(rot.length, cups.length, "one rotating uma a cup");
-  const R = { S: 8, A: 7 };
+  assert.equal(rot.length, cups.length, "one flex uma a cup");
+  const R = { S: 8, A: 7, B: 6 };
   rot.forEach((p) => {
     const t = p.trainee, apt = t.apt;
-    assert.ok(R[apt[1]] && R[apt[{ Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.cup.course.dist]]] && R[apt[{ Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 }[p.member.style]]], t.n + " fits " + p.cup.id);
-    assert.ok([101401, 109801].every((id) => D.trainee(id).cid !== t.cid), "not a fixed uma's character");
-    assert.equal(v.parentValue(p, D.trainee(101401)), 0, "parents count for the fixed umas only");
+    assert.ok(R[apt[1]] && R[apt[{ Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.cup.course.dist]]] && R[apt[{ Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 }[p.member.style]]] >= 7, t.n + " fits " + p.cup.id);
+    assert.ok([101401, 109801].every((id) => D.trainee(id).cid !== t.cid), "not a core uma's character");
+    assert.equal(v.parentValue(p, D.trainee(101401)), 0, "parents count for your 3 only");
+    const core = v.pairs.filter((x) => x.cup.id === p.cup.id && !x.rotating).map((x) => x.member.style);
+    if (UV.cups[p.cup.id] && UV.cups[p.cup.id].status === "ok") assert.ok(core.indexOf(p.member.style) === -1, p.cup.id + ": a style the core two don't run");
   });
-  for (let i = 1; i < rot.length; i++) assert.notEqual(rot[i].trainee.id, rot[i - 1].trainee.id, "a fresh uma each cup");
-  // Without umas of yours, the slot sits out (and says so).
+  let repeats = 0;
+  for (let i = 1; i < rot.length; i++) if (rot[i].trainee.id === rot[i - 1].trainee.id) repeats++;
+  assert.ok(repeats <= rot.length / 2, "mostly a fresh uma each cup");
+  // Without umas of yours, both slots sit out (and say so).
   const none = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { rotate: true }] }, umas: new Set() });
-  assert.equal(none.pairs.filter((p) => p.rotating).length, 0);
-  assert.equal(none.unrotated.length, cups.length);
+  assert.equal(none.pairs.length, 0);
+  assert.equal(none.unrotated.length, cups.length * 2);
 });
 
 test("scenario eras: each cup in the scenario of its date, estimates with the scenario's friend as link", () => {
@@ -338,24 +366,22 @@ test("your plan, locked: each row at its # Pulls, free pulls first, and it fits 
   assert.ok(team.every((it) => it.blind), "their carats set aside; she's yours from there");
 });
 
-test("your team by date: a fixed uma races once she's yours, a flex slot in between; your selector picks first", () => {
+test("your team by date: one of your 3 races once she's yours; your selector picks first", () => {
   const teams = { sm: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi", rotate: true }],
     ml: [{ id: 111501, style: "Oikomi" }, { id: 111901, style: "Oikomi" }, { id: 102501, style: "Sasi", rotate: true }], dirt: [] };
   const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today) && [105301, 102501].indexOf(t.id) === -1).map((t) => t.id));
   const yours = new Map([[111901, "2027-11-06"], [111501, "2028-04-25"], [105301, "2026-11-29"], [102501, "2027-04-05"]]);
   const lockedPicks = new Map([["anniv2-uma", 105301], ["anniv2.5-uma", 102501]]);
   const v = make({ teams, umas: mine, yours, lockedPicks, until: "2028-09-30" });
-  ["Orfevre", "Dream Journey"].forEach((n) => {
+  ["Orfevre", "Dream Journey", "Manhattan Cafe", "Bamboo Memory"].forEach((n) => {
     const id = D.DATA.trainees.find((t) => t.n === n && yours.has(t.id)).id, from = yours.get(id);
-    const own = v.pairs.filter((p) => !p.rotating && p.trainee.id === id), wait = v.pairs.filter((p) => p.member.waiting === id);
-    assert.ok(own.length && own.every((p) => p.date > from), n + " races once she's yours");
-    assert.ok(wait.length && wait.every((p) => p.date <= from && p.rotating), "her slot is a flex until then");
+    assert.ok(v.pairs.every((p) => p.trainee.id !== id || p.date > from), n + " races only once she's yours");
   });
-  // Ikuno Dictus isn't in the plan: hers from her Global release.
-  const ikuno = v.pairs.filter((p) => !p.rotating && p.trainee.id === 106301);
-  assert.ok(ikuno.length && ikuno.every((p) => p.date > B.release.trainees["106301"]));
-  // The named third is yours (a parent, a flex pick), but her slot is the flex.
+  // Ikuno Dictus isn't in the plan, a pick or My umas: never yours, so she never races.
+  assert.ok(!v.pairs.some((p) => p.trainee.id === 106301));
+  // The third slot is the flex; the core slots take the best of your 3 you have.
   assert.ok(v.pairs.filter((p) => p.slot === 2).every((p) => p.rotating));
+  v.pairs.filter((p) => p.slot < 2 && !p.rotating).forEach((p) => assert.ok([105301, 106301, 106101, 111501, 111901, 102501].includes(p.trainee.id)));
   assert.ok(v.yoursBy(102501, "2027-05-01") && !v.yoursBy(102501, "2027-03-01"), "Manhattan Cafe from your 2.5 Anniversary pick");
   // Your Uma selector picks are taken first, before anything else on those selectors.
   v.addSelectors();

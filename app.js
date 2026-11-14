@@ -3300,10 +3300,16 @@
       turnText: (t) => E.turnInfo(t, scenario()).text,
       scenario: () => ({ id: scenario().id, name: scenario().name }),
       scenarioName: (id) => (SCENARIOS.find((x) => x.id === id) || { name: id }).name,
-      // Your Pull planner team for the cup's track: [{ tid, style }].
+      // Your Pull planner team for the cup's track, as the planner races it there: the 2 of your 3
+      // umas worth the most on that cup (no two in one running style when another fits), then the
+      // flex slot's best other uma of yours. [{ tid, style }], umas you have only.
       pullTeam: (p) => {
-        const g = window.UmaPullValues && window.UmaPullValues.groupOf(p), teams = (state.pull && state.pull.teams) || {};
-        return g ? (teams[g] || []).filter((m) => m && m.id).map((m) => ({ tid: +m.id, style: m.style || null })) : [];
+        const PV = window.UmaPullValues, g = PV && PV.groupOf(p), teams = (state.pull && state.pull.teams) || {};
+        if (!g) return [];
+        const list = teams[g] || [], mine = myUmas(), UV = window.UmaUmaValues || null;
+        const core = PV.teamPick(p, list, (id) => mine.has(id), UV, D);
+        const flex = list.some((m) => m && m.rotate) ? PV.flexPick(p, [...mine], core, UV, D) : null;
+        return core.concat(flex ? [flex] : []).map((x) => ({ tid: +x.tid, style: x.style || null }));
       },
       trainParent: (o, section) => trainParent(o, section),
       // Parents step 3's "Improve this deck": ③'s deck optimizer for her, and how far it is (0-1, or null).

@@ -88,6 +88,84 @@
   //      whites(cup, style) → the ace's race white skills' L values, skillL(cup, style, id) → L }
   // Use: buildPair(pair) for every pair, then addSelectors(), then scorePair(pair) for every pair
   // (or prepare() for the last two), then route() (or the planner with value() and commit()).
+  // Your team's picks per cup (data/uma-values.js): what each uma brings there herself, the 2 (or
+  // however many core slots) of your named umas worth the most, no two in one running style.
+  function teamLogic(UV) {
+  // What an uma brings to a cup herself, in lengths (data/uma-values.js): her own unique raced on
+  // the cup in that running style, plus her aptitudes against A (S adds the measured A→S, each
+  // grade under A costs the measured B→A). null where the cup or she has no value.
+  const GRADES = "SABCDEFG";
+  function valueOf(t, cup, st) {
+    const c = UV && UV.cups && UV.cups[cup.id];
+    if (!c || c.status !== "ok" || !c.umas[t.id] || c.umas[t.id][st] == null) return null;
+    const a = c.apt[st], surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
+    const aptL = (grade, v) => { const k = GRADES.indexOf(grade); return k <= 0 ? (k === 0 ? v.AS : 0) : k === 1 ? 0 : -(k - 1) * v.BA; };
+    return c.umas[t.id][st] + aptL(t.apt[surf], a.surface) + aptL(t.apt[dist], a.distance) + aptL(t.apt[STYLE_IX[st]], a.style);
+  }
+  // Without values: A or better on its surface, distance and her best running style.
+  function fitFor(t, cup) {
+    const surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
+    let best = null;
+    STYLES.forEach((st) => { const g = RANK[t.apt[STYLE_IX[st]]] || 0; if (!best || g > best.g) best = { st, g }; });
+    const s = RANK[t.apt[surf]] || 0, d = RANK[t.apt[dist]] || 0;
+    return { style: best.st, good: s >= 7 && d >= 7 && best.g >= 7, score: Math.min(s, d, best.g) * 100 + s + d + best.g };
+  }
+  // Her options on a cup: { style, v } for each style she has at A or S (and the one you set),
+  // by value; without values, her best fit only.
+  function optionsFor(t, cup, preferred) {
+    const styles = STYLES.filter((st) => (RANK[t.apt[STYLE_IX[st]]] || 0) >= 7 || st === preferred);
+    const vals = styles.map((st) => ({ style: st, v: valueOf(t, cup, st) })).filter((x) => x.v != null);
+    if (vals.length) return vals.map((x) => Object.assign(x, { v: x.v + (x.style === preferred ? PREFERRED_L : 0) }));
+    const f = fitFor(t, cup);
+    return [{ style: preferred || f.style, v: f.good ? f.score / 100 : -1, noValue: true }];
+  }
+  // The core slots: of your named umas you have by then, the ones worth the most lengths there,
+  // no two in the same running style when another choice allows it (they'd fight for one spot).
+  const SAME_STYLE = 100, PREFERRED_L = 0.05, FRESH_L = 0.5;
+  function coreFor(cup, members, k) {
+    let best = null;
+    const pick = (i, chosen, styles, sum, dup) => {
+      if (chosen.length === k || i === members.length) {
+        const score = sum - dup * SAME_STYLE + chosen.length * 1000;
+        if (!best || score > best.score) best = { score, chosen: chosen.slice() };
+        if (chosen.length === k || i === members.length) return;
+      }
+      pick(i + 1, chosen, styles, sum, dup);
+      const m = members[i];
+      if (chosen.some((c) => c.t.cid === m.t.cid)) return;
+      optionsFor(m.t, cup, m.m.style).forEach((op) => {
+        chosen.push({ t: m.t, m: m.m, style: op.style, v: op.v });
+        pick(i + 1, chosen, styles.concat(op.style), sum + op.v, dup + (styles.indexOf(op.style) !== -1 ? 1 : 0));
+        chosen.pop();
+      });
+    };
+    pick(0, [], [], 0, 0);
+    return best ? best.chosen.sort((a, b) => b.v - a.v) : [];
+  }
+    return { valueOf, optionsFor, coreFor, SAME_STYLE, FRESH_L };
+  }
+  // The core picks for one cup: list (a team's members) and has(id) (yours by then).
+  // → [{ tid, style, value }] best first. Used by CM & decks for its team.
+  function teamPick(cup, list, has, UV, D) {
+    const TL = teamLogic(UV), k = (list || []).filter((m) => m && (m.id || m.rotate) && !m.rotate).length;
+    const pool = (list || []).filter((m) => m && m.id && D.trainee(m.id) && has(+m.id)).map((m) => ({ m, t: D.trainee(m.id) }));
+    return TL.coreFor(cup, pool, k).map((c) => ({ tid: c.t.id, style: c.style, value: c.noValue ? null : c.v }));
+  }
+
+  // The flex pick for one cup: your best other uma there (ids: yours), in a style the core picks
+  // don't run when one fits. → { tid, style, value } or null.
+  function flexPick(cup, ids, core, UV, D) {
+    const TL = teamLogic(UV), cids = new Set(core.map((c) => (D.trainee(c.tid) || {}).cid)), styles = core.map((c) => c.style);
+    const surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
+    let best = null;
+    ids.map((id) => D.trainee(id)).filter((t) => t && !cids.has(t.cid) && (RANK[t.apt[surf]] || 0) >= 6 && (RANK[t.apt[dist]] || 0) >= 6).forEach((t) => {
+      TL.optionsFor(t, cup, null).filter((op) => !op.noValue || op.v > 0).forEach((op) => {
+        const rank = op.v - (styles.indexOf(op.style) !== -1 ? TL.SAME_STYLE : 0);
+        if (!best || rank > best.rank) best = { rank, tid: t.id, style: op.style, value: op.noValue ? null : op.v };
+      });
+    });
+    return best ? { tid: best.tid, style: best.style, value: best.value } : null;
+  }
   function create(o) {
     const { D, T, A, B } = o;
     const card = (id) => D.card(id);
@@ -138,58 +216,64 @@
     // Your umas and when each is yours: My umas now; o.yours (the umas your plan gets: a trainee
     // banner of it, a selector pick) from then; and your team umas (a flex slot's named uma
     // included) from when they're out on Global if nothing says sooner: you'll have them.
-    const relT = (B.release && B.release.trainees) || {};
     const yours = new Map();
     const setYours = (id, d) => { id = +id; if (!trainee(id)) return; d = !d || d < today ? today : d; if (!yours.has(id) || d < yours.get(id)) yours.set(id, d); };
     [...(o.umas || [])].forEach((id) => setYours(id, today));
     (o.yours || new Map()).forEach((d, id) => setYours(id, d));
+    // Your team umas (the named ones). One is yours only when you have her, she's in your plan or
+    // a selector pick: one you're not pulling for (no plan row) isn't assumed yours from her release.
     const team = new Set();
     Object.values(o.teams || {}).forEach((list) => (list || []).forEach((m) => { if (m && m.id && trainee(m.id)) team.add(+m.id); }));
-    team.forEach((id) => { if (!yours.has(id)) { const t = trainee(id); setYours(id, t.en || relT[id] || today); } });
     const yoursBy = (id, date) => yours.has(+id) && yours.get(+id) < date;
     const umas = new Set(yours.keys());
 
-    // A flex slot: each cup, the uma of yours that fits it best (A or better on its surface,
-    // distance and her best running style), a different one from the cup before when another
-    // fits as well. The umas racing that cup already (and their characters) are out. A fixed uma
-    // you won't have yet by a cup leaves her slot flex there.
-    function fitFor(t, cup) {
-      const surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
-      let best = null;
-      STYLES.forEach((st) => { const g = RANK[t.apt[STYLE_IX[st]]] || 0; if (!best || g > best.g) best = { st, g }; });
-      const s = RANK[t.apt[surf]] || 0, d = RANK[t.apt[dist]] || 0;
-      return { style: best.st, good: s >= 7 && d >= 7 && best.g >= 7, score: Math.min(s, d, best.g) * 100 + s + d + best.g };
-    }
+    const { valueOf, optionsFor, coreFor, SAME_STYLE, FRESH_L } = teamLogic(o.umaValues || null);
+    // A flex slot: each cup, your best other uma there (by value, in a style the others don't run
+    // when one fits), a different one from the cup before unless she's worth FRESH_L more. The
+    // umas racing that cup already (and their characters) are out.
     const lastRotated = {}; // group:slot → the uma rotated in last
-    const rotateFor = (cup, key, used) => {
+    const rotateFor = (cup, key, used, styles) => {
       const list = [...yours.keys()].filter((id) => yoursBy(id, cup.global.start)).map((id) => trainee(id)).filter((t) => t && !used.has(t.cid))
-        .map((t) => Object.assign({ t }, fitFor(t, cup)))
-        .sort((a, b) => (b.good - a.good) || ((a.t.id === lastRotated[key]) - (b.t.id === lastRotated[key])) || (b.score - a.score) || (a.t.id - b.t.id));
+        .flatMap((t) => {
+          const surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
+          if ((RANK[t.apt[surf]] || 0) < 6 || (RANK[t.apt[dist]] || 0) < 6) return []; // B or better there
+          return optionsFor(t, cup, null).filter((op) => !op.noValue || op.v > 0).map((op) => ({ t, style: op.style, good: true,
+            rank: op.v - ((styles || []).indexOf(op.style) !== -1 ? SAME_STYLE : 0) - (t.id === lastRotated[key] ? FRESH_L : 0) }));
+        })
+        .sort((a, b) => b.rank - a.rank || a.t.id - b.t.id);
       const pick = list[0];
-      if (!pick || !pick.good) return null;
+      if (!pick) return null;
       lastRotated[key] = pick.t.id;
       return pick;
     };
 
-    // The cups ahead with the team for their track: one pair per cup and team uma.
+    // The cups ahead with the team for their track: one pair per cup and team slot. The named umas
+    // are your pool: the slots you don't mark flex take the best of them you have by then, and the
+    // flex slots (and any core slot none of them can fill yet) take a fresh uma of yours.
     const cups = o.P.list.filter((p) => p.global.start > today && p.global.start <= until && groupOf(p))
       .sort((a, b) => (a.global.start < b.global.start ? -1 : 1));
     const pairs = [], unrotated = [];
     cups.forEach((cup) => {
       const g = groupOf(cup), list = o.teams[g] || [], date = cup.global.start, era = eraAt(date);
-      const fixedNow = (m) => m && m.id && !m.rotate && yoursBy(m.id, date);
-      const used = new Set(list.filter(fixedNow).map((m) => trainee(m.id).cid));
-      list.forEach((m, slot) => {
-        if (!m || (!m.id && !m.rotate)) return;
-        let t, member = m, rotating = false;
-        if (fixedNow(m)) t = trainee(m.id);
-        else {
-          const r = rotateFor(cup, g + ":" + slot, used);
-          if (!r) { unrotated.push({ cup, slot, waiting: !m.rotate ? +m.id : null }); return; }
-          t = r.t; member = { id: r.t.id, style: r.style, rotate: true, waiting: !m.rotate ? +m.id : null }; rotating = true;
-          used.add(t.cid);
-        }
-        pairs.push({ key: [cup.id, slot, t.id, member.style, era.key].join(":"), cup, date, group: g, slot, member, trainee: t, rotating, era });
+      const slots = list.map((m, i) => i).filter((i) => list[i] && (list[i].id || list[i].rotate));
+      const coreSlots = slots.filter((i) => !list[i].rotate), flexSlots = slots.filter((i) => list[i].rotate);
+      const pool = list.filter((m) => m && m.id && trainee(m.id) && yoursBy(m.id, date)).map((m) => ({ m, t: trainee(m.id) }));
+      const core = coreFor(cup, pool, coreSlots.length);
+      const used = new Set(core.map((c) => c.t.cid)), styles = core.map((c) => c.style);
+      const push = (slot, t, member, rotating) => pairs.push({ key: [cup.id, slot, t.id, member.style, era.key].join(":"), cup, date, group: g, slot, member, trainee: t, rotating, era });
+      coreSlots.forEach((slot, j) => {
+        const c = core[j];
+        if (c) { push(slot, c.t, { id: c.t.id, style: c.style, value: c.noValue ? null : c.v, core: true }, false); return; }
+        const r = rotateFor(cup, g + ":" + slot, used, styles);
+        if (!r) { unrotated.push({ cup, slot, waiting: null }); return; }
+        used.add(r.t.cid); styles.push(r.style);
+        push(slot, r.t, { id: r.t.id, style: r.style, rotate: true, waiting: null }, true);
+      });
+      flexSlots.forEach((slot) => {
+        const r = rotateFor(cup, g + ":" + slot, used, styles);
+        if (!r) { unrotated.push({ cup, slot, waiting: null }); return; }
+        used.add(r.t.cid); styles.push(r.style);
+        push(slot, r.t, { id: r.t.id, style: r.style, rotate: true, waiting: null }, true);
       });
     });
 
@@ -220,7 +304,8 @@
     if (parentsOn) B.trainee.filter((b) => later(b, "t")).forEach((b) => {
       // Umas you'll have anyway (your team, your plan's) aren't what these pulls are worth; a
       // locked banner of yours for one of them just sets its carats aside.
-      const feat = b.pick.filter(([id]) => trainee(id) && !umas.has(id)).map(([id, rate]) => ({ id, rate }));
+      // Nor a team uma you're not pulling for: she's yours when you get her some other way.
+      const feat = b.pick.filter(([id]) => trainee(id) && !umas.has(id) && !team.has(+id)).map(([id, rate]) => ({ id, rate }));
       const mine = b.pick.map(([id]) => id).filter((id) => umas.has(id));
       if (feat.length || locked.has(b.id)) items.push(lock({ key: "t" + b.id, kind: "trainee", banner: b, date: dateOf(b), feat, mine, most: Math.max(1, Math.min(2, feat.length)), pullsAt: (k) => spark * k, blind: !feat.length }));
     });
@@ -1160,7 +1245,7 @@
     return { locked, freePulls, yours, lockedPicks, budget, done: new Set(Object.keys(done).concat(rows.filter((x) => rowDone(x, today, done)).map(rowKey))) };
   }
 
-  const api = { create, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
+  const api = { create, teamPick, flexPick, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaPullValues = api;
 })(typeof window !== "undefined" ? window : globalThis);
