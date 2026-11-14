@@ -66,3 +66,15 @@ test("affinity: future characters take JP's groups; Global families keep Global'
   const g = (a, b) => PD.affinity.filter(([, m]) => m.includes(a) && m.includes(b)).reduce((s, [p]) => s + p, 0);
   assert.equal(A.together(cid("El Condor Pasa"), cid("Grass Wonder")), g(cid("El Condor Pasa"), cid("Grass Wonder")));
 });
+
+test("banners ahead come from umacaratcalculator.com, with the pulls that come free on them", () => {
+  const B = require("../data/banners.js");
+  assert.match(B.meta.source, /umacaratcalculator\.com/);
+  const ahead = B.trainee.concat(B.support).filter((b) => b.id >= 1000000);
+  assert.ok(ahead.length > 100, "the calculator's banners replace GameTora's forecast");
+  assert.ok(ahead.every((b) => b.start && b.end && b.end >= b.start && b.pick.length), "dates and featured cards");
+  assert.ok(B.trainee.concat(B.support).some((b) => b.free > 0), "free pulls");
+  const ids = new Set(B.support.map((b) => b.id));
+  assert.ok(!B.trainee.some((b) => ids.has(b.id)), "a trainee and a support banner never share an id");
+  for (const kind of ["trainee", "support"]) for (let i = 1; i < B[kind].length; i++) assert.ok(B[kind][i].start >= B[kind][i - 1].start, kind + " in date order");
+});

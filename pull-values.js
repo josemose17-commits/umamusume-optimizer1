@@ -200,7 +200,9 @@
     // freePulls: Map(banner id → pulls that come free on it), locked or not.
     const freePulls = o.freePulls || new Map();
     const lock = (it) => {
+      // Your plan's free pulls for its banners, else the banner's own (umacaratcalculator.com).
       if (freePulls.has(it.banner.id)) it.free = +freePulls.get(it.banner.id) || 0;
+      else if (+it.banner.free > 0) it.free = +it.banner.free;
       const L = locked.get(it.banner.id);
       // Locked at that level exactly: the route doesn't take it further (your plan is fixed).
       if (L) { it.required = L.level || 2; it.most = it.required; it.free = +L.free || it.free || 0; it.locked = true; it.target = L.target || null; }

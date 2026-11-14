@@ -614,7 +614,7 @@
         const k = result.plan.chosen.get((kind === "support" ? "s" : "t") + b.id);
         return k ? k * B.meta.spark : 0;
       };
-      return `<details class="panel"><summary><b>Banners ahead</b> (GameTora's forecast after the announced ones; ~ dates are estimates)</summary>
+      return `<details class="panel"><summary><b>Banners ahead</b> (umacaratcalculator.com's timeline after the announced ones; ~ dates are predicted)</summary>
         <div class="table-wrap"><table><thead><tr><th>When</th><th>Banner</th><th>Featured</th></tr></thead><tbody>
         ${list.map(({ b, kind }) => kind === "event"
           ? `<tr><td>${esc(est(b) + fmtDate(b.start))}</td><td>${esc(b.name)}</td><td class="mini">Selectors: a free support selector, and $20.99 and $69.99 ones for support cards and umas</td></tr>`
@@ -633,14 +633,14 @@
         <p><b>Selectors.</b> At each anniversary (JP's campaigns, on Global's calendar: its 1.5 Anniversary was in July 2026), a free support selector and the $20.99 ones (support and Uma, each with 1,500 carats). The pool: the gacha SSRs (or 3★ umas) JP had about ${PV.POOL_LAG || 45} days before that anniversary. A pick is one copy, valued like a pulled one; it's taken before any carats are spent.</p>
         <p><b>Parents and supports on one scale.</b> A trainee counts as Parent 1 for your fixed team umas (yours to train; Parent 2 is a friend's rental): her sparks fire at their base chance × (1 + her affinity with the ace / 100) at the ace's two inspirations, carrying the ace's top 3 race whites and her inherited unique at 2★, and a 2★ pink spark where the ace lacks an A on the race (like El Condor Pasa's dirt B) and she has it. Blue sparks are left out: any parent can carry them. It's all in the same points as a deck card, so a trainee banner and a support banner compete for the same carats; "Every banner on one scale" shows them side by side. Same rules: clearly better than your best Parent 1 (your teams included), in enough cups. Future characters' affinity comes from JP's table.</p>
         <p><b>The route.</b> Step by step, the move with the most points per carat that still leaves enough carats at every banner (free selector picks first, then the pulls), counting your income up to each banner's date, the packs' carats and tickets first. After each step the decks take the step's likely cards, so the next card has to beat those. Then a second pass: back to your decks now, the same pulls in date order, and the selector picks chosen again on top of them, so no pick goes to a card a pull already brings to LB4. It's a careful step-by-step plan, not a search of every possible route.</p>
-        <p><b>Dates.</b> Banners Global has announced keep their own dates and rates. Later ones, the anniversaries and the cups are GameTora's forecast from Global's pace against JP, so they can shift; plan again as banners are announced.</p>
+        <p><b>Dates.</b> Banners Global has announced keep their own dates and rates. Later banners, with their free pulls, follow umacaratcalculator.com's timeline (Henry's resource spreadsheet, updated by hand as Global announces them). The anniversaries and the cups are GameTora's forecast from Global's pace against JP, so they can shift; plan again as banners are announced.</p>
       </div></details>`;
     }
     function render(body) {
       const p = S();
       if (!B || !PV || !PP) { body.innerHTML = `<div class="empty">The banner data didn't load. Refresh the page.</div>`; return; }
       body.innerHTML = `<div class="pulls">
-        <section class="panel"><h2>Pull planner</h2><p class="mini">Your plan's banners at 400, and the best use of everything else (other banners, selector picks), so your teams' decks get clearly stronger in as many cups as your carats allow, through mid-2029. It builds your decks for every cup ahead from the cards you own, in the scenario of the time, and puts every support card and trainee on one scale, on the banners Global has announced and GameTora's forecast of the rest.</p></section>
+        <section class="panel"><h2>Pull planner</h2><p class="mini">Your plan's banners at 400, and the best use of everything else (other banners, selector picks), so your teams' decks get clearly stronger in as many cups as your carats allow, through mid-2029. It builds your decks for every cup ahead from the cards you own, in the scenario of the time, and puts every support card and trainee on one scale, on the banners Global has announced and umacaratcalculator.com's timeline of the rest.</p></section>
         ${planHTML(p)}${picksHTML(p)}${budgetHTML(p)}${teamsHTML(p)}${controlsHTML(p)}${routeHTML(p)}${decksHTML()}${calendarHTML(p)}${howHTML()}
       </div>`;
       const fx = body.querySelector(".pull-fixed");

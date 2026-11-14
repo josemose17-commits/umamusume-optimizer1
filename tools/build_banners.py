@@ -24,6 +24,15 @@ Sources (GameTora, gametora.com/umamusume):
     in the same order on its own, faster calendar (its 1.5 Anniversary came in 2026), so each
     anniversary's Global date is that of the JP banner that opened it: Global's own when it's
     announced, else GameTora's forecast.
+
+Future banners (umacaratcalculator.com, the Uma Musume Carat Calculator, which follows Henry's
+resource spreadsheet; its public calculator data at /api/calculator-data):
+  - banner_uma_data / banner_support_data: Global's banners with their dates (confirmed, or
+    predicted: is_predicted), the featured trainees and cards by the game's own ids (game_id), and
+    the pulls that come free on each (free_pulls). Its dates are maintained by hand as Global
+    announces them, so they replace GameTora's forecast. GameTora's announced banners keep their
+    own rates and take the calculator's free pulls. If the calculator can't be reached, GameTora's
+    forecast is used as before.
 Game data (c) Cygames, Inc.
 """
 import datetime
@@ -49,6 +58,68 @@ def fetch(path):
     req = urllib.request.Request(BASE + path, headers={"User-Agent": "uma-turn-coach data build"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)
+
+
+UCC = "https://umacaratcalculator.com/api/calculator-data"
+# Calculator banners get ids past GameTora's, and its uma and support banners (numbered apart)
+# get their own ranges, so a trainee and a support banner never share an id.
+UCC_ID = {"support": 1000000, "trainee": 2000000}
+
+
+def calculator():
+    req = urllib.request.Request(UCC, headers={"User-Agent": "uma-turn-coach data build"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.load(r)
+
+
+def from_calculator(data, rarity, now):
+    """The calculator's banners still running or ahead: {kind: [banner]}, in this file's shape."""
+    out = {"support": [], "trainee": []}
+    for kind, key, items in (("support", "banner_support_data", "support_cards"), ("trainee", "banner_uma_data", "umas")):
+        for b in data.get(key, []):
+            t = b.get("banner_timeline") or {}
+            if not t.get("start_date") or not t.get("end_date"):
+                continue
+            end = datetime.datetime.fromisoformat(t["end_date"].replace("Z", "+00:00")).timestamp()
+            if end < now - 86400:
+                continue
+            over = b.get("rate_overrides") or {}
+            pick = []
+            for x in b.get(items) or []:
+                cid = x.get("game_id")
+                if not cid:
+                    continue
+                rate = over.get(str(cid)) or FEATURED[kind].get(rarity[kind].get(cid), 0)
+                if rate:
+                    pick.append([cid, rate])
+            if not pick:
+                continue
+            out[kind].append({"id": UCC_ID[kind] + b["id"], "start": t["start_date"][:10], "end": t["end_date"][:10],
+                              "est": bool(t.get("is_predicted")), "free": int(b.get("free_pulls") or 0),
+                              "pick": sorted(pick, key=lambda x: -x[1])})
+    return out
+
+
+def merge(gt, calc):
+    """GameTora's announced banners, with the calculator's free pulls where it has the same banner
+    (same featured ids, start within 3 days); then the calculator's other banners in place of
+    GameTora's forecast."""
+    out = {}
+    for kind in gt:
+        announced = [b for b in gt[kind] if not b["est"] and b.get("end")]
+        def same(c, g):
+            return set(i for i, _ in c["pick"]) == set(i for i, _ in g["pick"]) and \
+                abs((datetime.date.fromisoformat(c["start"]) - datetime.date.fromisoformat(g["start"])).days) <= 3
+        rest = []
+        for c in calc[kind]:
+            g = next((g for g in announced if same(c, g)), None)
+            if g:
+                if c.get("free"):
+                    g["free"] = c["free"]
+            else:
+                rest.append(c)
+        out[kind] = announced + rest
+    return out
 
 
 def day(ts):
@@ -94,6 +165,14 @@ def main():
                 continue
             out[kind].append({"id": b["id"], "start": day(b["display_start"]), "end": None,
                               "est": bool(b.get("is_estimated", True)), "pick": sorted(pick, key=lambda x: -x[1])})
+    # The calculator's banners in place of GameTora's forecast (GameTora's if it can't be reached).
+    source = "GameTora (gametora.com): Global banners with their rates, and GameTora's forecast of Global's banners and releases"
+    try:
+        out = merge(out, from_calculator(calculator(), rarity, now))
+        source = ("GameTora (gametora.com): Global's announced banners with their rates, card releases, anniversaries and scenarios; "
+                  "umacaratcalculator.com (Henry's resource spreadsheet): the banners ahead, their dates and free pulls")
+    except Exception as e:  # noqa: BLE001 - any failure keeps GameTora's forecast
+        print("calculator unavailable, keeping GameTora's forecast:", e)
     for kind in out:
         out[kind].sort(key=lambda b: (b["start"], b["id"]))
     # The anniversaries on Global's calendar.
@@ -134,7 +213,7 @@ def main():
     data = {
         "meta": {
             "built": datetime.date.today().isoformat(),
-            "source": "GameTora (gametora.com): Global banners with their rates, and GameTora's forecast of Global's banners and releases",
+            "source": source,
             "pullCarats": PULL_CARATS, "spark": SPARK, "featured": {k: {str(r): v for r, v in d.items()} for k, d in FEATURED.items()},
         },
         "support": out["support"], "trainee": out["trainee"], "release": release, "events": events,
@@ -154,7 +233,7 @@ def main():
     except FileNotFoundError:
         pass
     with open(OUT, "w", encoding="utf-8") as f:
-        f.write("// Generated by tools/build_banners.py from GameTora (gametora.com). Game data (c) Cygames, Inc.\n")
+        f.write("// Generated by tools/build_banners.py from GameTora (gametora.com) and umacaratcalculator.com. Game data (c) Cygames, Inc.\n")
         f.write("(function (root) {\n  const BANNERS = " + body + ";\n")
         f.write('  if (typeof module !== "undefined" && module.exports) module.exports = BANNERS;\n  else root.UmaBanners = BANNERS;\n')
         f.write('})(typeof window !== "undefined" ? window : globalThis);\n')
