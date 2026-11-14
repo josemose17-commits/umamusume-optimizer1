@@ -2817,7 +2817,7 @@
   function staminaNote(p, style) {
     const s = staminaInfo(p, style), who = esc(STYLE_NAME[style] || style);
     if (!s) return "";
-    if (s.kind === "engine") return ` Stamina stays at ${s.build}: this cup has JP's stamina showdown, which the race simulator here doesn't model.`;
+    if (s.kind === "engine") return ` Stamina stays at ${s.build}: this cup has JP's stamina showdown, so on courses over 2100 m stamina past a full spurt still gains lengths (the deck's race value counts it, measured on the cup's JP-dated simulator).`;
     const ref = `the race simulator's reference (no skills equipped, Normal mood) gives a ${who} a full last spurt in ${s.hits} of ${s.of} races from ${s.raw}`;
     return s.kind === "lower"
       ? ` Stamina is lowered to ${s.need}: ${ref}, +${STAMINA_MARGIN} as a rough allowance for stamina debuffers (not measured). Check her finished build in <b>Skills for this build</b>.`

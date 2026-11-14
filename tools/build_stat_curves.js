@@ -88,7 +88,7 @@ function styleJP(preset, st, sim) {
   const top = sta[sta.length - 1][3];
   let need = (sta.find((x) => x[3] != null && x[3] * RACES >= top * RACES - 2) || sta[sta.length - 1])[0];
   // One step finer below it.
-  if (need > 300) { const half = [need - 50].concat(h2hJP(preset, sim, line, { stamina: need - 50 })); sta.push(half); if (half[3] * RACES >= top * RACES - 2) need -= 50; }
+  if (need > 300 && need - 50 !== s.stamina) { const half = [need - 50].concat(h2hJP(preset, sim, line, { stamina: need - 50 })); sta.push(half); if (half[3] * RACES >= top * RACES - 2) need -= 50; }
   sta.push([s.stamina, 0, 0, null]);
   const input = Object.assign({}, line, { stamina: Math.max(s.stamina, need) });
   const curves = KEYS.map((k, i) => {
