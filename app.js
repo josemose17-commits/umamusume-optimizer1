@@ -137,14 +137,37 @@
   let owned = {};
   try { owned = JSON.parse(localStorage.getItem(OWN_KEY)) || {}; } catch (e) { owned = {}; }
   // Cards and outfits you won't use (deck.js keeps them out of every search and suggestion).
-  const hiddenList = () => (state.hidden = state.hidden || { cards: [], trainees: [] });
+  // { cards, trainees }: hidden by hand; halloween: the standing rule (new Halloween cards and
+  // outfits from the daily data are left out too), keep: the Halloween ones you brought back.
+  const hiddenList = () => {
+    const h = (state.hidden = state.hidden || { cards: [], trainees: [] });
+    if (!h.keep) h.keep = { cards: [], trainees: [] };
+    // Lists saved by the one-time "Hide Halloween" button become the standing rule.
+    if (h.halloween == null) {
+      const hw = D.halloween(), has = new Set(h.cards.map(Number));
+      if (hw.cards.length && hw.cards.every((id) => has.has(id))) {
+        h.halloween = true;
+        const hc = new Set(hw.cards), ht = new Set(hw.trainees), hadT = new Set(h.trainees.map(Number));
+        h.keep.trainees = hw.trainees.filter((id) => !hadT.has(id));
+        h.cards = h.cards.filter((id) => !hc.has(+id)); h.trainees = h.trainees.filter((id) => !ht.has(+id));
+      } else h.halloween = false;
+    }
+    return h;
+  };
+  // Hide or bring back one card (kind "cards") or outfit ("trainees"): a Halloween one under the
+  // rule moves in or out of keep; anything else in or out of your own list.
   function setHidden(kind, ids, on) {
-    const h = hiddenList(), set = new Set(h[kind].map(Number));
-    ids.forEach((id) => { if (on) set.add(+id); else set.delete(+id); });
-    h[kind] = [...set].sort((a, b) => a - b);
+    const h = hiddenList(), hw = h.halloween ? new Set(D.halloween()[kind]) : new Set();
+    const mine = new Set(h[kind].map(Number)), keep = new Set(h.keep[kind].map(Number));
+    ids.forEach((id) => {
+      id = +id;
+      if (hw.has(id)) { if (on) keep.delete(id); else keep.add(id); }
+      else if (on) mine.add(id); else mine.delete(id);
+    });
+    h[kind] = [...mine].sort((a, b) => a - b); h.keep[kind] = [...keep].sort((a, b) => a - b);
     D.setHidden(h); save();
   }
-  D.setHidden(state.hidden);
+  D.setHidden(hiddenList());
   function saveOwned() { try { localStorage.setItem(OWN_KEY, JSON.stringify(owned)); } catch (e) { /* ignore */ } }
   // Cards you've marked as out on Global before the card data has their Global date (saved in
   // this browser): { id: date marked }. A date from the data always wins.
@@ -786,12 +809,14 @@
       const ht = e.target.closest("[data-hide-trainee]");
       if (ht) { const id = +ht.dataset.hideTrainee; setHidden("trainees", [id], !D.isHiddenTrainee(id)); renderTab(); return; }
       if (e.target.closest("#hideHalloween")) {
-        const h = D.halloween();
-        setHidden("cards", h.cards, true); setHidden("trainees", h.trainees, true);
-        flash(`Hidden: ${h.cards.length} Halloween support cards and ${h.trainees.length} outfits. They're listed under My cards, where ✕ brings one back.`);
+        const h = hiddenList();
+        h.halloween = !h.halloween; if (!h.halloween) h.keep = { cards: [], trainees: [] };
+        D.setHidden(h); save();
+        const hw = D.halloween();
+        flash(h.halloween ? `Halloween cards and outfits are left out: ${hw.cards.length} cards and ${hw.trainees.length} outfits today, and new ones as the data adds them.` : "Halloween cards and outfits can be used again.");
         renderTab(); return;
       }
-      if (e.target.closest("#unhideAll")) { state.hidden = { cards: [], trainees: [] }; D.setHidden(state.hidden); save(); renderTab(); return; }
+      if (e.target.closest("#unhideAll")) { state.hidden = { cards: [], trainees: [], halloween: false, keep: { cards: [], trainees: [] } }; D.setHidden(state.hidden); save(); renderTab(); return; }
       if (e.target.closest("#ownExport")) {
         const code = ownedCode();
         const box = $("#ownCodeOut");
@@ -807,7 +832,7 @@
         owned = got;
         saveOwned();
         const hid = D.decodeHidden($("#ownImportCode").value);
-        if (hid) { state.hidden = hid; D.setHidden(hid); save(); }
+        if (hid) { state.hidden = Object.assign({ halloween: false, keep: { cards: [], trainees: [] } }, hid); D.setHidden(state.hidden); save(); }
         flash("Restored " + Object.keys(got).length + " cards" + (hid ? ", and " + (hid.cards.length + hid.trainees.length) + " cards and outfits you don't use" : ""));
         renderTab();
         fillLists();
@@ -1734,11 +1759,15 @@
   // Cards and outfits you won't use: left out of deck searches, upgrades, borrowed cards, the tier
   // list, parent training and the Pull planner, still findable in these tabs.
   function hiddenPanelHTML() {
-    const h = hiddenList(), cards = h.cards.map((id) => D.card(id)).filter(Boolean), outs = h.trainees.map((id) => D.trainee(id)).filter(Boolean);
+    const h = hiddenList(), hw = D.halloween();
+    const cards = [...D.hidden.cards].map((id) => D.card(id)).filter(Boolean), outs = [...D.hidden.trainees].map((id) => D.trainee(id)).filter(Boolean);
+    const kept = h.halloween ? h.keep.cards.map((id) => D.card(id)).filter(Boolean).map((c) => c.n + " · " + c.t).concat(h.keep.trainees.map((id) => D.trainee(id)).filter(Boolean).map((t) => t.n + " [" + t.t + "]")) : [];
     const chip = (label, attr, id) => `<span class="chip">${esc(label)} <button type="button" class="linkish" ${attr}="${id}" aria-label="Use ${esc(label)} again">✕</button></span>`;
     return `<div class="hidden-cards"><h3>Cards and outfits I won't use</h3>
-      <p class="mini">Left out of deck searches, upgrade suggestions, borrowed cards, the tier list, parent training and the Pull planner. You can still find them here and in the Support cards and Trainees tabs. Hide a card from its details (<b>Don't use this card</b>), or all Halloween-themed ones at once: the cards and outfits from JP's yearly Halloween banner (opens around Sept 29) and anything with a Halloween word in its title. ✕ brings one back.</p>
-      <div class="row-wrap"><button type="button" class="btn ghost small" id="hideHalloween">Hide Halloween cards and outfits</button>${cards.length || outs.length ? '<button type="button" class="linkish" id="unhideAll">Use them all again</button>' : ""}</div>
+      <p class="mini">Left out of deck searches, upgrade suggestions, borrowed cards, the tier list, parent training and the Pull planner. You can still find them here and in the Support cards and Trainees tabs. Hide a card from its details (<b>Don't use this card</b>), an outfit from the Trainees tab, or every Halloween-themed one with the rule below. ✕ brings one back.</p>
+      <label class="chip-toggle"><input type="checkbox" id="hideHalloween"${h.halloween ? " checked" : ""}> Never use Halloween cards and outfits</label>
+      <p class="mini">The cards and outfits from JP's yearly Halloween banner (it opens around Sept 29; its R and promo cards aren't themed) and anything with a Halloween word in its title ("witch" alone doesn't count). It's a standing rule: new ones are left out as the daily data adds them (${hw.cards.length} cards and ${hw.trainees.length} outfits today).${kept.length ? ` Brought back: ${kept.map(esc).join(", ")}.` : ""}</p>
+      ${cards.length || outs.length ? '<div class="row-wrap"><button type="button" class="linkish" id="unhideAll">Use them all again</button></div>' : ""}
       ${cards.length ? `<div class="row-wrap"><span class="mini"><b>Support cards (${cards.length}):</b></span>${cards.map((c) => chip(c.n + " · " + c.t, "data-hide-card", c.id)).join("")}</div>` : ""}
       ${outs.length ? `<div class="row-wrap"><span class="mini"><b>Outfits (${outs.length}):</b></span>${outs.map((t) => chip(t.n + " [" + t.t + "]", "data-hide-trainee", t.id)).join("")}</div>` : ""}
     </div>`;

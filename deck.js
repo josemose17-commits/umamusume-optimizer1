@@ -262,10 +262,18 @@
   // ---- Cards and outfits you won't use ----
   // Left out of every deck search, upgrade, borrow, tier list and pull plan (set by the page from
   // your saved list). Support card ids and trainee (outfit) ids.
+  // h: { cards, trainees } you hid by hand, and halloween: true to leave out every Halloween-themed
+  // card and outfit (halloween(), so new ones from the daily data too) except keep: { cards, trainees }.
   const hidden = { cards: new Set(), trainees: new Set() };
   function setHidden(h) {
-    hidden.cards = new Set(((h && h.cards) || []).map(Number));
-    hidden.trainees = new Set(((h && h.trainees) || []).map(Number));
+    const ids = (a) => (a || []).map(Number), keep = (h && h.keep) || {};
+    hidden.cards = new Set(ids(h && h.cards));
+    hidden.trainees = new Set(ids(h && h.trainees));
+    if (h && h.halloween) {
+      const hw = halloween(), kc = new Set(ids(keep.cards)), kt = new Set(ids(keep.trainees));
+      hw.cards.forEach((id) => { if (!kc.has(id)) hidden.cards.add(id); });
+      hw.trainees.forEach((id) => { if (!kt.has(id)) hidden.trainees.add(id); });
+    }
   }
   const isHidden = (id) => hidden.cards.has(+id);
   const isHiddenTrainee = (id) => hidden.trainees.has(+id);
@@ -283,20 +291,24 @@
   }
 
   // Backup code for the cards you own: "UMA1:" then base-36 card id + limit break digit per card.
-  // Cards and outfits you won't use follow as "~x" and "~t" lists of base-36 ids (older codes have none).
+  // Cards and outfits you won't use follow as "~x" and "~t" lists of base-36 ids, then with the
+  // Halloween rule on "~h" and "~k" lists of the Halloween ones you kept (older codes have none).
   function encodeOwned(owned, hide) {
     const list = (ids) => [...new Set((ids || []).map(Number))].sort((a, b) => a - b).map((id) => id.toString(36)).join(".");
-    const extra = hide && ((hide.cards || []).length || (hide.trainees || []).length) ? "~x" + list(hide.cards) + "~t" + list(hide.trainees) : "";
+    const any = hide && ((hide.cards || []).length || (hide.trainees || []).length || hide.halloween);
+    const extra = any ? "~x" + list(hide.cards) + "~t" + list(hide.trainees) + (hide.halloween ? "~h" + list((hide.keep || {}).cards) + "~k" + list((hide.keep || {}).trainees) : "") : "";
     return "UMA1:" + Object.keys(owned).map(Number).filter((id) => byId.has(id)).sort((a, b) => a - b).map((id) => id.toString(36) + owned[id]).join(".") + extra;
   }
   function decodeHidden(text) {
-    const m = String(text || "").trim().match(/^UMA1:[0-9a-z.]*~x([0-9a-z.]*)~t([0-9a-z.]*)$/i);
+    const m = String(text || "").trim().match(/^UMA1:[0-9a-z.]*~x([0-9a-z.]*)~t([0-9a-z.]*)(?:~h([0-9a-z.]*)~k([0-9a-z.]*))?$/i);
     if (!m) return null;
-    const ids = (s) => s.split(".").filter(Boolean).map((t) => parseInt(t, 36));
-    return { cards: ids(m[1]).filter((id) => byId.has(id)), trainees: ids(m[2]).filter((id) => traineeById.has(id)) };
+    const ids = (s) => (s || "").split(".").filter(Boolean).map((t) => parseInt(t, 36));
+    const out = { cards: ids(m[1]).filter((id) => byId.has(id)), trainees: ids(m[2]).filter((id) => traineeById.has(id)) };
+    if (m[3] != null) Object.assign(out, { halloween: true, keep: { cards: ids(m[3]).filter((id) => byId.has(id)), trainees: ids(m[4]).filter((id) => traineeById.has(id)) } });
+    return out;
   }
   function decodeOwned(text) {
-    const m = String(text || "").trim().replace(/~x[0-9a-z.]*~t[0-9a-z.]*$/i, "").match(/^UMA1:([0-9a-z.]*)$/i);
+    const m = String(text || "").trim().replace(/~x[0-9a-z.]*~t[0-9a-z.]*(?:~h[0-9a-z.]*~k[0-9a-z.]*)?$/i, "").match(/^UMA1:([0-9a-z.]*)$/i);
     if (!m) return null;
     const out = {};
     m[1].split(".").filter(Boolean).forEach((t) => {
