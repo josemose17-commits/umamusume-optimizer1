@@ -44,6 +44,14 @@ stamina showdown. The Global Umalator races one runner against a virtual pacer: 
 vision, dueling and anything that needs another runner are simplified. GlobalSim (the Skill
 optimizer's win mode) races a full field.
 
+## Stat values on stamina-showdown cups
+
+`data/stat-curves.js` measures CM 27 on and every League of Heroes on the cup's JP-dated simulator
+(`race-worker.js` with its variant). There stamina past a full spurt still gains lengths on
+courses over 2100 m, so stamina's curve runs to 2000 instead of stopping at her full-spurt
+stamina, which is measured on the same simulator. Summed curves matched whole stat lines within
+0.14 L on League of Heroes 1 (Pace Chaser) and CM 28 (Late Surger), and within 0.07 L on CM 29.
+
 ## Conditions that need the field
 
 These are why a skill's simulated gain can be off (tags in the skill tables):

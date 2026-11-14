@@ -245,7 +245,7 @@ test("simulated careers start with the cards' initial stats and skill points", (
 // ---- Race scoring (stats and skills in lengths) ----
 const CURVES = require("../data/stat-curves.js");
 
-test("stat curves cover the simulated cups; showdown cups have none", () => {
+test("stat curves cover every cup with course data, showdown cups on their JP-dated simulator", () => {
   for (const [id, c] of Object.entries(CURVES.cups)) {
     if (c.status !== "ok") { assert.ok(["engine", "course"].includes(c.status), id); continue; }
     for (const st of ["Nige", "Senkou", "Sasi", "Oikomi"]) {
@@ -255,8 +255,11 @@ test("stat curves cover the simulated cups; showdown cups have none", () => {
       v.curves.forEach((pts) => { assert.ok(pts.length >= 5); pts.forEach((p, i) => { assert.ok(Number.isFinite(p[1])); if (i) assert.ok(p[0] > pts[i - 1][0]); }); });
     }
   }
-  assert.equal(O.raceValuesFor(CURVES, "cm27", "Senkou"), null, "stamina showdown");
   assert.ok(O.raceValuesFor(CURVES, "cm22", "Senkou"));
+  const sd = O.raceValuesFor(CURVES, "loh1", "Senkou");
+  assert.ok(sd && sd.showdown && sd.need > 0, "League of Heroes 1: showdown, with her full-spurt stamina measured");
+  assert.equal(O.raceValuesFor(CURVES, "cm44", "Senkou"), null, "no course data");
+  for (const [id, c] of Object.entries(CURVES.cups)) if (c.status !== "course") assert.equal(c.status, "ok", id);
 });
 
 test("race value: more speed is worth lengths, stamina past her need is worth nothing", () => {
@@ -295,4 +298,13 @@ test("race scoring buys skills with each career's SP outside Grand Concert too",
   const s = O.simulate(ctx, cards);
   assert.ok(Number.isFinite(s.skillValue) && s.skillValue > 0, String(s.skillValue));
   assert.strictEqual(s.skillBudget.careers, 4);
+});
+
+test("race value with stamina showdown: stamina past a full spurt still counts on long cups, not on short ones", () => {
+  const long = O.buildCtx({ scenario: ura, build: "long", raceValues: O.raceValuesFor(CURVES, "loh1", "Senkou") });
+  const line = (sta) => [1450, sta, 1100, 750, 1000];
+  assert.ok(long.race, "her build stamina covers a full spurt here");
+  assert.ok(O.raceL(long, line(1700)) > O.raceL(long, line(1400)) + 0.3, "showdown");
+  const sprint = O.buildCtx({ scenario: ura, build: "sprint", raceValues: O.raceValuesFor(CURVES, "cm29", "Senkou") });
+  assert.ok(Math.abs(O.raceL(sprint, [1500, 1500, 1200, 700, 1100]) - O.raceL(sprint, [1500, 1100, 1200, 700, 1100])) < 1e-9, "a 1400 m cup: no showdown");
 });
