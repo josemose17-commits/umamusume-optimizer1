@@ -3109,6 +3109,31 @@
   const IT_MANUAL_OPTS = [["1", "Fully (as in a manual career)"], ["0.5", "Half (default)"], ["0.25", "A quarter"], ["0", "Not at all"]];
   const SKILL_W = [["0", "Not at all (pure Euophrys)"], ["0.5", "A little"], ["1", "Normal"], ["2", "A lot"], ["3", "Skills first"]];
   const COMP_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]];
+  // The scenario master guides' deck makeups (data/scenario-decks.js) for the coach scenario and
+  // this cup's distance (the guide's nearest distance when it skips one), as one-tap choices.
+  const GUIDE_ERA = { grandmasters: 5, larc: 6, uaf: 7, cooking: 8, mecha: 9, legends: 10, island: 11, onsen: 12 };
+  function guideMakeups(c) {
+    const SD = window.UmaScenarioDecks, e = SD && SD.eras[String(GUIDE_ERA[state.scenario])], p = presetById(c.preset);
+    if (!e || !p) return null;
+    const DISTS = ["Sprint", "Mile", "Medium", "Long"], i = DISTS.indexOf(p.course.dist);
+    for (let k = 0; k < DISTS.length; k++) for (const j of [i - k, i + k]) {
+      const list = e.decks.filter((x) => x.dist.indexOf(DISTS[j]) !== -1);
+      if (list.length) return { e, list, dist: DISTS[j], exact: k === 0 };
+    }
+    return null;
+  }
+  const makeupComp = (m) => {
+    const comp = {}, cards = [];
+    Object.entries(m.comp).forEach(([k, n]) => { if (k.indexOf("card:") === 0) { const cd = D.card(+k.slice(5)); if (cd) { comp[cd.ty] = (comp[cd.ty] || 0) + n; cards.push(cd.id); } } else comp[k] = (comp[k] || 0) + n; });
+    return { comp, cards };
+  };
+  function guideMakeupsHTML(c) {
+    const g = guideMakeups(c);
+    if (!g) return "";
+    const label = (m) => { const { comp, cards } = makeupComp(m); return COMP_TYPES.filter(([k]) => comp[k]).map(([k, l]) => comp[k] + " " + l.toLowerCase()).join(" + ") + (cards.length ? " · " + cards.map((id) => D.card(id).n).join(", ") : "") + (m.note ? " (" + m.note + ")" : ""); };
+    return `<p class="mini"><b>${esc(g.e.guide)} guide's makeups</b> for ${esc(g.dist.toLowerCase())}${g.exact ? "" : " (its nearest distance)"}: tap one to use it${g.e.required ? `; it also adds ${esc(D.card(g.e.required).n)} to Must include` : ""}.</p>
+      <div class="row-wrap">${g.list.map((m, i) => `<button type="button" class="btn ghost small" data-cm-makeup="${i}">${esc(label(m))}</button>`).join("")}</div>`;
+  }
   function compHTML(c) {
     const fixed = COMP_TYPES.reduce((a, [k]) => a + (c.comp[k] != null ? c.comp[k] : 0), 0);
     return `<div class="comp">
@@ -3116,6 +3141,7 @@
       <div class="comp-row">${COMP_TYPES.map(([k, l]) => `<label class="field comp-f ty-${k}"><span><i class="tydot"></i>${l}</span><select data-cm-comp="${k}"><option value="">Any</option>${[0, 1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${c.comp[k] === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>`).join("")}
       ${Object.keys(c.comp).length ? '<button type="button" class="btn ghost small" id="compClear">Reset</button>' : ""}</div>
       ${fixed > 6 ? `<p class="mini warn">That adds up to ${fixed} cards; a deck has 6.</p>` : ""}
+      ${c.goal === "race" ? guideMakeupsHTML(c) : ""}
     </div>`;
   }
 
@@ -4169,6 +4195,18 @@
     const goalBtn = hit("[data-cm-goal]");
     if (goalBtn) { c.goal = goalBtn.dataset.cmGoal; save(); renderCM(); return true; }
     if (hit("#compClear")) { c.comp = {}; save(); renderCM(); return true; }
+    const mkBtn = hit("[data-cm-makeup]");
+    if (mkBtn) {
+      const g = guideMakeups(c), m = g && g.list[+mkBtn.dataset.cmMakeup];
+      if (m) {
+        const { comp, cards } = makeupComp(m);
+        c.comp = comp;
+        cards.filter((id) => id === g.e.required && c.locked.indexOf(id) === -1).forEach((id) => c.locked.push(id));
+        save(); renderCM();
+        flash("Deck makeup set from the " + g.e.guide + " guide." + (g.e.required ? " " + D.card(g.e.required).n + " is a must-include." : ""));
+      }
+      return true;
+    }
     if (hit("#cmRun")) {
       const fixed = Object.values(c.comp).reduce((a, b) => a + b, 0);
       if (fixed > 6) { flash("The deck makeup adds up to " + fixed + " cards. A deck has 6."); return true; }

@@ -64,6 +64,9 @@
     14: { name: "Order Up! Tracen Ramen!", base: "DYI" },
   };
   const NOW_ERA = 4; // Global's scenario before the forecast's first
+  // SSR pick tickets: on a close call, Speed before Wit before Stamina and Guts (the scenario
+  // guides' order for filling a roster), as a small lean on the pick's value.
+  const PICK_ORDER = { speed: 0.03, wit: 0.02, stamina: 0.01, guts: 0.01 };
   // Parents: an aptitude raised to A on the race counts like 1 L (family.js's stand-in), from a
   // 2★ pink spark (3% base). Ranks for picking a rotating uma.
   const PINK_2 = 0.03, APT_L = 1;
@@ -326,8 +329,12 @@
       if (sel.paid) add("paid", "support", "$20.99 support selector", SELECTOR_PRICE);
       if (sel.uma) add("uma", "trainee", "$20.99 Uma selector", SELECTOR_PRICE);
     });
+    // SSR pick tickets you have now (o.handPicks): free picks from the gacha SSRs out on Global.
+    for (let i = 1; i <= Math.min(20, Math.floor(+o.handPicks || 0)); i++) {
+      if (!done.has("xhand-" + i)) selectors.push({ id: "hand-" + i, event: { id: "hand", name: "SSR pick ticket you have", start: today }, date: today, kind: "support", cut: null, global: true, label: "pick " + i, price: 0, carats: 0 });
+    }
     const bonus = selectors.filter((s) => s.carats).map((s) => ({ date: s.date, carats: s.carats, label: s.label }));
-    const inSupportPool = (c, cut) => !(D.isHidden && D.isHidden(c.id)) && c.r === 3 && c.src === "gacha" && !!c.jp && c.jp <= cut && scorable(c.id);
+    const inSupportPool = (c, cut) => !(D.isHidden && D.isHidden(c.id)) && c.r === 3 && c.src === "gacha" && !!c.jp && (cut == null ? !!c.en && c.en <= today : c.jp <= cut) && scorable(c.id);
 
     // ---- the route so far ----
     // key → { k, copies: Map(card → new copies), got: Set(trainee), spark: [ids], notes: [] }
@@ -352,7 +359,7 @@
       freeCards.forEach((by, id) => { if (by < pair.date) ids.add(id); });
       committed.forEach((x, key) => { if (x.copies && byKey.get(key).date < pair.date) x.copies.forEach((n, id) => { if (n > 0) ids.add(id); }); });
       const pool = [];
-      ids.forEach((id) => { const n = copiesBy(id, pair.date); if (card(id) && n > 0 && scorable(id)) pool.push({ id, lb: lbOf(n) }); });
+      ids.forEach((id) => { const n = copiesBy(id, pair.date); if (card(id) && n > 0 && scorable(id) && !(D.isHidden && D.isHidden(id))) pool.push({ id, lb: lbOf(n) }); });
       return pool;
     };
     const borrowFor = (pair) => D.DATA.supports.filter((c) => !(D.isHidden && D.isHidden(c.id)) && c.r === 3 && cardOut(c, pair.date) && scorable(c.id)).map((c) => ({ id: c.id, lb: 4 }));
@@ -403,6 +410,59 @@
     }
     // o.reuse: an earlier run with the same cards, teams and deck settings, whose decks hold.
     const reuse = o.reuse ? new Map(o.reuse.pairs.filter((p) => p.base).map((p) => [p.key, p])) : null;
+    // The scenario master guides' deck makeups (data/scenario-decks.js) for a cup: its scenario's
+    // makeups for its distance, else the guide's nearest distance (a guide skips distances its
+    // scenario isn't for). null for a scenario without a guide.
+    const SD = o.scenarioDecks || null, DISTS = ["Sprint", "Mile", "Medium", "Long"];
+    function makeupsFor(pair) {
+      const e = SD && SD.eras && pair.era && SD.eras[String(pair.era.id)];
+      if (!e || !e.decks.length) return null;
+      const i = DISTS.indexOf(pair.cup.course.dist);
+      for (let k = 0; k < DISTS.length; k++) for (const j of [i - k, i + k]) {
+        const list = e.decks.filter((x) => x.dist.indexOf(DISTS[j]) !== -1);
+        if (list.length) return { guide: e.guide, required: e.required, prefer: (e.prefer || {})[pair.cup.course.dist] || [], list };
+      }
+      return null;
+    }
+    // A guide makeup as a deck makeup ({ type: count }) and the named cards it locks in (the
+    // scenario's card, when you own it or can borrow it).
+    function asComp(m, pool, bp) {
+      const comp = {}, locked = [];
+      Object.entries(m.comp).forEach(([k, n]) => {
+        if (k.indexOf("card:") !== 0) { comp[k] = (comp[k] || 0) + n; return; }
+        const id = +k.slice(5), c = card(id);
+        if (!c) return;
+        comp[c.ty] = (comp[c.ty] || 0) + n;
+        if (pool.some((x) => x.id === id) || bp.some((x) => x.id === id)) locked.push(id);
+      });
+      return { comp, locked };
+    }
+    // The deck for a pair: in each of its scenario guide's makeups (the best total kept), else in
+    // CM & decks' makeup. The scenario's card joins the shortlists so it can be locked in.
+    function deckFor(pair) {
+      const all = poolFor(pair), mk = makeupsFor(pair);
+      const pool = shortlist(pair.opts, all), bp = pair.borrowShort.slice();
+      if (mk) {
+        const named = new Set([mk.required].concat(mk.prefer).filter(Boolean).map(Number));
+        named.forEach((id) => {
+          const own = all.find((x) => x.id === id);
+          if (own && !pool.some((x) => x.id === id)) pool.push(own);
+          if (!own && !bp.some((x) => x.id === id)) { const b = borrowFor(pair).find((x) => x.id === id); if (b) bp.push(b); }
+        });
+        let best = null;
+        mk.list.forEach((m) => {
+          const { comp, locked } = asComp(m, pool, bp);
+          const opts = Object.assign({}, pair.opts, { comp, locked: (pair.opts.locked || []).concat(locked) });
+          try {
+            const r = T.buildDeck(opts, pool, bp), total = r.cards.reduce((a, c) => a + (c.score || 0), 0);
+            if (!best || total > best.total) best = { r, opts, total, m };
+          } catch (e) { /* a makeup your cards can't fill */ }
+        });
+        if (best) { pair.opts = best.opts; pair.makeup = Object.assign({ guide: mk.guide }, best.m); return best.r; }
+      }
+      pair.makeup = null;
+      return T.buildDeck(pair.opts, pool, bp);
+    }
     function buildPair(pair) {
       pair.opts = o.deckOpts(pair.cup, pair.member.style, pair.trainee.id, o.eras !== false ? pair.era.key : null);
       const old = reuse && reuse.get(pair.key);
@@ -410,13 +470,14 @@
         pair.deck = old.base.map((c) => Object.assign({}, c));
         pair.base = old.base.map((c) => Object.assign({}, c));
         pair.borrowShort = old.borrowShort;
+        if (old.makeup) { pair.opts = old.opts; pair.makeup = old.makeup; }
         pair.error = null;
         altBorrow(pair);
         return;
       }
       try {
         pair.borrowShort = shortlist(pair.opts, borrowFor(pair), BORROW_SHORT);
-        const r = T.buildDeck(pair.opts, shortlist(pair.opts, poolFor(pair)), pair.borrowShort);
+        const r = deckFor(pair);
         pair.deck = r.cards.map((c) => ({ id: c.id, lb: c.lb, borrowed: !!c.borrowed, score: 0 }));
         pair.error = null;
       } catch (err) { pair.deck = null; pair.error = err.message || String(err); }
@@ -890,7 +951,7 @@
       if (c) return k <= c.k || !it.pre ? 0 : Math.max(0, (it.pre[k] || 0) - (it.pre[c.k] || 0));
       if (it.kind === "support") return supportPlan(it, k).value;
       if (it.kind === "trainee") return traineePlan(it, k).value;
-      if (it.kind === "selector") return it.pick === "support" ? cardRows(it.id, it.date, key)[1].value : parentRows([it.id], it.date, key).value;
+      if (it.kind === "selector") return it.pick === "support" ? cardRows(it.id, it.date, key)[1].value * (1 + (PICK_ORDER[card(it.id).ty] || 0)) : parentRows([it.id], it.date, key).value;
       return 0;
     }
     // Takes an item into the route at its likely outcome: each featured card's median copies

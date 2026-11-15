@@ -431,3 +431,32 @@ test("a select banner (choose 2 of 10): only the 2 that add most to your decks a
   const c = v.committed.get(it.key);
   assert.ok(c && c.copies.size <= it.select, "copies only of the cards you choose: " + (c ? c.copies.size : "none"));
 });
+
+test("each cup's deck is built in its scenario guide's makeups, with the scenario's card", () => {
+  const SD = require("../data/scenario-decks.js");
+  const v = make({ scenarioDecks: SD });
+  v.pairs.forEach((pair) => v.buildPair(pair));
+  const guided = v.pairs.filter((p) => p.deck && SD.eras[String(p.era.id)]);
+  assert.ok(guided.length > 0, "cups in scenarios the guides cover");
+  guided.forEach((p) => {
+    assert.ok(p.makeup, p.cup.id + " " + p.era.name + ": a guide makeup");
+    const n = {};
+    p.deck.forEach((c) => { const t = D.card(c.id).ty; n[t] = (n[t] || 0) + 1; });
+    Object.entries(p.opts.comp).forEach(([t, k]) => assert.equal(n[t] || 0, k, p.cup.id + " " + t + " as the makeup says"));
+    const req = SD.eras[String(p.era.id)].required;
+    if (req && p.opts.locked.indexOf(req) !== -1) assert.ok(p.deck.some((c) => c.id === req), "the scenario's card is in");
+  });
+  const gm = guided.find((p) => p.era.name === "Grand Masters");
+  if (gm) assert.ok(gm.deck.some((c) => c.id === 30137), "Grand Masters decks carry Ancestors & Guides (yours or borrowed)");
+});
+
+test("SSR pick tickets you have: free picks from the SSRs out on Global, Speed before Wit on a close call", () => {
+  const v = make({ handPicks: 2 });
+  v.pairs.forEach((pair) => v.buildPair(pair));
+  v.addSelectors();
+  const hand = v.items.filter((it) => it.kind === "selector" && it.sel.id.indexOf("hand-") === 0);
+  assert.ok(hand.length > 0, "picks to choose from");
+  assert.deepEqual([...new Set(hand.map((it) => it.sel.id))].sort(), ["hand-1", "hand-2"]);
+  hand.forEach((it) => { const c = D.card(it.id); assert.ok(c.r === 3 && c.en && c.en <= today, D.card(it.id).n + " is an SSR out on Global"); });
+  assert.ok(v.selectors.filter((s) => s.id.indexOf("hand-") === 0).every((s) => s.price === 0 && s.date === today));
+});

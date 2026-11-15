@@ -56,7 +56,7 @@
       const s = ctx.state();
       if (!s.pull) s.pull = {};
       const p = s.pull;
-      const def = { carats: "", perMonth: "", sTickets: "", tTickets: "", months: "all", minCups: "2", minPct: "10", fade: "20", usePlan: true, selFree: true, selPaid: true, selUma: true };
+      const def = { carats: "", perMonth: "", sTickets: "", tTickets: "", ssrPicks: "", months: "all", minCups: "2", minPct: "10", fade: "20", usePlan: true, selFree: true, selPaid: true, selUma: true };
       Object.keys(def).forEach((k) => { if (p[k] == null) p[k] = def[k]; });
       delete p.luck;
       delete p.parents;
@@ -94,7 +94,7 @@
     }
     // What the decks rest on (a re-plan with the same keeps them), and everything the route does.
     const deckKey = (p) => JSON.stringify([ctx.today, until(p), p.teams, ctx.ownedCode(), ctx.settingsKey(), [...ctx.myUmas()].sort(), p.usePlan && p.plan, p.selUma && p.selPicks]);
-    const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma, p.selPicks, p.done]);
+    const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.ssrPicks, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma, p.selPicks, p.done]);
     const cardName = (id) => { const c = D.card(id); return c ? c.n + " (" + RARITY[c.r] + " " + c.ty + ")" : "#" + id; };
     const cardShort = (id) => { const c = D.card(id); return c ? c.n + " " + c.ty : "#" + id; };
     const umaName = (id) => { const t = D.trainee(id); return t ? tLabel(t) : "#" + id; };
@@ -109,10 +109,10 @@
     async function build(p, o) {
       const end = until(p), label = o.label || "";
       const v = PV.create({
-        D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(), umaValues: root.UmaUmaValues || null,
+        D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(), umaValues: root.UmaUmaValues || null, scenarioDecks: root.UmaScenarioDecks || null,
         minCups: +p.minCups || 2, minPct: (+p.minPct || 10) / 100, fade: (+p.fade || 0) / 100, locked: o.locked, freePulls: o.freePulls,
         yours: o.yours, lockedPicks: o.lockedPicks, done: o.done,
-        selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma },
+        selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma }, handPicks: num(p.ssrPicks),
         reuse: o.reuse, deckOpts: ctx.deckOpts, whites: ctx.whites, skillL: ctx.skillL,
       });
       const n = v.pairs.length;
@@ -237,6 +237,7 @@
           ${f("perMonth", "Carats per month", "e.g. 3000", "Free income guides put at about 2,000–3,500 a month before events and campaigns; type yours, paid carats included if you buy them.")}
           ${f("sTickets", "Support tickets", "0")}
           ${f("tTickets", "Trainee tickets", "0")}
+          ${f("ssrPicks", "SSR pick tickets", "0", "Unused tickets that pick one SSR from the gacha SSRs out on Global. The route places each where it makes a deck clearly stronger, at the limit break you'd reach (two on one card take it to LB1, and so on), Speed before Wit before Stamina/Guts on a close call. They don't expire: the route already knows the pulls ahead, so in the plan using one now is never worse, but holding one until the meta settles after a new scenario is still sound.")}
         </div>
         <p class="mini">${B ? `Global's rules: ${B.meta.pullCarats} carats a pull, so 200 pulls (one spark) are ${fmtN(200 * B.meta.pullCarats)} carats and 400 (two sparks) ${fmtN(400 * B.meta.pullCarats)}; spark points don't carry over to the next banner. ` : ""}${p.usePlan && p.plan && p.plan.length
           ? `<b>Your plan's carat estimates are the budget</b> (below): carats per month and the $20.99 packs' carats aren't added on top. Carats now (if you type them) set where the estimate starts today.`
@@ -584,7 +585,9 @@
         const bySlot = new Map();
         ps.forEach((x) => { if (!bySlot.has(x.slot)) bySlot.set(x.slot, []); bySlot.get(x.slot).push(x); });
         const styleName = (k) => (STYLES.find(([s]) => s === k) || [0, ""])[1];
-        const era = (x) => (x.era ? ` <span class="mini">(${esc(x.era.name)}${x.era.est ? ", estimated scoring" : ""})</span>` : "");
+        const TY = { speed: "speed", stamina: "stamina", power: "power", guts: "guts", wit: "wit", friend: "friend", group: "group" };
+        const makeup = (x) => (x.makeup && x.opts && x.opts.comp ? `; ${esc(x.makeup.guide)} guide's makeup: ${esc(Object.entries(x.opts.comp).map(([t, n]) => n + " " + (TY[t] || t)).join(" + "))}` : "");
+        const era = (x) => (x.era ? ` <span class="mini">(${esc(x.era.name)}${x.era.est ? ", estimated scoring" : ""}${makeup(x)})</span>` : "");
         const teamOf = (slot) => ((S().teams || {})[g] || [])[slot] || {};
         return `<h4>${esc(PV.GROUPS[g].label)}</h4>${[...bySlot.entries()].map(([slot, list]) => { const m = teamOf(slot); return `<div class="pull-decks">${m.rotate || !m.id
           ? `<b>Flex slot</b> <span class="mini">a fresh uma of yours each cup in CM &amp; LoH</span>`
