@@ -94,9 +94,15 @@ def from_calculator(data, rarity, now):
                     pick.append([cid, rate])
             if not pick:
                 continue
-            out[kind].append({"id": UCC_ID[kind] + b["id"], "start": t["start_date"][:10], "end": t["end_date"][:10],
-                              "est": bool(t.get("is_predicted")), "free": int(b.get("free_pulls") or 0),
-                              "pick": sorted(pick, key=lambda x: -x[1])})
+            row = {"id": UCC_ID[kind] + b["id"], "start": t["start_date"][:10], "end": t["end_date"][:10],
+                   "est": bool(t.get("is_predicted")), "free": int(b.get("free_pulls") or 0),
+                   "pick": sorted(pick, key=lambda x: -x[1])}
+            # A select banner ("Debut 10 Select 2"): you choose rate_up_picks of the listed cards to
+            # feature; the others aren't featured.
+            k = b.get("rate_up_picks")
+            if isinstance(k, int) and 0 < k < len(pick):
+                row["select"] = k
+            out[kind].append(row)
     return out
 
 

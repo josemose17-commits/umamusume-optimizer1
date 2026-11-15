@@ -299,7 +299,7 @@
         if (!scorable(id)) { unscorable.push({ banner: b, id }); return; }
         feat.push({ id, rate });
       });
-      if (feat.length || locked.has(b.id)) items.push(lock({ key: "s" + b.id, kind: "support", banner: b, date: dateOf(b), feat, most: 2, pullsAt: (k) => spark * k, blind: !feat.length }));
+      if (feat.length || locked.has(b.id)) items.push(lock({ key: "s" + b.id, kind: "support", banner: b, date: dateOf(b), feat, most: 2, pullsAt: (k) => spark * k, blind: !feat.length, select: b.select || null }));
     });
     if (parentsOn) B.trainee.filter((b) => later(b, "t")).forEach((b) => {
       // Umas you'll have anyway (your team, your plan's) aren't what these pulls are worth; a
@@ -599,8 +599,11 @@
       if (memo.has(mk)) return memo.get(mk);
       const n = spark * k;
       const tabs = it.feat.map((f) => ({ f, rows: cardRows(f.id, it.date, it.key), dist: binom(n, f.rate) }));
-      const use = tabs.filter((x) => x.rows.some((r) => r.value > 0))
-        .sort((a, b) => Math.max(...b.rows.map((r) => r.value)) - Math.max(...a.rows.map((r) => r.value))).slice(0, MAX_USEFUL);
+      // A select banner features only the cards you choose on it (it.select of them): the ones
+      // that add most to your decks; the rest come at the off-banner rate, not counted.
+      let use = tabs.filter((x) => x.rows.some((r) => r.value > 0))
+        .sort((a, b) => Math.max(...b.rows.map((r) => r.value)) - Math.max(...a.rows.map((r) => r.value))).slice(0, it.select ? Math.min(MAX_USEFUL, it.select) : MAX_USEFUL);
+      if (it.select) tabs.splice(0, tabs.length, ...use);
       const likely = use.length ? sparksFor(use, use.map((u) => median(u.dist)), k) : { v: 0, to: [] };
       let value = 0;
       if (likely.v > 1e-9) {
