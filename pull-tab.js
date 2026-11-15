@@ -413,7 +413,8 @@
       }
       const pulls = `${fmtN(s.pulls)} pulls<div class="mini">${fmtN(s.carats)} carats${s.free ? " + " + fmtN(s.free) + " free on the banner" : ""}${s.tickets ? " + " + fmtN(s.tickets) + " tickets" : ""}</div>`;
       const featured = it.banner.pick.map(([id]) => (it.kind === "support" ? cardName(id) : umaName(id)));
-      const what = `${it.locked ? `<span class="pill">your plan</span> ` : ""}${it.kind === "support" ? "Support banner" : "Trainee banner"}<div class="mini">${esc(featured.join(", "))}</div>`;
+      const chosen = it.select ? [...((c && c.copies) || new Map()).keys()] : [];
+      const what = `${it.locked ? `<span class="pill">your plan</span> ` : ""}${it.kind === "support" ? "Support banner" : "Trainee banner"}${it.select ? ` <span class="pill">select ${it.select} of ${featured.length}</span>` : ""}<div class="mini">${it.select ? `You choose ${it.select} of these to feature: ` : ""}${esc(featured.join(", "))}</div>${chosen.length ? `<div class="mini">Choose: <b>${esc(chosen.map(cardShort).join(" and "))}</b></div>` : ""}`;
       let got = "";
       if (it.blind && it.kind === "trainee" && it.mine && it.mine.length) {
         got = `<div class="mini">For your team:</div><b>${esc(it.mine.map(umaName).join(" and "))}</b><div class="mini">Yours from this banner: she races (or joins the flex picks) and counts as a parent from here.</div>`;

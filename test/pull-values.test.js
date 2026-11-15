@@ -418,3 +418,16 @@ test("your plan as time goes by: banners behind you drop out, what you got comes
   assert.ok(after.yours.has(111901) && after.yours.has(111501));
   assert.ok(PV.rowDone(ramonu, "2026-12-27", {}) && !PV.rowDone(larc, "2026-12-27", {}));
 });
+
+test("a select banner (choose 2 of 10): only the 2 that add most to your decks are featured", () => {
+  const v = make();
+  v.pairs.forEach((pair) => v.buildPair(pair));
+  v.prepare();
+  const sel = v.items.filter((it) => it.kind === "support" && it.select && !it.blind);
+  assert.ok(sel.length > 0 && sel.every((it) => it.feat.length > it.select), "the banner lists more than you choose");
+  const it = sel.find((x) => v.value(x, 2) > 0) || sel[0];
+  v.value(it, 2);
+  v.commit(it.key, 2);
+  const c = v.committed.get(it.key);
+  assert.ok(c && c.copies.size <= it.select, "copies only of the cards you choose: " + (c ? c.copies.size : "none"));
+});
