@@ -260,9 +260,10 @@ test("search defaults: top key blue, pink by the rule, every listed white prefer
   const defaults = decode(plan.rentalSearch(x, p1));
   assert.equal(defaults.mb[0][0], CP.BLUE_IDS[plan.want(x).blue[0].i]);
   assert.ok(defaults.ow && defaults.ow.length, "listed whites go in as preferred whites"); assert.ok(!defaults.mp && !defaults.w, "nothing required by default");
-  const need = plan.want(x).pink.find(p => p.target === "S") || plan.want(x).pink[0];
-  if (need) assert.deepEqual(defaults.p, [[CP.PINK_IDS[need.i], 3, 9]], "pink per the rule by default");
-  else assert.ok(!defaults.p, "no pink when she's already there");
+  // Parent 2 is your borrow: a pink only for an aptitude still below A; the S pink is your side's.
+  const belowA = plan.want(x).pink.find(p => p.target === "A");
+  if (!belowA) assert.ok(!defaults.p, "no pink filter on your borrow when she's at A");
+  else assert.equal(defaults.p[0][0], CP.PINK_IDS[belowA.i]);
   assert.ok(!decode(plan.rentalSearch(x, p1, { pink: "none" })).p, "pink can be turned off");
   const q = plan.rentalSearch(x, p1, { blue: 4, pink: "7", required: [top[0]] });
   const f = decode(q);
@@ -495,8 +496,8 @@ test("pink: an aptitude still below A comes first (start stars lift it for sure)
   assert.equal(q.pink.label, "Turf", "Turf B → A first");
   assert.equal(q.pink.target, "A");
   const sI = plan.want(x).pink.find(p => p.target === "S").i;
-  assert.deepEqual(decode(q).p, [[CP.PINK_IDS[0], 1, 9], [CP.PINK_IDS[sI], 3, 9]], "B → A: any 1★ lifts it; and her line also carries the S-distance pink");
-  assert.ok(plan.searchSummary(q).join(" · ").includes("to take the ace to S"));
+  assert.deepEqual(decode(q).p, [[CP.PINK_IDS[0], 1, 9]], "B → A: any 1★ lifts it; the S-distance pink is left to your side");
+  assert.ok(sI != null && !plan.searchSummary(q).join(" · ").includes("to take the ace to S"));
   const gpq = plan.trainingRentalSearch(x, plan.rankFresh(x, [vet(uniq[3], [])], [uniq[2].id], {})[0]);
   assert.equal(decode(gpq).mp.length, 1, "the grandparent is one uma: one pink");
   assert.ok(plan.searchSummary(q).join(" · ").includes("1–9★ across her and her parents") && plan.searchSummary(q).join(" · ").includes("enough to lift the ace's Turf B to A"));
@@ -512,8 +513,8 @@ test("pink: an aptitude still below A comes first (start stars lift it for sure)
   const lifted = plan.rankVets(x, [vet(uniq[0], [], { parents: [] })].map(v => (v.self.pink = [0, 2], v)))[0];
   assert.ok(lifted.s.pink.find(p => p.i === 0).p >= 0.9);
   const q2 = plan.rentalSearch(x, lifted);
-  assert.equal(q2.pink.target, "S"); assert.notEqual(q2.pink.label, "Turf");
-  assert.equal(plan.pinkFocus(x, lifted.s).target, "S");
+  assert.equal(q2.pink, null, "nothing below A left: your borrow needs no pink");
+  assert.equal(plan.pinkFocus(x, lifted.s).target, "S", "your own side still aims at S");
 });
 
 test("a planned blue split: Parent 2's own stat on her, each stat's stars across her line", () => {
@@ -548,4 +549,21 @@ test("with a purchase plan, its whites come first and the race's other offered w
   assert.ok(list.length > 2 && list.length <= 10, String(list.length));
   assert.deepEqual(new Set(list.slice(0, 2).map((k) => String(k.white))), keep, "the plan's whites first");
   assert.ok(list.every((k) => !k.gamble && !k.gold));
+});
+
+test("a CM parent's priorities: the plan's whites, then the cup's own skills (◎ when SS is likely), then the rest", () => {
+  const x = x0(), w = plan.want(x).white;
+  const offers = {}; w.forEach((k) => { offers[k.id] = 0.5; });
+  const keep = new Set(w.slice(0, 1).map((k) => String(k.id)));
+  const narrow = { targets: Object.fromEntries(Object.entries(x.rel.targets).filter(([id]) => keep.has(String(id)))), why: x.rel.why, L: x.rel.L };
+  const planned = Object.assign({}, x, { rel: narrow, relAll: x.rel, skillPlan: { parentValues: {} } });
+  const last = String(w[w.length - 1].id);
+  const list = plan.itSkills(planned, offers, 10, new Set(), {}, { own: (id) => id === last, double: true });
+  assert.equal(String(list[0].white), [...keep][0], "the plan's white first");
+  const at = list.findIndex((k) => String(k.white) === last);
+  assert.ok(at > 0 && list[at].own, "the cup's own skill is in");
+  const tier = (k) => (!k.extra ? 0 : k.own ? 1 : 2);
+  for (let i = 1; i < list.length; i++) assert.ok(tier(list[i]) >= tier(list[i - 1]), "plan, then the cup's own (its skills and fitting greens), then the rest");
+  const fam = SB.DATA.skills[last][0], circles = Object.keys(SB.DATA.skills).filter((id) => SB.DATA.skills[id][0] === fam && SB.DATA.skills[id][3] === 1);
+  if (circles.length > 1) assert.notEqual(String(list[at].id), last, "its ◎ when SS is likely");
 });

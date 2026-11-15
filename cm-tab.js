@@ -431,7 +431,8 @@
         panel("p1", "2 · Make Parent 1", p1HTML(c, a, d, r) + prog),
         panel("training", "3 · Train her", trainHTML(c, a, d, r)),
         panel("p2", "4 · Parent 2", p2HTML(c, a, d, r)),
-        panel("check", "5 · Her family", checkHTML(r))].join("") : "";
+        panel("check", "5 · Her family", checkHTML(r)),
+        panel("vets", "6 · Your veterans", vetsHTML(r))].join("") : "";
       body.innerHTML = `<div class="cm cmp">
         <section class="panel"><h2>Parents${a ? " for " + esc(tName(trainee(a.tid))) : ""}</h2>
           <p class="mini">${esc(p.name)} · ${a ? STYLE_LABEL[styleOf(a)] : "no ace yet"}. Fill her gaps with blue sparks, make Parent 1 with a borrowed grandparent, borrow Parent 2, reach ${MIN_AFFINITY}+ affinity.</p>
@@ -704,7 +705,7 @@
         <div class="row-wrap">
           <label class="field"><span>Blue stat</span><select data-cmp-rental="blue" ${attr}>${options([["auto", "Her biggest gap (" + l.blue[0].label + ")"], ...F.STAT_LABELS.map((v, i) => [i, v])], prefs.blue == null ? "auto" : prefs.blue)}</select></label>
           <label class="field"><span>Blue stars</span><select data-cmp-rental="quality" ${attr}>${options([["recommended", "Own 3★ · lineage 7–9★"], ["broad", "Wider: own 2–3★ · lineage 6–9★"]], l.broad ? "broad" : "recommended")}</select></label>
-          <label class="field"><span>Pink</span><select data-cmp-rental="pink" ${attr}>${options([["auto", "Your rule" + (l.auto ? " (" + l.auto.label + " → " + l.auto.target + (l.pink2 ? ", " + l.pink2.label + " → " + l.pink2.target : "") + ")" : ": none needed")], ["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.mode)}</select></label>
+          <label class="field"><span>Pink</span><select data-cmp-rental="pink" ${attr}>${options([["auto", "Your rule" + (l.auto ? " (" + l.auto.label + " → " + l.auto.target + (l.pink2 ? ", " + l.pink2.label + " → " + l.pink2.target : "") + ")" : ": none (your side fixes her aptitudes)")], ["none", "Off"], ...l.choices.map(p => [p.i, p.label + " · lineage 3★+"])], l.mode)}</select></label>
           <label class="field"><span>Whites</span><select data-cmp-rental="sort" ${attr}>${options([["whites", "In the link as preferred (P0/P1/P2), then affinity"], ["affinity", "Not in the link: affinity only"]], l.sort)}</select></label>
         </div>
         <fieldset class="cmp-required"><legend class="mini">Require whites (each one you tick must be ${scope === "training" ? "on her" : "in her line"}; every tick cuts the results)</legend>${l.whites.length ? `<div class="row-wrap"><button type="button" class="btn ghost small" data-cmp-require="all" ${attr}>Require all</button><button type="button" class="btn ghost small" data-cmp-require="none" ${attr}>Clear</button></div>` : ""}<div class="row-wrap">${l.whites.map(w => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}" ${attr}${selected.has(w.id) ? " checked" : ""}>${esc(ctx.skillName(w.id))}</label>`).join("") || '<span class="mini">No race whites missing.</span>'}</div></fieldset>
@@ -785,16 +786,21 @@
       const tr = r.train, f = tr.f, fo = tr.focus;
       const cards = tr.deck.cards.map((x) => D.card(x.id)).filter(Boolean);
       const from = (id) => cards.map((cd) => (cd.es || []).map(String).includes(id) ? cd.n + " (event)" : (cd.hs || []).map(String).includes(id) ? cd.n + " (hint)" : "").filter(Boolean);
-      const list = CP.itSkills(r.x, f.learning ? f.learning.skills : f.offers || tr.deck.offers, 10, eventsAnyway(tr.deck.cards), CP.familyCover(f.s));
+      // The cup's own skills (its distance, its surface; greens that fit it) come right after her
+      // purchase plan's, at ◎ when her SS chance is high (LightBirb's Parenting 201).
+      const course = r.x.race && r.x.race.preset && r.x.race.preset.course, scope = (root.UmaSkillStyles && root.UmaSkillStyles.scope) || {};
+      const cupOwn = course ? (id) => { const sc = scope[id]; return !!sc && (sc.dist == null || sc.dist === { Sprint: 1, Mile: 2, Medium: 3, Long: 4 }[course.dist]) && (sc.surface == null || sc.surface === (course.surface === "Dirt" ? 2 : 1)); } : null;
+      const ssLikely = !!(f.learning && f.learning.ssShare >= root.UmaCmPlan.SS_SHARE);
+      const list = CP.itSkills(r.x, f.learning ? f.learning.skills : f.offers || tr.deck.offers, 10, eventsAnyway(tr.deck.cards), CP.familyCover(f.s), cupOwn ? { own: cupOwn, double: ssLikely } : null);
       const skills = list.map((k) => {
         const src = from(k.id).concat(k.gold && k.id !== k.white ? from(k.white) : []);
-        return `<li><b>${esc(ctx.skillName(k.id))}</b>${k.gold ? " (gold)" : ""} <span class="mini">${k.gamble ? "· no card of hers gives it: only if a random event offers it" : `· ${Math.round(k.p * 100)}% ${f.learning ? "estimated learned within SP" : "offered"} · ${esc([...new Set(src)].join(", ") || (f.learning ? "trainee, deck or inherited hint" : "her deck"))}${k.cover >= 0.1 ? ` · her family already gives it ~${Math.round(k.cover * 100)}%` : ""}`}</span></li>`;
+        return `<li><b>${esc(ctx.skillName(k.id))}</b>${k.gold ? " (gold)" : ""}${k.own && !k.double ? ' <span class="mini">· this cup</span>' : ""}${k.double ? ' <span class="mini">· this cup, ◎ (her SS chance is high)</span>' : ""} <span class="mini">${k.gamble ? "· no card of hers gives it: only if a random event offers it" : `· ${Math.round(k.p * 100)}% ${f.learning ? "estimated learned within SP" : "offered"} · ${esc([...new Set(src)].join(", ") || (f.learning ? "trainee, deck or inherited hint" : "her deck"))}${k.cover >= 0.1 ? ` · her family already gives it ~${Math.round(k.cover * 100)}%` : ""}`}</span></li>`;
       }).join("");
       const races = tr.agenda.filter((x) => !x.free).map((x) => x.name);
       const anySS = fo && fo.rows.some((y) => y.hit > 0);
       const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${Math.round(y.over * 100)}% blue 2★+`).join(" · ")} (16 careers each, before inheritance). ${fo.covered === false ? "A gap is left, so her blue's 2★ chance comes before rating." : "The ace's gaps are covered, so the most SS runs and the highest rating (her skills) decide, not her blue."} Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
       return `<div class="cmp-it"><h4>Independent Training settings</h4><p class="mini">For this deck and these ${plural(races.length, "extra G1")}.</p>${focus}
-        <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it picks the event choice that gives them). Whites only, for her white sparks: the skills her purchase plan buys first, then the race's other whites her deck can hint, by value × chance:</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
+        <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it picks the event choice that gives them). Whites only, for her white sparks: the skills her purchase plan buys first, then this cup's own (its distance and surface skills, at ◎ when her SS chance is high, and the greens that fit it), then the race's other whites her deck can hint, by value × chance:</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
         ${list.anyway.length ? `<p class="mini"><b>Come anyway, no slot needed</b> (every choice of the event gives them, when it happens): ${list.anyway.map((k) => esc(ctx.skillName(k.id)) + (k.gold ? " (gold)" : "")).join(", ")}.</p>` : ""}
         <p class="mini"><b>Agenda:</b> ${races.length ? races.map(esc).join(", ") : "her career goals only"}.</p></div>`;
     }
@@ -864,6 +870,35 @@
     }
 
     // ⑤ The ace's family affinity: the minimum, or what's missing.
+    // Your veterans for this cup (LightBirb's Parenting 201): where to branch off your core loop
+    // (exit points) and which ones you can transfer (cleanout). Marks only; nothing is removed.
+    function vetsHTML(r) {
+      const VP = root.UmaVetPlan, vets = ctx.veterans().list;
+      if (!VP || !vets.length) return `<p class="mini">Import your veterans (Parent 1, below the ranking) to see exit points and the cleanout.</p>`;
+      const meta = ctx.SB.DATA.skills, family = (id) => (meta[id] ? meta[id][0] : id);
+      const apt = (i) => F.APT_LABELS[i], stat = (i) => F.STAT_LABELS[i];
+      let exits = "";
+      if (r && r.x) {
+        const course = r.x.race.preset.course, w = CP.want(r.x), gl = ctx.scenario().id === "grandlive";
+        const list = VP.exitPoints(vets, { pinks: F.aptTargets(course, r.x.race.style).map((n) => n.i), blues: w.blue.map((b) => b.i), grandLive: gl, family, useful: new Set(Object.keys(CP.fam.families(r.x.rel))) });
+        exits = `<h4>Exit points for this cup</h4><p class="mini">Veterans to branch off your core loop: a good blue (${gl ? "Grand Live: 2★+ stamina or 3★ guts or wit" : "2★+ in " + w.blue.map((b) => b.label).join(" or ")}) and a 2★+ pink of the cup (${F.aptTargets(course, r.x.race.style).map((n) => apt(n.i)).join(", ")}), most useful whites first.</p>`
+          + (list.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Blue · pink</th><th class="num">Whites for her</th><th class="num">On her parents</th></tr></thead><tbody>${list.slice(0, 8).map((e) => `<tr><td>${esc(vetName(e.v))}</td><td>${stat(e.blue[0])} ${e.blue[1]}★ · ${apt(e.pink[0])} ${e.pink[1]}★${e.green ? ` · green ${e.green}★` : ""}</td><td class="num">${e.whites}</td><td class="num">${e.lineWhites}</td></tr>`).join("")}</tbody></table></div>`
+            : `<p class="mini">None yet: no veteran has both. Your next loop run that rolls one is the exit point.</p>`);
+      }
+      const marks = VP.cleanout(vets, { family, aptName: apt, whiteName: (f) => ctx.skillName(f) });
+      const keep = vets.filter((v) => marks.get(v.id).keep), go = vets.filter((v) => !marks.get(v.id).keep);
+      return exits + `<details data-cmp-open="cleanout"><summary class="mini">Veteran cleanout: ${keep.length} to keep, ${go.length} safe to transfer</summary>
+        <p class="mini">Keeps the best blue + pink for each pink, your best of each character (her green), and the only veteran with a 2★+ white. The rest are safe to transfer; the app removes nothing.</p>
+        <div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Sparks</th><th>Mark</th></tr></thead><tbody>${keep.concat(go).map((v) => { const m = marks.get(v.id); return `<tr${m.keep ? "" : ' class="cmp-cut"'}><td>${esc(vetName(v))}</td><td class="mini">${sparks(v.self)}</td><td>${m.keep ? "Keep <span class=\"mini\">· " + esc(m.why.join("; ")) + "</span>" : "Safe to transfer"}</td></tr>`; }).join("")}</tbody></table></div></details>`;
+    }
+    // Two grandparent rules side by side (shown only): which one is right changes how much her
+    // grandparents' whites count. Practice runs with a known family would settle it.
+    function grandHTML(r) {
+      const g = root.UmaVetPlan && r.p1 && r.p1.s ? root.UmaVetPlan.grandCheck(r.p1.s, F) : null;
+      if (!g || !g.slots) return "";
+      const n = (v) => (Math.round(v * 10) / 10).toFixed(1);
+      return `<p class="mini"><b>Grandparent rule check:</b> her grandparents' ${g.slots} white spark${g.slots === 1 ? "" : "s"} give about <b>${n(g.app)}</b> hints with the app's rule (each grandparent's own affinity) and <b>${n(g.video)}</b> with LightBirb's (half her parent's bonus). ${Math.abs(g.app - g.video) < 0.15 ? "Same either way for this family." : "The app keeps its rule for now."}</p>`;
+    }
     function checkHTML(r) {
       if (!r || !r.p1) return `<p class="mini">Find Parent 1 first.</p>`;
       const y = r.p1.aff, miss = MIN_AFFINITY - y.total, fam = y.family;
@@ -872,6 +907,7 @@
       const head = miss <= 0 ? `<p class="ok"><b>✓ About ${y.total} ${y.symbol}</b>: ${MIN_AFFINITY}+ for the ace's family once you borrow.</p>`
         : `<p class="warn"><b>About ${y.total} ${y.symbol}: ${miss} short of ${MIN_AFFINITY}.</b> About ${Math.ceil(miss / 3)} more shared G1 wins (+3 for each pair that both won one), or rentals with more affinity with her.</p>`;
       return head + `<p class="mini">${y.filled.length ? `Known now: ${y.known}. The rest assumes the best-affinity characters for the slots you borrow, each with the G1s rentals most often win; uma.moe's affinity sort shows the real number.` : "Every member is known."}</p>
+        ${grandHTML(r)}
         <details data-cmp-open="check"><summary class="mini">The family it counts</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Slot</th><th>Character</th><th class="num">G1 wins</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
     }
 
