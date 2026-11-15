@@ -188,7 +188,10 @@
     // a gold's spark carries its white, but the white is what to prioritize), her purchase plan's
     // first (x.rel), then the race's other relevant whites her deck can hint (x.relAll), each by
     // value × chance, up to n. Random-event gambles only when there's no purchase plan.
-    function itSkills(x, offers, n = 10, anyway = new Set(), cover = {}) {
+    // cup (optional): { own(id) → the skill is for this cup's distance or surface, or a green that
+    // fits it; double → use the ◎ of a distance or surface skill (her SS chance is high) }. The
+    // cup's own skills come right after the purchase plan's (a CM parent's priorities).
+    function itSkills(x, offers, n = 10, anyway = new Set(), cover = {}, cup = null) {
       if (!famMembers) { famMembers = {}; Object.keys(meta).forEach((id) => { (famMembers[meta[id][0]] = famMembers[meta[id][0]] || []).push(id); }); }
       const o2 = offers || {}, rows = [], seen = new Set();
       const add = (rel, xx, extra) => {
@@ -201,13 +204,17 @@
           seen.add(f);
           const white = String(fam.baseWhite(fams[f].ids[0])), c = cover[f] || 0;
           const golds = all.filter((id) => meta[id] && meta[id][3] === 2).map(String);
-          rows.push({ family: f, id: white, white, gold: false, p, L: eff[f], cover: c, extra, score: eff[f] * p * (1 - c), gamble: !(p > 0), anyway: anyway.has(white) || golds.some((g) => anyway.has(g)) });
+          const own = !!(cup && cup.own && (cup.own(white) || all.some((id) => cup.own(String(id))) || fams[f].why === "green"));
+          // The ◎ of a cup's own ○ skill when she'll likely hit SS (the video's "double circle").
+          const dbl = own && cup.double ? all.map(String).filter((id) => meta[id] && meta[id][3] === 1 && id !== white && meta[id][1] > (meta[white] ? meta[white][1] : 0)).sort((a, b) => meta[b][1] - meta[a][1])[0] : null;
+          rows.push({ family: f, id: dbl || white, white, gold: false, double: !!dbl, own, p, L: eff[f], cover: c, extra, score: eff[f] * p * (1 - c), gamble: !(p > 0), anyway: anyway.has(white) || golds.some((g) => anyway.has(g)) });
         });
       };
       add(x.rel, x, false);
       if (x.relAll && x.relAll !== x.rel) add(x.relAll, Object.assign({}, x, { rel: x.relAll }), true);
       const byScore = (a, b) => b.score - a.score || b.L - a.L;
-      const offered = rows.filter((r) => !r.gamble && !r.anyway && !r.extra).sort(byScore).concat(rows.filter((r) => !r.gamble && !r.anyway && r.extra).sort(byScore));
+      const live = rows.filter((r) => !r.gamble && !r.anyway);
+      const offered = live.filter((r) => !r.extra).sort(byScore).concat(live.filter((r) => r.extra && r.own).sort(byScore), live.filter((r) => r.extra && !r.own).sort(byScore));
       const rest = x.skillPlan ? [] : rows.filter((r) => r.gamble).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
       return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L) });
     }
@@ -514,7 +521,13 @@
       // distance; her surface in a sprint), which only a pink firing at an inspiration gives.
       const fam = opts.pinkReach || (!opts.pinkFor && p1.s && p1.s.pink) || [];
       const lifted = (i) => { const q = fam.find((y) => y.i === i); return q ? q.p : 0; };
-      const auto = choices.find((p) => p.needed && p.target === "A" && lifted(p.i) < 0.9) || choices.find((p) => p.needed && p.target === "S") || choices.find((p) => p.needed) || null;
+      // Parent 2 is a borrow for her other side: your side fixes her aptitudes (your Parent 1 line,
+      // the grandparent you borrow to train her), so Parent 2's search asks for a pink only while
+      // an aptitude is still below A after her family. The S pink stays on your side: few rentals
+      // are built around your ace, so a pink filter there costs the best whites (LightBirb's
+      // Parenting 201). The grandparent search (opts.own) keeps your full rule.
+      const auto = choices.find((p) => p.needed && p.target === "A" && lifted(p.i) < 0.9)
+        || (opts.own ? choices.find((p) => p.needed && p.target === "S") || choices.find((p) => p.needed) : null) || null;
       const mode = opts.pink == null || opts.pink === "auto" ? "auto" : opts.pink === "none" ? "none" : String(opts.pink);
       const focus = mode === "auto" ? auto : mode === "none" ? null : choices.find((p) => String(p.i) === mode);
       // Below A: the start lift is certain, so ask for just the stars it needs on top of her known
@@ -530,7 +543,7 @@
       // Each uma carries one pink spark. Parent 2's line is three umas, so with your rule it also
       // asks for the S-distance pink (3–9★) once an aptitude below A takes the first row. The
       // grandparent is one uma: one pink.
-      const sNeed = mode === "auto" && !opts.own && pink && pink.target === "A" ? choices.find((p) => p.needed && p.target === "S" && p.i !== pink.i) : null;
+      const sNeed = null; // the S pink is your side's (see auto)
       const pink2 = sNeed ? Object.assign({}, sNeed, { min: 3, main: false }) : null;
       // The gap her known family (Parent 1 and her parents, with their real sparks) leaves: the
       // rental's blue goes to the biggest one still open.
