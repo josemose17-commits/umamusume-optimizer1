@@ -393,7 +393,7 @@
     };
 
     // ---------- CM & decks: the cup and your team ----------
-    // Her stamina need for this track and style (two debuffers, none on Sprint), from the race
+    // Her stamina need for this track and style (the debuff skills you pick, none on Sprint), from the race
     // simulator; redrawn once it's worked out.
     let staminaWait = null;
     function staminaLine() {
