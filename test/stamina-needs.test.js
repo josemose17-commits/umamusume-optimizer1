@@ -65,38 +65,68 @@ test("comparison summaries report the paired SD and a 95% interval", () => {
   assert.equal(RS.summary([0]).ci95, 0);
 });
 
-test("automatic stamina sends the correct course and two-debuffer HP stress profile to the worker", () => {
-  const global = require("../data/race-skills.json");
-  const jp = require("../data/race-skills-jp.json");
+test("automatic stamina passes native debuff skills twice and skips them on Sprint", () => {
+  const global = require("../data/race-skills.json"), jp = require("../data/race-skills-jp.json");
+  const cases = [
+    ["cm21", []], ["cm22", ["200921", "200931", "201441"]],
+    ["cm23", ["200921", "200931", "201441", "201161"]], ["cm24", ["200921", "200931", "201441", "201221"]]
+  ];
   for (const catalog of [global, jp]) {
-    for (const [id, percent] of [["cm21", 0], ["cm22", 10], ["cm23", 16], ["cm24", 12]]) {
+    for (const [id, skills] of cases) {
       const p = PRESETS.list.find(x => x.id === id);
-      assert.deepEqual(RS.staminaDebuffs(p, catalog), { opponents: percent ? 2 : 0, percent });
-      const input = { strategy: "Oikomi", speed: 1500, stamina: 750, power: 1240, guts: 850, wisdom: 1100, mood: 1 };
+      assert.deepEqual(RS.staminaDebuffs(p, "Oikomi"), [...skills, ...skills]);
       if (!catalog.courses[p.course.id]) continue;
-      const { msg, data } = RS.staminaRequest(p, input, catalog, percent, 120, 4242);
+      const input = { strategy: "Oikomi", speed: 1500, stamina: 750, power: 1240, guts: 850, wisdom: 1100, mood: 1 };
+      const { msg, data } = RS.staminaRequest(p, input, catalog, 120, 4242);
       assert.equal(msg, "hpcalc");
-      assert.equal(data.hpDrain, percent / 100);
+      assert.equal(data.racedef.orderRange, null);
       assert.equal(data.course.distance, p.course.distance);
       assert.equal(data.racedef.groundCondition, p.racedef.ground);
       for (const [k, v] of Object.entries(input)) assert.equal(data.uma[k], v);
       assert.equal(data.uma.skills.size, 0);
+      assert.deepEqual([...data.debufUma.skills.values()], [...skills, ...skills]);
+      assert.equal(data.options.useIntChecks, true);
+      assert.equal(data.options.forceFullSpurt, true);
     }
   }
 });
 
-test("automatic stamina uses the lowest 25-point step near the high-stamina spurt rate", async () => {
+test("automatic stamina verifies 95% full spurt rather than using a high-stamina relative threshold", async () => {
   const p = PRESETS.list.find(x => x.id === "cm22"), catalog = require("../data/race-skills.json");
-  const result = await RS.staminaTarget(p, { strategy: "Nige", guts: 700 }, catalog, async ({ data }) => {
+  const result = await RS.staminaTarget(p, { strategy: "Nige", stamina: 800, guts: 700 }, catalog, async ({ data }) => {
     assert.equal(data.uma.strategy, "Nige");
     assert.equal(data.uma.guts, 700);
-    assert.equal(data.hpDrain, 0.1);
-    return { results: { runData: { nspurt: data.uma.stamina < 681 ? 109 : 113 } } };
+    assert.equal(data.debufUma.skills.size, 6);
+    const hits = data.uma.stamina < 681 ? 113 : 115;
+    return { results: { runData: { nspurt: hits }, results: { requiredHp: [2100] } } };
   });
   assert.equal(result.need, 700);
-  assert.equal(result.hits, 113);
+  assert.equal(result.hits, 115);
+  assert.equal(result.at, 800);
   assert.equal((await RS.staminaTarget(p, { strategy: "Nige" }, catalog, async () =>
-    ({ results: { runData: { nspurt: 40 } } }))).need, null);
+    ({ results: { runData: { nspurt: 111 }, results: { requiredHp: [] } } }))).need, null);
+});
+
+test("Umalator stamina links preserve both skill lists, options, mood and RNG", async () => {
+  const { gzipSync } = require("node:zlib");
+  const p = PRESETS.list.find(x => x.id === "cm22"), catalog = require("../data/race-skills.json");
+  const url = value => "https://alpha123.github.io/uma-tools/umalator-global/stamina#" +
+    encodeURIComponent(gzipSync(JSON.stringify(value)).toString("base64"));
+  const uma = { speed: 1450, stamina: 675, power: 1250, guts: 750, wisdom: 1200,
+    strategy: "Senkou", surfaceAptitude: "A", distanceAptitude: "S", strategyAptitude: "A", mood: 2 };
+  const cfg = { courseId: p.course.id, racedef: p.racedef, nsamples: 500, seed: 321,
+    usePosKeep: false, useCompeteTop: true, useIntChecks: true,
+    uma1: { ...uma, skills: ["200331"] }, debufUma: { ...uma, strategy: "Sasi", skills: ["200871", "200871"] } };
+  const setup = await RS.readStaminaLink(url(cfg), p);
+  const { data } = RS.staminaRequest(p, setup.ace, catalog, setup.samples, setup.seed, setup);
+  assert.equal(data.nsamples, 500);
+  assert.equal(data.options.seed, 321);
+  assert.equal(data.options.usePosKeep, false);
+  assert.equal(data.uma.mood, 2);
+  assert.deepEqual([...data.uma.skills.values()], ["200331"]);
+  assert.deepEqual([...data.debufUma.skills.values()], ["200871", "200871"]);
+  await assert.rejects(RS.readStaminaLink(url({ ...cfg, racedef: { ...cfg.racedef, ground: 1 } }), p), /same course/);
+  assert.equal(RS.staminaEstimate([0, 0, 1600 + 0.8 * 0.89 * 825], "Senkou", 1600), 825);
 });
 
 test("automatic stamina is the deck target and moves the stamina shortfall in race scoring", () => {

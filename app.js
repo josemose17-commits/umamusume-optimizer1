@@ -2686,7 +2686,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2797,11 +2797,12 @@
   // Calculate once per course, style and race stat line. Stamina itself is the solver's
   // variable; editing the manual target or final stamina only changes the displayed gap.
   const staminaCache = new Map();
-  function staminaInput(p, c, tid) {
+  const linkedStamina = (p, c) => c.staminaLink?.preset === p.id ? c.staminaLink : null;
+  function staminaInput(p, c, tid, setup) {
     const q = c.raceSkills || {}, stats = q.stats || {}, targets = c.targets || {}, apt = q.apt || {};
     const t = tid && D.trainee(tid), grades = t ? t.apt : [];
     const dist = ["Sprint", "Mile", "Medium", "Long"].indexOf(p.course.dist);
-    return { strategy: c.style, mood: Math.max(-2, Math.min(2, +q.mood || 0)),
+    return { ...setup?.ace, strategy: c.style, mood: Math.max(-2, Math.min(2, +q.mood || 0)), stamina: +stats.stamina || p.stats.stamina,
       speed: +stats.speed || +targets.speed || p.stats.speed, power: +stats.power || +targets.power || p.stats.power,
       guts: +stats.guts || +targets.guts || p.stats.guts, wisdom: +stats.wit || +targets.wit || p.stats.wisdom,
       distanceAptitude: apt.distanceAptitude || grades[dist + 2] || "A",
@@ -2809,20 +2810,20 @@
       strategyAptitude: apt.strategyAptitude || grades[6 + STYLES.findIndex(([style]) => style === c.style)] || "A" };
   }
   function staminaEntry(p, c, tid = deckTrainee("cm")) {
-    const input = staminaInput(p, c, tid), key = JSON.stringify([p.id, input]);
+    const setup = linkedStamina(p, c), input = staminaInput(p, c, tid, setup), key = JSON.stringify([p.id, input, setup]);
     if (staminaCache.has(key)) return staminaCache.get(key);
     const entry = { key };
     staminaCache.set(key, entry);
     if (staminaCache.size > 24) staminaCache.delete(staminaCache.keys().next().value);
-    const RS = window.UmaRaceSkills, engine = RS.engine(p, SV.meta.sims);
+    const RS = window.UmaRaceSkills, engine = RS.engine(p, setup ? null : SV.meta.sims);
     entry.promise = (async () => {
       const catalog = await RS.load(engine.catalog);
-      const reason = RS.supported(p, { ...simVariant(p), inBrowser: !!engine.sim }, catalog);
+      const reason = RS.supported(p, setup ? null : { ...simVariant(p), inBrowser: !!engine.sim }, catalog);
       if (reason) throw new Error(reason);
-      const worker = RS.runner(engine.sim, true);
-      try { return await RS.staminaTarget(p, input, catalog, worker.run); }
+      const worker = RS.runner(engine.sim);
+      try { return await RS.staminaTarget(p, input, catalog, worker.run, setup); }
       finally { worker.close(); }
-    })().catch(() => ({ unavailable: true })).then(result => (entry.result = result));
+    })().catch(error => ({ unavailable: error.message || "Stamina simulation failed." })).then(result => (entry.result = result));
     return entry;
   }
 
@@ -2838,8 +2839,8 @@
   function staminaNote(c, result) {
     const style = esc(STYLE_NAME[c.style] || c.style);
     if (!result) return `Calculating stamina for ${style}…`;
-    if (result.unavailable) return "Automatic stamina is unavailable for this course. Using the distance default unless you enter a target.";
-    const pressure = result.opponents ? `two debuffers, ${result.percent}% max HP drained` : "Sprint, no debuffs";
+    if (result.unavailable) return `Automatic stamina is unavailable. ${esc(result.unavailable)} Using the distance default unless you enter a target.`;
+    const pressure = { two: "two timed debuff sets", link: "linked Umalator setup", sprint: "Sprint, no debuffs" }[result.mode];
     const cap = E.capsFor(state, scenario()).stamina;
     const override = c.targets?.stamina > 0 ? ` · deck uses your ${+c.targets.stamina} override` : "";
     if (!result.need) {
@@ -2849,7 +2850,10 @@
     const entered = +(c.raceSkills?.stats?.stamina || c.targets?.stamina || 0), diff = entered - result.need;
     const gap = entered > 0 ? diff === 0 ? " · at target" : ` · ${Math.abs(diff)} ${diff < 0 ? "short" : "above target"}` : "";
     const capped = result.need > cap ? ` · above your ${cap} cap, plan recovery skills` : "";
-    return `<b>${result.need} stamina</b> · ${style} · ${pressure} · full spurt in ${result.hits}/${result.samples} races${gap}${override}${capped}`;
+    const comparison = c.raceSkills?.stats?.stamina > 0 || result.mode === "link"
+      ? `<br>At ${result.at}: ${(result.atHits * 100 / result.samples).toFixed(1)}% full spurt (${result.atHits}/${result.samples}).` : "";
+    const linked = result.mode === "link" && result.estimate ? ` Umalator's 95% HP estimate: ${result.estimate}.` : "";
+    return `<b>${result.need} stamina</b> · ${style} · ${pressure} · full spurt in ${result.hits}/${result.samples} races at target${gap}${override}${capped}${comparison}${linked}`;
   }
 
   const staminaPlaceholder = (p, result) => Math.min(raceBuildTarget(p, result).stamina, E.capsFor(state, scenario()).stamina);
@@ -3083,6 +3087,7 @@
 
   function targetsHTML(p, c, host = deckHost()) {
     const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c) : null;
+    const linked = stamina && linkedStamina(p, c);
     if (stamina && !stamina.result) stamina.promise.then(() => {
       if (state.tab === "cm" && cm("cm") === c) showStamina(p, c, stamina);
     });
@@ -3095,7 +3100,11 @@
       ${host === "parents" ? `<span class="mini"><b>Target stats</b> (optional): the search swaps cards to get her closer. <b>Blue spark targets</b> aims every stat at 1100 for 3★ blue sparks.</span><details class="pred-help"><summary>More on targets</summary>` : ""}
       <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       ${host === "parents" ? "</details>" : ""}
-      ${stamina ? `<p class="mini" id="cmStaminaEstimate" data-stamina-key="${esc(stamina.key)}" role="status">${staminaNote(c, stamina.result)}</p><p class="mini">Uses the stats in Skills for this build, then your targets, then cup defaults. Assumes no recovery skills and every modeled debuff hits at the start. Enter a stamina target to override.</p>` : ""}
+      ${stamina ? `<p class="mini" id="cmStaminaEstimate" data-stamina-key="${esc(stamina.key)}" role="status">${staminaNote(c, stamina.result)}</p><p class="mini">Tries for 95% full spurts. Uses your stats and mood, with no recovery skills in the default setup. Enter a stamina target to override.</p>
+        <details class="pred-help"${linked ? " open" : ""}><summary>Stamina setup${linked ? " · Umalator link loaded" : ""}</summary>
+          <p class="mini">Default: two copies of a debuffer's skills with sampled activation and timing. The simulator approximates rival positions. Sprint skips debuffs.</p>
+          <div class="row-wrap"><label class="field grow"><span>Compare with a Global Umalator stamina link</span><input id="cmStaminaLink" type="url" placeholder="Paste the Copy link URL" autocomplete="off"></label>
+          <button type="button" class="btn ghost small" id="cmStaminaImport">Use link</button>${linked ? '<button type="button" class="btn ghost small" id="cmStaminaReset">Use default debuffers</button>' : ""}</div></details>` : ""}
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${stamina && s === "stamina" ? staminaPlaceholder(p, stamina.result) : bt[s]}"></label>`).join("")}</div>
       ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
       ${concertSettingsHTML(c)}
@@ -4051,7 +4060,7 @@
     const table = (rows, ranking) => `<div class="table-wrap"><table><thead><tr><th>Skill</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows.map(x=>`<tr><th>${skillNameHTML(x.id)}${g8Pill(c.preset, c.style, x.id)}${dependency(x.id) ? `<div class="mini">${esc(dependency(x.id))}</div>` : ""}</th><td>${x.cost}${ranking && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${num((ranking ? x.result : x.marginal).mean)}</td><td>${num(x.per100)}</td></tr>`).join("") || '<tr><td colspan="4">No additional purchase fits.</td></tr>'}</tbody></table></div>`;
     return `<details class="pred-help" id="cmRaceInputs"${q.open ? " open" : ""}><summary>Skills for this build: equipped skills, hints and SP</summary>
       <p class="mini">Compares affordable skill sets on this course. A new equipped skill changes the baseline and the remaining recommendations.</p>
-      <div class="row-wrap"><label class="field"><span>Inputs</span><select data-race-field="mode"><option value="plan"${q.mode === "plan" ? " selected" : ""}>Plan from this deck</option><option value="finished"${q.mode === "finished" ? " selected" : ""}>Finished uma: enter stats and SP left</option></select></label><label class="field"><span>Unique level</span><select data-race-field="uniqueLv">${[1,2,3,4,5,6].map(n=>`<option value="${n}"${+(q.uniqueLv || 1)===n?" selected":""}>${n}</option>`).join("")}</select></label><label class="field"><span>Mood</span><select data-race-field="mood">${[["0","Normal (CM rounds)"],["1","Good"],["2","Great (finals)"]].map(([v,l])=>`<option value="${v}"${String(q.mood||"0")===v?" selected":""}>${l}</option>`).join("")}</select></label><label class="field"><span>SP left (finished uma)</span><input type="number" min="0" max="20000" data-race-field="sp" value="${esc(q.sp)}"></label></div>
+      <div class="row-wrap"><label class="field"><span>Inputs</span><select data-race-field="mode"><option value="plan"${q.mode === "plan" ? " selected" : ""}>Plan from this deck</option><option value="finished"${q.mode === "finished" ? " selected" : ""}>Finished uma: enter stats and SP left</option></select></label><label class="field"><span>Unique level</span><select data-race-field="uniqueLv">${[1,2,3,4,5,6].map(n=>`<option value="${n}"${+(q.uniqueLv || 1)===n?" selected":""}>${n}</option>`).join("")}</select></label><label class="field"><span>Mood</span><select data-race-field="mood">${[["-2","Awful"],["-1","Bad"],["0","Normal (CM rounds)"],["1","Good"],["2","Great (finals)"]].map(([v,l])=>`<option value="${v}"${String(q.mood||"0")===v?" selected":""}>${l}</option>`).join("")}</select></label><label class="field"><span>SP left (finished uma)</span><input type="number" min="0" max="20000" data-race-field="sp" value="${esc(q.sp)}"></label></div>
       <div class="tg-row">${E.STATS.map(s=>`<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" min="1" max="3000" data-race-stat="${s}" value="${q.stats[s] || ""}" placeholder="${((j.optResult || {}).est || {}).stats ? j.optResult.est.stats[E.STATS.indexOf(s)] : "Final stat"}"></label>`).join("")}</div>
       <div class="row-wrap">${pairs.map(([k,label])=>`<label class="field"><span>${label} aptitude</span><select data-race-apt="${k}"><option value="">Trainee's starting grade</option>${["G","F","E","D","C","B","A","S"].map(v=>`<option value="${v}"${q.apt[k]===v?" selected":""}>${v}</option>`).join("")}</select></label>`).join("")}</div>
       <div class="row-wrap"><label class="field grow"><span>Add a shop skill or planning target (including inherited uniques)</span><input id="cmRaceSkill" list="cmRaceSkillList" autocomplete="off" placeholder="Skill name"></label><button type="button" class="btn ghost small" id="cmRaceAdd">Add</button></div>
@@ -4185,7 +4194,30 @@
     if(el.dataset.raceHint!=null)q.skills[+el.dataset.raceHint].hint=+el.value;
     raceEdited();
   });
+  async function importStaminaLink(button) {
+    const c = cm("cm"), p = presetById(c.preset), field = document.getElementById("cmStaminaLink");
+    button.disabled = true;
+    try {
+      const setup = await window.UmaRaceSkills.readStaminaLink(field.value.trim(), p);
+      if (state.tab !== "cm" || cm("cm") !== c) return;
+      c.staminaLink = { ...setup, preset: p.id };
+      const q = raceState(c), a = setup.ace;
+      q.stats = { speed: a.speed, stamina: a.stamina, power: a.power, guts: a.guts, wit: a.wisdom };
+      q.apt = { distanceAptitude: a.distanceAptitude, surfaceAptitude: a.surfaceAptitude, strategyAptitude: a.strategyAptitude };
+      q.mood = String(a.mood || 0);
+      const { ace } = W.current(state);
+      if (ace) ace.style = a.strategy;
+      c.style = a.strategy;
+      save();
+      renderCM();
+    } catch (error) { flash(error.message || "Couldn't read that Umalator link."); }
+    finally { button.disabled = false; }
+  }
+
   document.addEventListener("click",e=>{
+    const staminaImport = e.target.closest("#cmStaminaImport");
+    if (staminaImport) { importStaminaLink(staminaImport); return; }
+    if (e.target.closest("#cmStaminaReset")) { delete cm("cm").staminaLink; save(); renderCM(); return; }
     if(e.target.closest("#cmRaceShow")){const box=document.getElementById("cmRaceInputs");box.open=true;box.scrollIntoView({block:"start"});return;}
     if(e.target.closest("#cmRaceRun")){runRaceSkills();return;}
     const remove=e.target.closest("[data-race-remove]");

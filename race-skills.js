@@ -52,10 +52,9 @@
       uma1: horse(input, before, catalog), uma2: horse(input, after, catalog),
       options: { seed, usePosKeep: true, useCompeteTop: true, useIntChecks: true } } };
   }
-  function runner(sim, stamina = false) {
+  function runner(sim) {
     const query = new URLSearchParams(version);
     if (sim) query.set("sim", sim);
-    if (stamina) query.set("stamina", "1");
     const worker = new Worker("race-worker.js?" + query);
     let pending = null;
     worker.onmessage = ({ data }) => {
@@ -72,42 +71,115 @@
   // kind "jp": the JP worker's skills and courses (JP-dated cups); else Global's.
   const load = (kind) => { const file = kind === "jp" ? "data/race-skills-jp.json" : "data/race-skills.json";
     return catalogs[file] || (catalogs[file] = fetch(file + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { delete catalogs[file]; throw e; })); };
-  // Two debuffers, all listed effects land: Subdued + Flustered (1% each),
-  // All-Seeing Eyes (3%), plus the distance-specific gold. Sprint opts out.
-  function staminaDebuffs(preset, catalog) {
-    const distance = preset.course.dist;
-    const ids = { Mile: ["201441"], Medium: ["201441", "201161"], Long: ["201441", "201221"] }[distance];
-    if (!ids) return { opponents: 0, percent: 0 };
-    const drain = id => -catalog.skills[id].alternatives[0].effects.find(e => e.type === 9 && e.modifier < 0 && e.target !== 1).modifier / 100;
-    return { opponents: 2, percent: 2 * ["200831", "200841", ...ids].reduce((sum, id) => sum + drain(id), 0) };
+  const STAMINA_STYLES = ["Nige", "Senkou", "Sasi", "Oikomi"];
+  const HP_FACTORS = { Nige: 0.95, Senkou: 0.89, Sasi: 1, Oikomi: 0.995 };
+  function staminaDebuffs(preset, strategy) {
+    if (preset.course.dist === "Sprint") return [];
+    const wards = { Nige: ["200831", "200841"], Senkou: ["200861", "200871"],
+      Sasi: ["200891", "200901"], Oikomi: ["200921", "200931"] };
+    const distanceSkills = { Medium: ["201161"], Long: ["201221"] };
+    const skills = [...wards[strategy], "201441", ...(distanceSkills[preset.course.dist] || [])];
+    // The stamina calculator accepts duplicate debuff skills, like Umalator's UI.
+    return skills.concat(skills);
   }
 
-  function staminaRequest(preset, input, catalog, percent, samples, seed) {
-    const { data } = request(preset, input, [], [], catalog, samples, seed);
-    const { uma1, uma2, course, racedef, options } = data;
-    return { msg: "hpcalc", data: { nsamples: samples, course, racedef, uma: uma1, debufUma: uma2,
-      options: { ...options, forceFullSpurt: false }, hpDrain: percent / 100 } };
+  function staminaHorse(input, catalog, skills = []) {
+    const build = horse(input, [], catalog);
+    for (const [i, id] of skills.entries()) {
+      const meta = catalog.meta[id];
+      if (!meta || !catalog.skills[id]) throw new Error("Stamina skill missing from the pinned data.");
+      const group = String(meta.groupId);
+      build.skills.set(String(meta.iconId).startsWith("3") ? group + "-" + i : group, id);
+    }
+    build.samplePolicies = new Map(Object.entries(input.samplePolicies || {}));
+    return build;
   }
 
-  async function staminaTarget(preset, input, catalog, run) {
-    const profile = staminaDebuffs(preset, catalog);
-    const samples = 120, step = 25, seed = 4242, high = 3000;
-    const spurt = async stamina => {
-      const answer = await run(staminaRequest(preset, { ...input, stamina }, catalog, profile.percent, samples, seed));
+  function staminaRequest(preset, input, catalog, samples, seed, setup) {
+    const { data: { course, racedef, options } } = request(preset, input, [], [], catalog, samples, seed);
+    const sprint = preset.course.dist === "Sprint";
+    const debuffer = setup?.debuffer || { ...input, strategy: "Sasi", strategyAptitude: "A", wisdom: 1100, mood: 0, outfitId: "" };
+    const effects = sprint ? [] : setup ? debuffer.skills : staminaDebuffs(preset, input.strategy);
+    if (setup || preset.kind !== "loh") racedef.orderRange = null; // Upstream CM stamina calculator.
+    return { msg: "hpcalc", data: { nsamples: samples, course, racedef,
+      uma: staminaHorse(input, catalog, setup?.ace.skills), debufUma: staminaHorse(debuffer, catalog, effects),
+      options: { ...options, ...setup?.options, forceFullSpurt: true } } };
+  }
+
+  // Umalator's displayed HP-to-Stamina estimate. Verify the deck target with actual
+  // full-spurt counts since changes in raw Stamina can also affect the race.
+  function staminaEstimate(requiredHp, style, distance) {
+    const hp = requiredHp[Math.ceil(requiredHp.length * 0.95) - 1];
+    let stamina = (hp - distance) * 1.25 / HP_FACTORS[style];
+    if (stamina > 1200) stamina = 1200 + (stamina - 1200) * 2;
+    return Number.isFinite(stamina) ? Math.max(1, Math.round(stamina)) : null;
+  }
+
+  async function staminaTarget(preset, input, catalog, run, setup) {
+    const samples = setup?.samples || 120, step = 25, seed = setup?.seed ?? 4242, high = 3000;
+    const goal = Math.ceil(samples * 0.95), tested = new Map();
+    const race = async stamina => {
+      if (tested.has(stamina)) return tested.get(stamina);
+      const answer = await run(staminaRequest(preset, { ...input, stamina }, catalog, samples, seed, setup));
       const hits = answer.results.runData.nspurt;
       if (!Number.isInteger(hits) || hits < 0 || hits > samples) throw new Error("Invalid full-spurt count.");
-      return hits;
+      const result = { hits, estimate: staminaEstimate(answer.results.results.requiredHp, input.strategy, preset.course.distance) };
+      tested.set(stamina, result);
+      return result;
     };
-    const top = await spurt(high);
-    if (top < samples / 2) return { ...profile, need: null, top, samples, high };
-    // Within two percentage points of the high-stamina reference, using the same rolls.
-    const goal = Math.ceil(top - samples * 0.02);
-    let lo = 1, hi = high / step, hits = top;
+    const at = Math.max(1, Math.min(high, input.stamina || preset.stats.stamina)), initial = await race(at);
+    const output = { samples, high, at, atHits: initial.hits, estimate: initial.estimate,
+      mode: preset.course.dist === "Sprint" ? "sprint" : setup ? "link" : "two" };
+    let lo = 1, hi = high / step;
+    // The linked or entered stat and the upstream estimate narrow the search.
+    if (initial.hits >= goal) hi = Math.max(lo, Math.ceil(at / step));
+    else lo = Math.max(lo, Math.floor(at / step) + 1);
+    const pivot = Math.min(hi, Math.max(lo, Math.ceil((initial.estimate || at) / step)));
+    if ((await race(pivot * step)).hits >= goal) hi = pivot;
+    else lo = Math.min(hi, pivot + 1);
     while (lo < hi) {
-      const mid = Math.floor((lo + hi) / 2), count = await spurt(mid * step);
-      if (count >= goal) { hi = mid; hits = count; } else lo = mid + 1;
+      const mid = Math.floor((lo + hi) / 2);
+      if ((await race(mid * step)).hits >= goal) hi = mid; else lo = mid + 1;
     }
-    return { ...profile, need: lo * step, hits, top, samples, high };
+    const hits = (await race(lo * step)).hits;
+    return hits >= goal ? { ...output, need: lo * step, hits } : { ...output, need: null, top: (await race(high)).hits };
+  }
+
+  // Share links contain gzipped JSON in the fragment. Keep only the race inputs needed
+  // to reproduce a Global stamina calculation, never the link or unrelated saved builds.
+  async function readStaminaLink(link, preset) {
+    const url = new URL(link);
+    if (url.origin !== "https://alpha123.github.io" || !/^\/uma-tools\/umalator-global\/stamina\/?$/.test(url.pathname) || url.hash.length > 16000) {
+      throw new Error("Paste a Global Umalator stamina link.");
+    }
+    const bytes = Uint8Array.from(atob(decodeURIComponent(url.hash.slice(1))), c => c.charCodeAt(0));
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 64000) { await reader.cancel(); throw new Error("Umalator link is too large."); }
+      chunks.push(value);
+    }
+    const data = JSON.parse(await new Blob(chunks).text());
+    if (+data.courseId !== +preset.course.id || ["ground", "weather", "season", "time"].some(k => data.racedef?.[k] !== preset.racedef[k])) {
+      throw new Error("Set the same course, ground, weather and time in both planners.");
+    }
+    const cleanHorse = h => {
+      const stats = ["speed", "stamina", "power", "guts", "wisdom"];
+      const grades = ["distanceAptitude", "surfaceAptitude", "strategyAptitude"];
+      if (!h || !STAMINA_STYLES.includes(h.strategy) || stats.some(k => !Number.isInteger(h[k]) || h[k] < 1 || h[k] > 3000)
+        || grades.some(k => !/^[GFEDCBAS]$/.test(h[k])) || !Array.isArray(h.skills) || h.skills.length > 100
+        || h.skills.some(id => !/^\d{5,9}$/.test(id))) throw new Error("Umalator link has invalid race inputs.");
+      const keys = stats.concat(grades, "strategy", "outfitId", "starCount", "uniqueLv", "mood", "popularity", "aptitudes", "samplePolicies", "skills");
+      return Object.fromEntries(keys.filter(k => Object.hasOwn(h, k)).map(k => [k, h[k]]));
+    };
+    return { ace: cleanHorse(data.uma1), debuffer: cleanHorse(data.debufUma || { ...data.uma1, skills: [] }),
+      samples: Math.max(24, Math.min(500, Math.floor(+data.nsamples || 120))),
+      seed: Number.isInteger(data.seed) && data.seed !== 0 ? data.seed >>> 0 : 4242,
+      options: Object.fromEntries(["usePosKeep", "useCompeteTop", "useIntChecks"].filter(k => typeof data[k] === "boolean").map(k => [k, data[k]])) };
   }
 
   const DUEL_RACES = 240, DUEL_SEED = 161803, CONFIRM_SEED = 577215, PRUNE_SEED = 141421;
@@ -324,6 +396,6 @@
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
       evaluations: calls, failedSets, method, learned, duel, pruned, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
-  const api = { summary, supported, engine, horse, request, runner, load, staminaDebuffs, staminaRequest, staminaTarget, optimize };
+  const api = { summary, supported, engine, horse, request, runner, load, staminaDebuffs, staminaRequest, staminaEstimate, staminaTarget, readStaminaLink, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -73,9 +73,9 @@ test('the JP worker is the pinned upstream build and every variant patches it', 
   });
 });
 
-function worker(sim, stamina = false) {
+function worker(sim) {
   let handler, last;
-  const sb = { URL, console: { assert() {}, log() {}, warn() {}, error() {} }, location: { href: 'http://localhost/race-worker.js?v=t' + (sim ? '&sim=' + sim : '') + (stamina ? '&stamina=1' : '') },
+  const sb = { URL, console: { assert() {}, log() {}, warn() {}, error() {} }, location: { href: 'http://localhost/race-worker.js?v=t' + (sim ? '&sim=' + sim : '') },
     addEventListener: (t, f) => { handler = f; }, postMessage: (m) => { if (['compare', 'hpcalc', 'error'].includes(m.type)) last = m; } };
   sb.self = sb;
   sb.XMLHttpRequest = function () { let u; this.open = (m, url) => { u = url; }; this.send = () => { this.status = 200; this.responseText = fs.readFileSync(path.join(ROOT, u.split('?')[0]), 'utf8'); }; };
@@ -84,19 +84,19 @@ function worker(sim, stamina = false) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'race-worker.js'), 'utf8'), sb);
   return (msg) => { last = null; handler({ data: msg }); return last; };
 }
-test('both pinned workers apply HP drain and clear it for the next race request', () => {
+test('both pinned workers simulate timed stamina skills from repeated debuff lists', () => {
   const p = P.list.find(x => x.id === 'cm22');
-  const input = { ...p.stats, strategy: 'Senkou', stamina: 625 };
+  const input = { ...p.stats, strategy: 'Senkou', stamina: 575 };
   for (const [sim, catalog] of [[null, require('../data/race-skills.json')], [SV.meta.sims.cm22, CJ]]) {
-    const run = worker(sim, true);
-    const spurts = percent => {
-      const answer = run(R.staminaRequest(p, input, catalog, percent, 24, 4242));
-      assert.equal(answer.type, 'hpcalc', answer.error);
-      return answer.results.runData.nspurt;
-    };
-    const normal = spurts(0);
-    assert.ok(spurts(10) < normal);
-    assert.equal(spurts(0), normal);
+    const run = worker(sim);
+    const req = R.staminaRequest(p, input, catalog, 48, 4242);
+    const stressed = run(req);
+    assert.equal(stressed.type, 'hpcalc', stressed.error);
+    assert.equal(stressed.results.results.requiredHp.length, 48);
+    req.data.debufUma.skills.clear();
+    const normal = run(req);
+    assert.equal(normal.type, 'hpcalc', normal.error);
+    assert.ok(stressed.results.runData.nspurt < normal.results.runData.nspurt);
   }
 });
 
