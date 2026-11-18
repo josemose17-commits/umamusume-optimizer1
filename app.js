@@ -2798,13 +2798,29 @@
   // variable; editing the manual target or final stamina only changes the displayed gap.
   const staminaCache = new Map();
   const linkedStamina = (p, c) => c.staminaLink?.preset === p.id ? c.staminaLink : null;
+  // Her stats for the stamina check, first found: the final stats you enter in Skills for this
+  // build, her deck's predicted stats (the last search for this cup and style), your targets,
+  // the cup's stat line. Stamina itself is what the check solves for.
+  function predictedStats(p, c) {
+    const r = deckJob("cm").optResult, est = r && r.goal === "race" && r.preset === p.id && r.style === c.style && r.est;
+    return est && est.stats ? Object.fromEntries(E.STATS.map((s, i) => [s, Math.round(est.stats[i])])) : null;
+  }
+  function staminaStatsFrom(p, c) {
+    const stats = (c.raceSkills || {}).stats || {}, pred = predictedStats(p, c), targets = c.targets || {};
+    const keys = ["speed", "power", "guts", "wit"];
+    if (keys.some((s) => +stats[s] > 0)) return "your stats";
+    if (pred) return "her predicted stats";
+    if (keys.some((s) => +targets[s] > 0)) return "your targets";
+    return "the cup's stat line";
+  }
   function staminaInput(p, c, tid, setup) {
-    const q = c.raceSkills || {}, stats = q.stats || {}, targets = c.targets || {}, apt = q.apt || {};
+    const q = c.raceSkills || {}, stats = q.stats || {}, targets = c.targets || {}, apt = q.apt || {}, pred = predictedStats(p, c) || {};
     const t = tid && D.trainee(tid), grades = t ? t.apt : [];
     const dist = ["Sprint", "Mile", "Medium", "Long"].indexOf(p.course.dist);
-    return { ...setup?.ace, strategy: c.style, mood: Math.max(-2, Math.min(2, +q.mood || 0)), stamina: +stats.stamina || p.stats.stamina,
-      speed: +stats.speed || +targets.speed || p.stats.speed, power: +stats.power || +targets.power || p.stats.power,
-      guts: +stats.guts || +targets.guts || p.stats.guts, wisdom: +stats.wit || +targets.wit || p.stats.wisdom,
+    const stat = (s, base) => +stats[s] || +pred[s] || +targets[s] || base;
+    return { ...setup?.ace, strategy: c.style, mood: setup ? Math.max(-2, Math.min(2, +(setup.ace && setup.ace.mood) || 0)) : 0, stamina: +stats.stamina || +pred.stamina || p.stats.stamina,
+      speed: stat("speed", p.stats.speed), power: stat("power", p.stats.power),
+      guts: stat("guts", p.stats.guts), wisdom: stat("wit", p.stats.wisdom),
       distanceAptitude: apt.distanceAptitude || grades[dist + 2] || "A",
       surfaceAptitude: apt.surfaceAptitude || grades[p.course.surface === "Dirt" ? 1 : 0] || "A",
       strategyAptitude: apt.strategyAptitude || grades[6 + STYLES.findIndex(([style]) => style === c.style)] || "A" };
@@ -2853,7 +2869,7 @@
     const comparison = c.raceSkills?.stats?.stamina > 0 || result.mode === "link"
       ? `<br>At ${result.at}: ${(result.atHits * 100 / result.samples).toFixed(1)}% full spurt (${result.atHits}/${result.samples}).` : "";
     const linked = result.mode === "link" && result.estimate ? ` Umalator's 95% HP estimate: ${result.estimate}.` : "";
-    return `<b>${result.need} stamina</b> · ${style} · ${pressure} · full spurt in ${result.hits}/${result.samples} races at target${gap}${override}${capped}${comparison}${linked}`;
+    return `<b>${result.need} stamina</b> · ${style} · ${pressure} · from ${staminaStatsFrom(presetById(c.preset), c)} · full spurt in ${result.hits}/${result.samples} races at target${gap}${override}${capped}${comparison}${linked}`;
   }
 
   const staminaPlaceholder = (p, result) => Math.min(raceBuildTarget(p, result).stamina, E.capsFor(state, scenario()).stamina);
@@ -3100,7 +3116,7 @@
       ${host === "parents" ? `<span class="mini"><b>Target stats</b> (optional): the search swaps cards to get her closer. <b>Blue spark targets</b> aims every stat at 1100 for 3★ blue sparks.</span><details class="pred-help"><summary>More on targets</summary>` : ""}
       <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       ${host === "parents" ? "</details>" : ""}
-      ${stamina ? `<p class="mini" id="cmStaminaEstimate" data-stamina-key="${esc(stamina.key)}" role="status">${staminaNote(c, stamina.result)}</p><p class="mini">Tries for 95% full spurts. Uses your stats and mood, with no recovery skills in the default setup. Enter a stamina target to override.</p>
+      ${stamina ? `<p class="mini" id="cmStaminaEstimate" data-stamina-key="${esc(stamina.key)}" role="status">${staminaNote(c, stamina.result)}</p><p class="mini">Tries for 95% full spurts on this track in her style. Uses the final stats you enter in Skills for this build, else her deck's predicted stats, else your targets; Normal mood (a safe check: Great mood can't be counted on); no recovery skills in the default setup. Enter a stamina target to override.</p>
         <details class="pred-help"${linked ? " open" : ""}><summary>Stamina setup${linked ? " · Umalator link loaded" : ""}</summary>
           <p class="mini">Default: two copies of a debuffer's skills with sampled activation and timing. The simulator approximates rival positions. Sprint skips debuffs.</p>
           <div class="row-wrap"><label class="field grow"><span>Compare with a Global Umalator stamina link</span><input id="cmStaminaLink" type="url" placeholder="Paste the Copy link URL" autocomplete="off"></label>
@@ -3380,6 +3396,17 @@
       // Your Pull planner team for the cup's track, as the planner races it there: the 2 of your 3
       // umas worth the most on that cup (no two in one running style when another fits), then the
       // flex slot's best other uma of yours. [{ tid, style }], umas you have only.
+      // The stamina check for the ace CM & decks has open (her track, style, stats, two debuffers;
+      // none on Sprint): its line, or null off a racing deck. onReady runs once it's worked out.
+      staminaSummary: (onReady) => {
+        const c = cm("cm"), p = c && c.goal === "race" ? presetById(c.preset) : null;
+        if (!p) return null;
+        const e = staminaEntry(p, c);
+        if (!e.result && onReady) e.promise.then(() => onReady());
+        return staminaNote(c, e.result);
+      },
+      // Her running style on this cup, as the team picks it (taken: teammates' styles).
+      styleFor: (p, tid, taken) => { const PV = window.UmaPullValues, t = D.trainee(tid); return PV && t ? PV.styleFor(p, t, taken, window.UmaUmaValues || null) : null; },
       pullTeam: (p) => {
         const PV = window.UmaPullValues, g = PV && PV.groupOf(p), teams = (state.pull && state.pull.teams) || {};
         if (!g) return [];

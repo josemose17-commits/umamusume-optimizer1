@@ -460,3 +460,14 @@ test("SSR pick tickets you have: free picks from the SSRs out on Global, Speed b
   hand.forEach((it) => { const c = D.card(it.id); assert.ok(c.r === 3 && c.en && c.en <= today, D.card(it.id).n + " is an SSR out on Global"); });
   assert.ok(v.selectors.filter((s) => s.id.indexOf("hand-") === 0).every((s) => s.price === 0 && s.date === today));
 });
+
+test("styleFor: the style worth most on the cup, avoiding a teammate's style", () => {
+  const cup = { id: "cmX", course: { surface: "Turf", dist: "Medium" } };
+  const t = { id: 1, cid: 1, apt: ["A", "G", "G", "A", "A", "B", "G", "A", "A", "G"] };
+  const ap = { distance: { BA: 1, AS: 0.5 }, surface: { BA: 1, AS: 0.5 }, style: { BA: 0.5, AS: 0.3 } };
+  const UV = { cups: { cmX: { status: "ok", apt: { Senkou: ap, Sasi: ap }, umas: { 1: { Senkou: 2, Sasi: 1.5 } } } } };
+  assert.deepEqual(PV.styleFor(cup, t, [], UV), { style: "Senkou", value: 2 });
+  assert.equal(PV.styleFor(cup, t, ["Senkou"], UV).style, "Sasi");
+  // No values for the cup: her best style grade.
+  assert.equal(PV.styleFor(cup, t, [], null).style, "Senkou");
+});
