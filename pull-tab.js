@@ -1,6 +1,6 @@
 // The Pull planner tab: your plan (the banners you'll pull 400 on, with your carat estimates),
 // your teams, and the route through the banners ahead: 200 or 400 pulls elsewhere, the free and
-// $20.99 selectors, and only cards that make your decks clearly stronger in more than one cup.
+// $20.99 selectors, by the deck gain per carat added up over every cup (each gain 3%+ by default).
 // pull-values.js builds your decks (in each cup's scenario) and values every banner, trainee and
 // selector pick on one scale; pull-planner.js finds the route. Keeps state.pull.
 (function (root) {
@@ -47,6 +47,9 @@
   function create(ctx) {
     const { D, B, P, PV, PP, esc, fmtDate } = ctx;
     let job = null;    // the run in progress: { stage, f }
+    // The rule a gain must pass, in words; strict: you raised it above the default.
+    const strictRule = (p) => +p.minPct > 3 || +p.minCups > 1;
+    const ruleText = (p) => (strictRule(p) ? `clearly stronger (${+p.minPct}%+) in ${+p.minCups}+ cup${+p.minCups === 1 ? "" : "s"}` : "stronger (3%+) in any cup");
     let result = null; // the last route, with the inputs it was made for
     let fixedOpen = false; // "Your fixed plan in the route" stays open across re-renders once opened
     const tLabel = (t) => t.n + " [" + t.t + "]";
@@ -56,9 +59,11 @@
       const s = ctx.state();
       if (!s.pull) s.pull = {};
       const p = s.pull;
-      const def = { carats: "", perMonth: "", sTickets: "", tTickets: "", ssrPicks: "", months: "all", minCups: "2", minPct: "10", fade: "20", usePlan: true, selFree: true, selPaid: true, selUma: true };
+      const def = { carats: "", perMonth: "", sTickets: "", tTickets: "", ssrPicks: "", months: "all", minCups: "1", minPct: "3", fade: "20", usePlan: true, selFree: true, selPaid: true, selUma: true };
       Object.keys(def).forEach((k) => { if (p[k] == null) p[k] = def[k]; });
       delete p.luck;
+      // Once: the old 10% / 2 cups bar becomes every real gain (3%+, any cup), added up per carat.
+      if (!p.ruleV) { if (p.minPct === "10" && p.minCups === "2") { p.minPct = "3"; p.minCups = "1"; } p.ruleV = 1; }
       delete p.parents;
       if (!p.teams) p.teams = JSON.parse(JSON.stringify(DEFAULT_TEAMS));
       // Once: each team's third uma is a flex in CM & LoH (you keep two fixed and use your other
@@ -110,7 +115,7 @@
       const end = until(p), label = o.label || "";
       const v = PV.create({
         D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(), umaValues: root.UmaUmaValues || null, scenarioDecks: root.UmaScenarioDecks || null,
-        minCups: +p.minCups || 2, minPct: (+p.minPct || 10) / 100, fade: (+p.fade || 0) / 100, locked: o.locked, freePulls: o.freePulls,
+        minCups: +p.minCups || 1, minPct: (+p.minPct || 3) / 100, fade: (+p.fade || 0) / 100, locked: o.locked, freePulls: o.freePulls,
         yours: o.yours, lockedPicks: o.lockedPicks, done: o.done,
         selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma }, handPicks: num(p.ssrPicks),
         reuse: o.reuse, deckOpts: ctx.deckOpts, whites: ctx.whites, skillL: ctx.skillL,
@@ -325,8 +330,14 @@
         <div class="row-wrap">
           <label class="field"><span>Plan ahead</span>${sel("months", [["all", "To mid-2029 (every forecast cup)"], ["12", "12 months"], ["18", "18 months"], ["24", "24 months"]])}</label>
           <label class="field"><span>Far-off cups count less: a year ahead loses</span>${sel("fade", [["0", "nothing"], ["10", "10%"], ["20", "20%"], ["30", "30%"]])}</label>
-          <label class="field"><span>Clearly stronger: beats the card it replaces by</span>${sel("minPct", [["5", "5% or more"], ["10", "10% or more"], ["15", "15% or more"], ["20", "20% or more"], ["30", "30% or more"]])}</label>
-          <label class="field"><span>Not a one-time use: in at least</span>${sel("minCups", [["1", "1 cup"], ["2", "2 cups"], ["3", "3 cups"], ["4", "4 cups"], ["5", "5 cups"]])}</label>
+        </div>
+        <details class="pred-help"${strictRule(p) ? " open" : ""}><summary>Stricter rules (optional)${strictRule(p) ? ": " + esc(ruleText(p)) : ""}</summary>
+        <p class="mini">By default every real gain counts (3% or more over the card it replaces, in any cup) and the route adds them all up per carat, so a card a bit better in many cups and one much better in a few both count. Raise these only if you want to pull for big upgrades that last.</p>
+        <div class="row-wrap">
+          <label class="field"><span>Counts when it beats the card it replaces by</span>${sel("minPct", [["3", "3% or more (any real gain)"], ["5", "5% or more"], ["10", "10% or more"], ["15", "15% or more"], ["20", "20% or more"], ["30", "30% or more"]])}</label>
+          <label class="field"><span>Only if that happens in at least</span>${sel("minCups", [["1", "1 cup (every cup counts)"], ["2", "2 cups"], ["3", "3 cups"], ["4", "4 cups"], ["5", "5 cups"]])}</label>
+        </div></details>
+        <div class="row-wrap">
         </div>
         <div class="row-wrap">
           ${box("selFree", "Free support selector")}
@@ -462,7 +473,7 @@
       const extra = drawn.filter((x) => !x.it.locked), fixed = drawn.filter((x) => x.it.locked);
       const lockedN = v.items.filter((it) => it.locked && it.kind !== "selector").length, picksN = v.items.filter((it) => it.locked && it.kind === "selector").length;
       const planSpent = steps.filter((s) => v.byKey.get(s.key).locked).reduce((a, s) => a + s.carats, 0);
-      const head = `<thead><tr><th>When</th><th>What</th><th class="num">Cost</th><th>You get</th><th>Clearly stronger in</th><th class="num">Carats left</th><th class="num">Adds</th></tr></thead>`;
+      const head = `<thead><tr><th>When</th><th>What</th><th class="num">Cost</th><th>You get</th><th>Stronger in</th><th class="num">Carats left</th><th class="num">Adds</th></tr></thead>`;
       const plural = (n, w) => n + " " + w + (n === 1 ? "" : "s");
       const fixedBanners = fixed.filter((x) => x.it.kind !== "selector").length, fixedPicks = fixed.length - fixedBanners;
       const fixedHTML = fixed.length ? `<details class="pull-fixed"${fixedOpen ? " open" : ""}><summary><b>Your fixed plan in the route</b> (${[fixedBanners ? plural(fixedBanners, "banner") : "", fixedPicks ? plural(fixedPicks, "Uma pick") : "", planSpent ? fmtN(planSpent) + " carats" : ""].filter(Boolean).join(", ")})</summary>
@@ -470,8 +481,8 @@
         <div class="table-wrap"><table>${head}<tbody>${fixed.map((x) => x.html).join("")}</tbody></table></div></details>` : "";
       const legend = drawn.length ? `<p class="mini">Spark for: the card the route pulls for, at its likely limit break (the spark plus the median pulled copies), with the chances of every other result. Comes with the pulls: the other featured cards' likely copies; they aren't why the route pulls there, but they count where they're clearly stronger. Next best here: the other picks on that selector and their points. Carats left: after that row and every row before it, your fixed plan's included. Adds: the expected points to your decks over every cup after the banner, counting only the clearly stronger ones (the deck score's units; 60 = 1 L of race skills).</p>` : "";
       const empty = fixed.length
-        ? `<div class="empty">Nothing outside your fixed plan makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats it leaves over, the selectors included. Mark your cards or relax the rules above.</div>`
-        : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks clearly stronger in ${esc(p.minCups)} or more cups for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`;
+        ? `<div class="empty">Nothing outside your fixed plan makes your decks ${esc(ruleText(p))} for the carats it leaves over, the selectors included. Mark your cards or relax the rules above.</div>`
+        : `<div class="empty">Nothing in the next ${esc(p.months)} months makes your decks ${esc(ruleText(p))} for the carats you'll have. Add your carats and income above, mark your cards, or relax the rules.</div>`;
       const table = extra.length
         ? `<div class="table-wrap"><table>${head}<tbody>${extra.map((x) => x.html).join("")}</tbody></table></div>${legend}${fixedHTML}`
         : `${empty}${fixedHTML}${legend}`;
@@ -485,8 +496,8 @@
           : `you'd have about ${fmtN(Math.max(0, left))} then, ${fmtN(need - Math.max(0, left))} short`}.</li>`;
       }).join("");
       const intro = result.budget
-        ? `Budget: your plan's carat estimates (about ${fmtN(have)} by ${esc(fmtDate(lastDate))} if you spent none). ${lockedN || picksN ? `Your fixed plan goes first: ${[lockedN ? `its ${plural(lockedN, "banner")}, each at its # Pulls in date order (free pulls before carats)` : "", picksN ? `your ${plural(picksN, "Uma selector pick")}` : ""].filter(Boolean).join(", and ")}, ${fmtN(planSpent)} carats, folded under the table. The table shows only what's outside it` : "The table"}: the selector picks left to the planner (the free and $20.99 support selectors, and any Uma selector you left blank) and the banners the carats ${lockedN || picksN ? "left over " : ""}go to, for making your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}): ${fmtN(spent - planSpent)} more carats, ${fmtN(spent)} in all.`
-        : `From ${fmtN(num(p.carats))} carats now and ${fmtN(num(p.perMonth))} a month${bonus ? `, plus ${fmtN(bonus)} from the $20.99 packs` : ""}, you'll have about ${fmtN(have)} by ${esc(fmtDate(result.until))}. This route spends ${fmtN(spent)} of them on the pulls that make your decks clearly stronger in the most cups per carat (at least ${esc(p.minPct)}% over the card replaced, in at least ${esc(p.minCups)} cup${+p.minCups === 1 ? "" : "s"}), in banner order so the carats are there at each one.`;
+        ? `Budget: your plan's carat estimates (about ${fmtN(have)} by ${esc(fmtDate(lastDate))} if you spent none). ${lockedN || picksN ? `Your fixed plan goes first: ${[lockedN ? `its ${plural(lockedN, "banner")}, each at its # Pulls in date order (free pulls before carats)` : "", picksN ? `your ${plural(picksN, "Uma selector pick")}` : ""].filter(Boolean).join(", and ")}, ${fmtN(planSpent)} carats, folded under the table. The table shows only what's outside it` : "The table"}: the selector picks left to the planner (the free and $20.99 support selectors, and any Uma selector you left blank) and the banners the carats ${lockedN || picksN ? "left over " : ""}go to, for the most deck gain per carat, added up over every cup (each gain counts when it's ${esc(ruleText(p))}): ${fmtN(spent - planSpent)} more carats, ${fmtN(spent)} in all.`
+        : `From ${fmtN(num(p.carats))} carats now and ${fmtN(num(p.perMonth))} a month${bonus ? `, plus ${fmtN(bonus)} from the $20.99 packs` : ""}, you'll have about ${fmtN(have)} by ${esc(fmtDate(result.until))}. This route spends ${fmtN(spent)} of them on the pulls with the most deck gain per carat, added up over every cup (each gain counts when it's ${esc(ruleText(p))}), in banner order so the carats are there at each one.`;
       return `<section class="panel pull-route">
         <h3>The route</h3>
         <p class="mini">${intro}${packs.length ? ` The ${packs.length} $20.99 pack${packs.length === 1 ? "" : "s"} in the window come to $${dollars.toFixed(2)}.` : ""}</p>
@@ -513,7 +524,7 @@
         ${any ? `<p class="mini">The picks anyway are planned together, the way the route plans: each one with the picks before it in your decks, so a card's next copy is worth what its next limit break adds (never past LB4), and a card that takes an earlier pick's spot is worth what it adds over that one. A card worth the same at an earlier or a later selector goes to the later one, leaving the earlier one for a card that helps sooner. Their points don't need your rules (any number of cups); "first" is the first cup it adds to.</p>` : ""}
         <ul class="mini">${rest.map((s) => {
         const f = s.kind === "support" ? sug.get(s.id) : null, first = f && f.from ? f.from.cup : null;
-        return `<li>${esc(est(s.event) + fmtDate(s.date))} ${esc(s.event.name)}, ${esc(s.label)}: no ${s.kind === "support" ? "card" : "uma"} makes your decks clearly stronger in ${esc(S().minCups)}+ cups from there.${f
+        return `<li>${esc(est(s.event) + fmtDate(s.date))} ${esc(s.event.name)}, ${esc(s.label)}: no ${s.kind === "support" ? "card" : "uma"} makes your decks ${esc(ruleText(S()))} from there.${f
           ? ` Best for your decks anyway: <b>${esc(cardName(f.id))}</b>, ${f.have ? lb(f.have) + " → " + lb(f.have + 1) : "new, LB0"} (+${fmtN(f.value)} points in ${f.cups} cup${f.cups === 1 ? "" : "s"}${first ? `; first ${esc(est(first.global) + fmtDate(first.global.start))} ${esc(first.name)}` : ""}).`
           : s.kind === "trainee" ? " Pick a team uma you still need." : s.kind === "support" ? " Nothing here adds to your decks, even rules aside." : ""}</li>`;
       }).join("")}</ul></details>`;
@@ -630,7 +641,7 @@
         <p><b>Your selector picks.</b> The Uma picks you've decided are taken first; every other pick is the planner's.</p>
         <p><b>Scenarios.</b> Each cup's decks are trained in the scenario Global is on by then (GameTora's forecast: ${(result ? result.v.eras : []).filter((e) => e.start).map((e) => esc(e.name) + " ~" + esc(fmtDate(e.start))).join(", ") || "Grand Masters from the 2nd Anniversary, then a new one every few months"}). Euophrys scores Grand Concert, Grand Masters and Design Your Island; for the others it has no preset, so they're estimated: the nearest preset's weights with the scenario's own friend (or group) SSR as its link card, at the bonus Euophrys gives Tucker Bryne in Design Your Island. That's what makes a scenario's friend card count, and only while its scenario lasts.</p>
         <p><b>Longevity.</b> A card counts in every cup after its banner up to the last forecast cup (mid-2029), and a cup a year ahead counts less by your fade (forecast uncertainty and newer cards).</p>
-        <p><b>Clearly stronger.</b> A banner card counts in a deck only when it beats the card it would replace (the "Which cards would improve it?" test, with the other five fixed) by your margin, at the limit break your copies reach. A card you'd otherwise borrow counts as yours, with the next-best friend's card. And only when that happens in enough different cups after its banner: a card you'd use once isn't one you pull for.</p>
+        <p><b>What counts.</b> A banner card counts in a deck when it beats the card it would replace (the "Which cards would improve it?" test, with the other five fixed) by 3% or more at the limit break your copies reach: smaller differences are within the deck scoring's error. A card you'd otherwise borrow counts as yours, with the next-best friend's card. Its gains are added up over every cup after its banner (far-off ones faded), so the route pulls where the total per carat is highest. <b>Stricter rules</b> can raise the margin or ask for several cups.</p>
         <p><b>200 or 400 pulls.</b> ${B ? B.meta.spark : 200} pulls give one spark (a featured card of your choice), so 200 pulls on an SSR's banner likely end at LB1 (the spark and one pulled copy), and 400 at LB4. A pull counts only when its likely result already clears your rules; its value is then the expected points over every result the pulls can give (with the sparks where they help most once you see the pulls), the other featured cards' copies included.</p>
         <p><b>Selectors.</b> At each anniversary (JP's campaigns, on Global's calendar: its 1.5 Anniversary was in July 2026), a free support selector and the $20.99 ones (support and Uma, each with 1,500 carats). The pool: the gacha SSRs (or 3★ umas) JP had about ${PV.POOL_LAG || 45} days before that anniversary. A pick is one copy, valued like a pulled one; it's taken before any carats are spent.</p>
         <p><b>Parents and supports on one scale.</b> A trainee counts as Parent 1 for your fixed team umas (yours to train; Parent 2 is a friend's rental): her sparks fire at their base chance × (1 + her affinity with the ace / 100) at the ace's two inspirations, carrying the ace's top 3 race whites and her inherited unique at 2★, and a 2★ pink spark where the ace lacks an A on the race (like El Condor Pasa's dirt B) and she has it. Blue sparks are left out: any parent can carry them. It's all in the same points as a deck card, so a trainee banner and a support banner compete for the same carats; "Every banner on one scale" shows them side by side. Same rules: clearly better than your best Parent 1 (your teams included), in enough cups. Future characters' affinity comes from JP's table.</p>
@@ -642,7 +653,7 @@
       const p = S();
       if (!B || !PV || !PP) { body.innerHTML = `<div class="empty">The banner data didn't load. Refresh the page.</div>`; return; }
       body.innerHTML = `<div class="pulls">
-        <section class="panel"><h2>Pull planner</h2><p class="mini">Your plan's banners at 400, and the best use of everything else (other banners, selector picks), so your teams' decks get clearly stronger in as many cups as your carats allow, through mid-2029. It builds your decks for every cup ahead from the cards you own, in the scenario of the time, and puts every support card and trainee on one scale, on the banners Global has announced and umacaratcalculator.com's timeline of the rest.</p></section>
+        <section class="panel"><h2>Pull planner</h2><p class="mini">Your plan's banners at 400, and the best use of everything else (other banners, selector picks), so your teams' decks gain the most your carats allow, added up over every cup through mid-2029. It builds your decks for every cup ahead from the cards you own, in the scenario of the time, and puts every support card and trainee on one scale, on the banners Global has announced and umacaratcalculator.com's timeline of the rest.</p></section>
         ${planHTML(p)}${picksHTML(p)}${budgetHTML(p)}${teamsHTML(p)}${controlsHTML(p)}${routeHTML(p)}${decksHTML()}${calendarHTML(p)}${howHTML()}
       </div>`;
       const fx = body.querySelector(".pull-fixed");
