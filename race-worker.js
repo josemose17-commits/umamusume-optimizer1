@@ -19,16 +19,28 @@ function readText(url) {
   return xhr.responseText;
 }
 self.addEventListener = (type, handler) => { if (type === "message") simulateMessage = handler; };
+const stamina = here.searchParams.has("stamina");
+self.umaHpDrain = 0;
 try {
-  if (sim) {
-    if (!/^[\w-]+$/.test(sim)) throw new Error("Unknown simulator variant.");
+  if (sim || stamina) {
+    if (sim && !/^[\w-]+$/.test(sim)) throw new Error("Unknown simulator variant.");
     importScripts("race-variants.js" + version);
-    const variant = JSON.parse(readText("data/race-variants/" + sim + ".json" + version));
-    (0, eval)(self.UmaRaceVariants.patch(readText("vendor/umalator-jp/simulator.worker.js" + version), variant));
+    const variants = self.UmaRaceVariants;
+    let source = readText((sim ? "vendor/umalator-jp" : "vendor/umalator") + "/simulator.worker.js" + version);
+    if (sim) source = variants.patch(source, JSON.parse(readText("data/race-variants/" + sim + ".json" + version)));
+    if (stamina) source = variants.patchHpDrain(source);
+    (0, eval)(source);
   } else importScripts("vendor/umalator/simulator.worker.js" + version);
 } catch (error) { loadError = error.message || String(error); }
 self.addEventListener = listen;
 listen("message", event => {
-  try { if (loadError) throw new Error(loadError); simulateMessage(event); self.postMessage({ type: "done" }); }
+  try {
+    if (loadError) throw new Error(loadError);
+    const drain = stamina ? event.data.data.hpDrain : 0;
+    if (!Number.isFinite(drain) || drain < 0 || drain >= 1) throw new Error("Invalid stamina drain.");
+    self.umaHpDrain = drain;
+    simulateMessage(event);
+    self.postMessage({ type: "done" });
+  }
   catch (error) { self.postMessage({ type: "error", error: error.message || String(error) }); }
 });

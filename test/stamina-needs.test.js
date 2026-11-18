@@ -64,3 +64,50 @@ test("comparison summaries report the paired SD and a 95% interval", () => {
   assert.ok(Math.abs(s.ci95 - 1.96 * Math.sqrt(5 / 3) / 2) < 1e-12);
   assert.equal(RS.summary([0]).ci95, 0);
 });
+
+test("automatic stamina sends the correct course and two-debuffer HP stress profile to the worker", () => {
+  const global = require("../data/race-skills.json");
+  const jp = require("../data/race-skills-jp.json");
+  for (const catalog of [global, jp]) {
+    for (const [id, percent] of [["cm21", 0], ["cm22", 10], ["cm23", 16], ["cm24", 12]]) {
+      const p = PRESETS.list.find(x => x.id === id);
+      assert.deepEqual(RS.staminaDebuffs(p, catalog), { opponents: percent ? 2 : 0, percent });
+      const input = { strategy: "Oikomi", speed: 1500, stamina: 750, power: 1240, guts: 850, wisdom: 1100, mood: 1 };
+      if (!catalog.courses[p.course.id]) continue;
+      const { msg, data } = RS.staminaRequest(p, input, catalog, percent, 120, 4242);
+      assert.equal(msg, "hpcalc");
+      assert.equal(data.hpDrain, percent / 100);
+      assert.equal(data.course.distance, p.course.distance);
+      assert.equal(data.racedef.groundCondition, p.racedef.ground);
+      for (const [k, v] of Object.entries(input)) assert.equal(data.uma[k], v);
+      assert.equal(data.uma.skills.size, 0);
+    }
+  }
+});
+
+test("automatic stamina uses the lowest 25-point step near the high-stamina spurt rate", async () => {
+  const p = PRESETS.list.find(x => x.id === "cm22"), catalog = require("../data/race-skills.json");
+  const result = await RS.staminaTarget(p, { strategy: "Nige", guts: 700 }, catalog, async ({ data }) => {
+    assert.equal(data.uma.strategy, "Nige");
+    assert.equal(data.uma.guts, 700);
+    assert.equal(data.hpDrain, 0.1);
+    return { results: { runData: { nspurt: data.uma.stamina < 681 ? 109 : 113 } } };
+  });
+  assert.equal(result.need, 700);
+  assert.equal(result.hits, 113);
+  assert.equal((await RS.staminaTarget(p, { strategy: "Nige" }, catalog, async () =>
+    ({ results: { runData: { nspurt: 40 } } }))).need, null);
+});
+
+test("automatic stamina is the deck target and moves the stamina shortfall in race scoring", () => {
+  const ura = SCENARIOS.find(s => s.id === "ura");
+  const raceValues = { ...OPT.raceValuesFor(require("../data/stat-curves.js"), "cm22", "Senkou"), staminaTarget: 825, staminaMargin: 0 };
+  const opts = { scenario: ura, build: "dirt", buildTarget: { stamina: 825 }, raceValues };
+  const ctx = OPT.buildCtx(opts), line = stamina => [1500, stamina, 1200, 700, 1100];
+  assert.equal(ctx.target.stamina, 825);
+  assert.ok(OPT.raceL(ctx, line(650)) < OPT.raceL(ctx, line(825)));
+  assert.equal(OPT.raceL(ctx, line(825)), OPT.raceL(ctx, line(950)));
+  const manual = OPT.buildCtx({ ...opts, target: { stamina: 900 } });
+  assert.equal(manual.target.stamina, 900);
+  assert.equal(manual.race, null);
+});

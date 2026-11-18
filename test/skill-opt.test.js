@@ -73,10 +73,10 @@ test('the JP worker is the pinned upstream build and every variant patches it', 
   });
 });
 
-function worker(sim) {
+function worker(sim, stamina = false) {
   let handler, last;
-  const sb = { URL, console: { assert() {}, log() {}, warn() {}, error() {} }, location: { href: 'http://localhost/race-worker.js?v=t' + (sim ? '&sim=' + sim : '') },
-    addEventListener: (t, f) => { handler = f; }, postMessage: (m) => { if (m.type === 'compare' || m.type === 'error') last = m; } };
+  const sb = { URL, console: { assert() {}, log() {}, warn() {}, error() {} }, location: { href: 'http://localhost/race-worker.js?v=t' + (sim ? '&sim=' + sim : '') + (stamina ? '&stamina=1' : '') },
+    addEventListener: (t, f) => { handler = f; }, postMessage: (m) => { if (['compare', 'hpcalc', 'error'].includes(m.type)) last = m; } };
   sb.self = sb;
   sb.XMLHttpRequest = function () { let u; this.open = (m, url) => { u = url; }; this.send = () => { this.status = 200; this.responseText = fs.readFileSync(path.join(ROOT, u.split('?')[0]), 'utf8'); }; };
   vm.createContext(sb);
@@ -84,6 +84,22 @@ function worker(sim) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'race-worker.js'), 'utf8'), sb);
   return (msg) => { last = null; handler({ data: msg }); return last; };
 }
+test('both pinned workers apply HP drain and clear it for the next race request', () => {
+  const p = P.list.find(x => x.id === 'cm22');
+  const input = { ...p.stats, strategy: 'Senkou', stamina: 625 };
+  for (const [sim, catalog] of [[null, require('../data/race-skills.json')], [SV.meta.sims.cm22, CJ]]) {
+    const run = worker(sim, true);
+    const spurts = percent => {
+      const answer = run(R.staminaRequest(p, input, catalog, percent, 24, 4242));
+      assert.equal(answer.type, 'hpcalc', answer.error);
+      return answer.results.runData.nspurt;
+    };
+    const normal = spurts(0);
+    assert.ok(spurts(10) < normal);
+    assert.equal(spurts(0), normal);
+  }
+});
+
 test('stamina showdown: stamina past 1200 gains lengths on League of Heroes 1, not without showdown', () => {
   const p = P.list.find((x) => x.id === 'loh1'), input = { ...p.stats, strategy: 'Senkou', outfitId: '100101' };
   const gain = (sim) => {

@@ -66,6 +66,7 @@
     for (let t = 1; t <= Math.max(last, 1); t++) if (!forced.has(t)) turns.push(t);
     const calendar = sc.id === "grandlive" ? grandConcertCalendar(opts) : null;
     if (calendar) { turns.length = 0; calendar.forEach(day => turns.push(day.turn)); }
+    const race = raceOn(opts, target, caps);
     const camp = new Set(E.campTurns(sc));
     const boost = sc.id === "grandlive" ? 1 : E.scenarioBoost({ fcal: [] }, sc);
     const t = opts.trainee ? D.trainee(opts.trainee) : null;
@@ -82,7 +83,7 @@
       available: (t ? [].concat(t.is || [], t.as || []) : []).map(String),
       // SP-limited skill purchases per simulated career (skill-budget.js): Grand Concert, and race
       // scoring in every scenario (stats and skills both in lengths).
-      skillBudget: (sc.id === "grandlive" || !!raceOn(opts, target)) && opts.skillBudget !== false,
+      skillBudget: (sc.id === "grandlive" || !!race) && opts.skillBudget !== false,
       coupledEvents: sc.id === "grandlive" && opts.coupledEvents !== false,
       runs: opts.runs || 10,
       seed: opts.seed || 12345,
@@ -94,7 +95,7 @@
       independent: !!opts.independent,
       // Race values (raceValuesFor): finished stats are scored in lengths on the cup's course
       // for her style, unless you typed your own targets (then the targets decide, as before).
-      race: raceOn(opts, target),
+      race,
       userTarget: !!(opts.target && STATS.some((s) => opts.target[s] > 0)),
     };
   }
@@ -103,8 +104,8 @@
   // Each stat's L across its range on the cup's course for her style, measured one stat at a time
   // in the race simulator (tools/build_stat_curves.js): no skills, Normal mood, against the cup's
   // stat line. Between grid points the value is a straight line; past the ends it continues the
-  // last segment (stamina stays flat past the top: a full spurt needs no more). Stamina is read
-  // STAMINA_MARGIN lower, the same allowance for opponents' stamina debuffs the race build uses.
+  // last segment. The CM deck aligns the stamina curve with its measured target; callers with
+  // only the reference curves can still supply a fixed margin.
   // The five are added up (checked against whole stat lines). Stamina-showdown cups were measured
   // on their JP-dated simulator, where stamina past a full spurt still counts (showdown). Cups
   // without course data have no curves (null): targets decide there.
@@ -115,14 +116,14 @@
     if (!v || v.status !== "ok" || !v.curves) return null;
     return { cup: cupId, style, curves: v.curves, need: v.base.need, showdown: !!v.showdown };
   }
-  // Race scoring is on with curves, no targets of yours, and a stamina target that covers her need
-  // for a full spurt (plus the margin). On long cups where it doesn't (the race build keeps the
-  // distance's stamina and asks for recovery skills), the curve can't see those heals, so a deck
-  // would be judged by a shortfall skills cover: targets decide there.
-  function raceOn(opts, target) {
+  // Use race scoring when the curves exist and the build can meet the spurt estimate.
+  // Explicit stat targets or a cap below the estimate use target fit instead.
+  function raceOn(opts, target, caps) {
     const r = opts.raceValues;
     if (!r || opts.target && STATS.some((s) => opts.target[s] > 0)) return null;
-    return r.need + STAMINA_MARGIN <= target.stamina + 1 ? r : null;
+    const need = r.staminaTarget ?? r.need + (r.staminaMargin ?? STAMINA_MARGIN);
+    const usable = r.staminaTarget == null ? target.stamina : Math.min(target.stamina, caps.stamina);
+    return need <= usable + 1 ? r : null;
   }
   function onCurve(pts, x, flatTop) {
     const n = pts.length;
@@ -141,9 +142,21 @@
       const x = Math.max(0, +stats[i] || 0);
       // Stamina stops counting past a full spurt, except with stamina showdown (JP-dated cups over
       // 2100 m), where its curve runs to 2000.
-      L += i === 1 ? onCurve(r.curves[1], x - STAMINA_MARGIN, !r.showdown || x - STAMINA_MARGIN >= r.curves[1][r.curves[1].length - 1][0]) : onCurve(r.curves[i], x, false);
+      L += i === 1 ? staminaL(r, x) : onCurve(r.curves[i], x, false);
     }
     return L;
+  }
+  function staminaL(r, raw) {
+    const curve = r.curves[1];
+    if (r.staminaTarget == null) {
+      return onCurve(curve, raw - (r.staminaMargin ?? STAMINA_MARGIN), true);
+    }
+    // Align the shortfall curve with the measured spurt threshold. Above it, keep the
+    // raw-stat showdown gains at their original stamina breakpoints.
+    const x = Math.min(raw, r.staminaTarget) - r.staminaTarget + r.need;
+    const showdown = r.showdown && raw > r.staminaTarget
+      ? onCurve(curve, raw, true) - onCurve(curve, r.staminaTarget, true) : 0;
+    return onCurve(curve, x, true) + showdown;
   }
   // The stat part of a deck's score from its simulated careers (s: simulate's result), with each
   // career's own value (for the noise check). Race values when the cup has them and you set no
