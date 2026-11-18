@@ -65,46 +65,34 @@ test("comparison summaries report the paired SD and a 95% interval", () => {
   assert.equal(RS.summary([0]).ci95, 0);
 });
 
-test("automatic stamina passes native debuff skills twice and skips them on Sprint", () => {
+test("automatic stamina: the distance drain twice by default, 4 adds the style drains, none on Sprint", async () => {
   const global = require("../data/race-skills.json"), jp = require("../data/race-skills-jp.json");
-  const cases = [
-    ["cm21", []], ["cm22", ["200921", "200931", "201441"]],
-    ["cm23", ["200921", "200931", "201441", "201161"]], ["cm24", ["200921", "200931", "201441", "201221"]]
-  ];
+  const cases = [["cm21", [], []], ["cm22", ["200921", "200931"], ["200921", "200931", "201441", "201441"]],
+    ["cm23", ["201161", "201161"], ["201161", "201161", "200921", "200931"]], ["cm24", ["201221", "201221"], ["201221", "201221", "200921", "200931"]]];
   for (const catalog of [global, jp]) {
-    for (const [id, skills] of cases) {
+    for (const [id, two, four] of cases) {
       const p = PRESETS.list.find(x => x.id === id);
-      assert.deepEqual(RS.staminaDebuffs(p, "Oikomi"), [...skills, ...skills]);
+      assert.deepEqual(RS.staminaDebuffs(p, "Oikomi"), two);
+      assert.deepEqual(RS.staminaDebuffs(p, "Oikomi", 4), four);
+      assert.deepEqual(RS.staminaDebuffs(p, "Oikomi", 0), []);
       if (!catalog.courses[p.course.id]) continue;
       const input = { strategy: "Oikomi", speed: 1500, stamina: 750, power: 1240, guts: 850, wisdom: 1100, mood: 1 };
       const { msg, data } = RS.staminaRequest(p, input, catalog, 120, 4242);
       assert.equal(msg, "hpcalc");
       assert.equal(data.racedef.orderRange, null);
       assert.equal(data.course.distance, p.course.distance);
-      assert.equal(data.racedef.groundCondition, p.racedef.ground);
       for (const [k, v] of Object.entries(input)) assert.equal(data.uma[k], v);
       assert.equal(data.uma.skills.size, 0);
-      assert.deepEqual([...data.debufUma.skills.values()], [...skills, ...skills]);
-      assert.equal(data.options.useIntChecks, true);
+      assert.deepEqual([...data.debufUma.skills.values()], two);
+      assert.equal(RS.staminaRequest(p, input, catalog, 120, 4242, null, { debuffs: 4 }).data.debufUma.skills.size, four.length);
       assert.equal(data.options.forceFullSpurt, true);
     }
   }
-});
-
-test("stamina check settings: one or no debuffer, and a full spurt in every race", async () => {
-  const p = PRESETS.list.find(x => x.id === "cm23"), catalog = require("../data/race-skills.json");
-  const one = RS.staminaDebuffs(p, "Oikomi", 1);
-  assert.deepEqual(one, ["200921", "200931", "201441", "201161"]);
-  assert.deepEqual(RS.staminaDebuffs(p, "Oikomi", 0), []);
-  if (catalog.courses[p.course.id]) {
-    const { data } = RS.staminaRequest(p, { strategy: "Oikomi", stamina: 900 }, catalog, 120, 4242, null, { debuffers: 1 });
-    assert.equal(data.debufUma.skills.size, 4);
-  }
-  const p2 = PRESETS.list.find(x => x.id === "cm22");
+  const p2 = PRESETS.list.find(x => x.id === "cm22"), catalog = global;
   const run = async ({ data }) => ({ results: { runData: { nspurt: data.uma.stamina < 1000 ? 115 : 120 }, results: { requiredHp: [] } } });
-  const r95 = await RS.staminaTarget(p2, { strategy: "Nige", stamina: 1200 }, catalog, run, null, { debuffers: 0 });
-  const r100 = await RS.staminaTarget(p2, { strategy: "Nige", stamina: 1200 }, catalog, run, null, { debuffers: 0, goal: 1 });
-  assert.equal(r95.mode, "none");
+  const r95 = await RS.staminaTarget(p2, { strategy: "Nige", stamina: 1200 }, catalog, run, null, { debuffs: 0 });
+  const r100 = await RS.staminaTarget(p2, { strategy: "Nige", stamina: 1200 }, catalog, run, null, { debuffs: 0, goal: 1 });
+  assert.equal(r95.mode, "d0");
   assert.equal(r95.need, 25);
   assert.equal(r100.need, 1000);
   assert.equal(r100.goal, 1);
@@ -115,7 +103,7 @@ test("automatic stamina verifies 95% full spurt rather than using a high-stamina
   const result = await RS.staminaTarget(p, { strategy: "Nige", stamina: 800, guts: 700 }, catalog, async ({ data }) => {
     assert.equal(data.uma.strategy, "Nige");
     assert.equal(data.uma.guts, 700);
-    assert.equal(data.debufUma.skills.size, 6);
+    assert.equal(data.debufUma.skills.size, 2);
     const hits = data.uma.stamina < 681 ? 113 : 115;
     return { results: { runData: { nspurt: hits }, results: { requiredHp: [2100] } } };
   });

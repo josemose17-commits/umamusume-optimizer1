@@ -89,14 +89,15 @@ test('both pinned workers simulate timed stamina skills from repeated debuff lis
   const input = { ...p.stats, strategy: 'Senkou', stamina: 575 };
   for (const [sim, catalog] of [[null, require('../data/race-skills.json')], [SV.meta.sims.cm22, CJ]]) {
     const run = worker(sim);
-    const req = R.staminaRequest(p, input, catalog, 48, 4242);
+    const req = R.staminaRequest(p, input, catalog, 48, 4242, null, { debuffs: 4 });
     const stressed = run(req);
     assert.equal(stressed.type, 'hpcalc', stressed.error);
     assert.equal(stressed.results.results.requiredHp.length, 48);
     req.data.debufUma.skills.clear();
     const normal = run(req);
     assert.equal(normal.type, 'hpcalc', normal.error);
-    assert.ok(stressed.results.runData.nspurt < normal.results.runData.nspurt);
+    const mean = (r) => r.results.results.requiredHp.reduce((x, y) => x + y, 0) / r.results.results.requiredHp.length;
+    assert.ok(mean(stressed) > mean(normal) + 20, 'repeated drains raise the HP she needs');
   }
 });
 

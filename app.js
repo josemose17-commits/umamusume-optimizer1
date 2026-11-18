@@ -2686,7 +2686,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffers || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2825,9 +2825,10 @@
       surfaceAptitude: apt.surfaceAptitude || grades[p.course.surface === "Dirt" ? 1 : 0] || "A",
       strategyAptitude: apt.strategyAptitude || grades[6 + STYLES.findIndex(([style]) => style === c.style)] || "A" };
   }
-  // Your stamina check settings: debuffers in the field (2 by default: a finals worst case; 1 is
-  // closer to an average CM lobby) and the share of races with a full spurt (95% or 100%).
-  const staminaOpts = (c) => ({ debuffers: c.staminaDebuffers === "0" ? 0 : c.staminaDebuffers === "1" ? 1 : 2, goal: c.staminaGoal === "1" ? 1 : 0.95 });
+  // Your stamina check settings: the debuff skills she faces (2 by default: the cup's distance
+  // drain twice; 4 adds the two aimed at her style; or none) and the share of races with a full
+  // spurt (95% or 100%).
+  const staminaOpts = (c) => ({ debuffs: c.staminaDebuffs === "0" ? 0 : c.staminaDebuffs === "4" ? 4 : 2, goal: c.staminaGoal === "1" ? 1 : 0.95 });
   function staminaEntry(p, c, tid = deckTrainee("cm")) {
     const setup = linkedStamina(p, c), input = staminaInput(p, c, tid, setup), opts = staminaOpts(c), key = JSON.stringify([p.id, input, setup, opts]);
     if (staminaCache.has(key)) return staminaCache.get(key);
@@ -2859,7 +2860,7 @@
     const style = esc(STYLE_NAME[c.style] || c.style);
     if (!result) return `Calculating stamina for ${style}…`;
     if (result.unavailable) return `Automatic stamina is unavailable. ${esc(result.unavailable)} Using the distance default unless you enter a target.`;
-    const pressure = { two: "two debuffers", one: "one debuffer", none: "no debuffers", link: "linked Umalator setup", sprint: "Sprint, no debuffs" }[result.mode];
+    const pressure = { d2: "2 debuff skills", d4: "4 debuff skills", d0: "no debuff skills", link: "linked Umalator setup", sprint: "Sprint, no debuffs" }[result.mode];
     const goalText = result.goal === 1 ? "goal: every race" : "goal: 95% of races";
     const cap = E.capsFor(state, scenario()).stamina;
     const override = c.targets?.stamina > 0 ? ` · deck uses your ${+c.targets.stamina} override` : "";
@@ -3120,11 +3121,11 @@
       ${host === "parents" ? `<span class="mini"><b>Target stats</b> (optional): the search swaps cards to get her closer. <b>Blue spark targets</b> aims every stat at 1100 for 3★ blue sparks.</span><details class="pred-help"><summary>More on targets</summary>` : ""}
       <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       ${host === "parents" ? "</details>" : ""}
-      ${stamina ? `<p class="mini" id="cmStaminaEstimate" data-stamina-key="${esc(stamina.key)}" role="status">${staminaNote(c, stamina.result)}</p><div class="row-wrap"><label class="field"><span>Stamina debuffers</span><select data-cm="staminaDebuffers"><option value="2"${staminaOpts(c).debuffers === 2 ? " selected" : ""}>Two (finals worst case)</option><option value="1"${staminaOpts(c).debuffers === 1 ? " selected" : ""}>One (an average CM lobby)</option><option value="0"${staminaOpts(c).debuffers === 0 ? " selected" : ""}>None</option></select></label><label class="field"><span>Full spurt in</span><select data-cm="staminaGoal"><option value="0.95"${staminaOpts(c).goal === 1 ? "" : " selected"}>95% of races</option><option value="1"${staminaOpts(c).goal === 1 ? " selected" : ""}>Every race (more stamina)</option></select></label></div><p class="mini">Tries for a full spurt in that share of races on this track in her style, against those debuffers (none on Sprint). Uses the final stats you enter in Skills for this build, else her deck's predicted stats, else your targets; Normal mood (a safe check: Great mood can't be counted on); no recovery skills in the default setup. Enter a stamina target to override.</p>
+      ${stamina ? `<p class="mini" id="cmStaminaEstimate" data-stamina-key="${esc(stamina.key)}" role="status">${staminaNote(c, stamina.result)}</p><div class="row-wrap"><label class="field"><span>Stamina debuff skills</span><select data-cm="staminaDebuffs"><option value="2"${staminaOpts(c).debuffs === 2 ? " selected" : ""}>2: the distance drain twice (Mile: two aimed at her style)</option><option value="4"${staminaOpts(c).debuffs === 4 ? " selected" : ""}>4: plus two more</option><option value="0"${staminaOpts(c).debuffs === 0 ? " selected" : ""}>None</option></select></label><label class="field"><span>Full spurt in</span><select data-cm="staminaGoal"><option value="0.95"${staminaOpts(c).goal === 1 ? "" : " selected"}>95% of races</option><option value="1"${staminaOpts(c).goal === 1 ? " selected" : ""}>Every race (more stamina)</option></select></label></div><p class="mini">Tries for a full spurt in that share of races on this track in her style, against those debuff skills (none on Sprint). Uses the final stats you enter in Skills for this build, else her deck's predicted stats, else your targets; Normal mood (a safe check: Great mood can't be counted on); no recovery skills in the default setup. Enter a stamina target to override.</p>
         <details class="pred-help"${linked ? " open" : ""}><summary>Stamina setup${linked ? " · Umalator link loaded" : ""}</summary>
-          <p class="mini">Default: the debuffers you pick above, each with a debuffer's drain skills aimed at her style, sampled activation and timing. The simulator approximates rival positions. Sprint skips debuffs.</p>
+          <p class="mini">Default: the debuff skills you pick above (2: Mystifying Murmur twice on Medium, Stamina Siphon twice on Long; 4 adds the two drains aimed at her style. Mile has no distance drain, so its 2 are the drains aimed at her style and 4 adds All-Seeing Eyes twice), with sampled activation and timing. The simulator approximates rival positions. Sprint skips debuffs.</p>
           <div class="row-wrap"><label class="field grow"><span>Compare with a Global Umalator stamina link</span><input id="cmStaminaLink" type="url" placeholder="Paste the Copy link URL" autocomplete="off"></label>
-          <button type="button" class="btn ghost small" id="cmStaminaImport">Use link</button>${linked ? '<button type="button" class="btn ghost small" id="cmStaminaReset">Use default debuffers</button>' : ""}</div></details>` : ""}
+          <button type="button" class="btn ghost small" id="cmStaminaImport">Use link</button>${linked ? '<button type="button" class="btn ghost small" id="cmStaminaReset">Use the default debuff skills</button>' : ""}</div></details>` : ""}
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${stamina && s === "stamina" ? staminaPlaceholder(p, stamina.result) : bt[s]}"></label>`).join("")}</div>
       ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
       ${concertSettingsHTML(c)}
@@ -3400,7 +3401,7 @@
       // Your Pull planner team for the cup's track, as the planner races it there: the 2 of your 3
       // umas worth the most on that cup (no two in one running style when another fits), then the
       // flex slot's best other uma of yours. [{ tid, style }], umas you have only.
-      // The stamina check for the ace CM & decks has open (her track, style, stats, two debuffers;
+      // The stamina check for the ace CM & decks has open (her track, style, stats, the debuff skills you pick;
       // none on Sprint): its line, or null off a racing deck. onReady runs once it's worked out.
       staminaSummary: (onReady) => {
         const c = cm("cm"), p = c && c.goal === "race" ? presetById(c.preset) : null;
