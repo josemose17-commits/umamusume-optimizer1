@@ -52,8 +52,11 @@
       uma1: horse(input, before, catalog), uma2: horse(input, after, catalog),
       options: { seed, usePosKeep: true, useCompeteTop: true, useIntChecks: true } } };
   }
-  function runner(sim) {
-    const worker = new Worker("race-worker.js" + version + (sim ? (version ? "&" : "?") + "sim=" + encodeURIComponent(sim) : ""));
+  function runner(sim, stamina = false) {
+    const query = new URLSearchParams(version);
+    if (sim) query.set("sim", sim);
+    if (stamina) query.set("stamina", "1");
+    const worker = new Worker("race-worker.js?" + query);
     let pending = null;
     worker.onmessage = ({ data }) => {
       if (!pending) return;
@@ -69,6 +72,44 @@
   // kind "jp": the JP worker's skills and courses (JP-dated cups); else Global's.
   const load = (kind) => { const file = kind === "jp" ? "data/race-skills-jp.json" : "data/race-skills.json";
     return catalogs[file] || (catalogs[file] = fetch(file + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { delete catalogs[file]; throw e; })); };
+  // Two debuffers, all listed effects land: Subdued + Flustered (1% each),
+  // All-Seeing Eyes (3%), plus the distance-specific gold. Sprint opts out.
+  function staminaDebuffs(preset, catalog) {
+    const distance = preset.course.dist;
+    const ids = { Mile: ["201441"], Medium: ["201441", "201161"], Long: ["201441", "201221"] }[distance];
+    if (!ids) return { opponents: 0, percent: 0 };
+    const drain = id => -catalog.skills[id].alternatives[0].effects.find(e => e.type === 9 && e.modifier < 0 && e.target !== 1).modifier / 100;
+    return { opponents: 2, percent: 2 * ["200831", "200841", ...ids].reduce((sum, id) => sum + drain(id), 0) };
+  }
+
+  function staminaRequest(preset, input, catalog, percent, samples, seed) {
+    const { data } = request(preset, input, [], [], catalog, samples, seed);
+    const { uma1, uma2, course, racedef, options } = data;
+    return { msg: "hpcalc", data: { nsamples: samples, course, racedef, uma: uma1, debufUma: uma2,
+      options: { ...options, forceFullSpurt: false }, hpDrain: percent / 100 } };
+  }
+
+  async function staminaTarget(preset, input, catalog, run) {
+    const profile = staminaDebuffs(preset, catalog);
+    const samples = 120, step = 25, seed = 4242, high = 3000;
+    const spurt = async stamina => {
+      const answer = await run(staminaRequest(preset, { ...input, stamina }, catalog, profile.percent, samples, seed));
+      const hits = answer.results.runData.nspurt;
+      if (!Number.isInteger(hits) || hits < 0 || hits > samples) throw new Error("Invalid full-spurt count.");
+      return hits;
+    };
+    const top = await spurt(high);
+    if (top < samples / 2) return { ...profile, need: null, top, samples, high };
+    // Within two percentage points of the high-stamina reference, using the same rolls.
+    const goal = Math.ceil(top - samples * 0.02);
+    let lo = 1, hi = high / step, hits = top;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2), count = await spurt(mid * step);
+      if (count >= goal) { hi = mid; hits = count; } else lo = mid + 1;
+    }
+    return { ...profile, need: lo * step, hits, top, samples, high };
+  }
+
   const DUEL_RACES = 240, DUEL_SEED = 161803, CONFIRM_SEED = 577215, PRUNE_SEED = 141421;
   async function optimize(o) {
     const learned = ids(o.learned), values = Object.assign({}, o.values), excluded = [];
@@ -283,6 +324,6 @@
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
       evaluations: calls, failedSets, method, learned, duel, pruned, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
-  const api = { summary, supported, engine, horse, request, runner, load, optimize };
+  const api = { summary, supported, engine, horse, request, runner, load, staminaDebuffs, staminaRequest, staminaTarget, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;
 })(typeof window !== "undefined" ? window : globalThis);

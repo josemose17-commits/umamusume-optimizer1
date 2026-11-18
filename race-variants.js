@@ -45,7 +45,14 @@
     const body = src.slice(0, l.skills[0]) + (over ? 'Object.assign(' + src.slice(l.skills[0], l.skills[1]) + ',' + JSON.stringify(over) + ')' : src.slice(l.skills[0], l.skills[1])) + src.slice(l.skills[1]);
     return patchCode(body, v);
   }
-  const api = { locate, patch, patchCode, objectAt };
+  // Apply the declared HP stress test before movement. This is shared by both pinned
+  // workers and leaves raw Stamina intact for course bonuses and stamina showdown.
+  function patchHpDrain(src) {
+    const init = "this.hp=this.maxHp,this.gutsModifier";
+    if (src.split(init).length !== 2) throw new Error("This race simulator cannot apply the stamina stress test.");
+    return src.replace(init, "this.hp=this.maxHp*(1-self.umaHpDrain),this.gutsModifier");
+  }
+  const api = { locate, patch, patchCode, patchHpDrain, objectAt };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.UmaRaceVariants = api;
 })(typeof self !== 'undefined' ? self : typeof window !== 'undefined' ? window : globalThis);
