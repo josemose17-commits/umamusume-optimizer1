@@ -91,6 +91,25 @@ test("automatic stamina passes native debuff skills twice and skips them on Spri
   }
 });
 
+test("stamina check settings: one or no debuffer, and a full spurt in every race", async () => {
+  const p = PRESETS.list.find(x => x.id === "cm23"), catalog = require("../data/race-skills.json");
+  const one = RS.staminaDebuffs(p, "Oikomi", 1);
+  assert.deepEqual(one, ["200921", "200931", "201441", "201161"]);
+  assert.deepEqual(RS.staminaDebuffs(p, "Oikomi", 0), []);
+  if (catalog.courses[p.course.id]) {
+    const { data } = RS.staminaRequest(p, { strategy: "Oikomi", stamina: 900 }, catalog, 120, 4242, null, { debuffers: 1 });
+    assert.equal(data.debufUma.skills.size, 4);
+  }
+  const p2 = PRESETS.list.find(x => x.id === "cm22");
+  const run = async ({ data }) => ({ results: { runData: { nspurt: data.uma.stamina < 1000 ? 115 : 120 }, results: { requiredHp: [] } } });
+  const r95 = await RS.staminaTarget(p2, { strategy: "Nige", stamina: 1200 }, catalog, run, null, { debuffers: 0 });
+  const r100 = await RS.staminaTarget(p2, { strategy: "Nige", stamina: 1200 }, catalog, run, null, { debuffers: 0, goal: 1 });
+  assert.equal(r95.mode, "none");
+  assert.equal(r95.need, 25);
+  assert.equal(r100.need, 1000);
+  assert.equal(r100.goal, 1);
+});
+
 test("automatic stamina verifies 95% full spurt rather than using a high-stamina relative threshold", async () => {
   const p = PRESETS.list.find(x => x.id === "cm22"), catalog = require("../data/race-skills.json");
   const result = await RS.staminaTarget(p, { strategy: "Nige", stamina: 800, guts: 700 }, catalog, async ({ data }) => {
