@@ -80,7 +80,7 @@
   //      [{ id, style, rotate }] (rotate: a flex slot, a fresh uma of yours each cup; its id, if
   //      any, is an uma you'll have) }, owned: { cardId: lb }, umas: Set of trainee ids you own,
   //      yours: Map(trainee id → date) (umas your plan gets, from then), lockedPicks: Map(selector
-  //      id → trainee or card id) (selector picks you've decided), minCups (2), minPct (0.1), parents (true), fade (share
+  //      id → trainee or card id) (selector picks you've decided), minCups (1), minPct (0.03: every real gain, added up), parents (true), fade (share
   //      of value lost a year ahead, 0), selectors: { free, paid, uma } (all true),
   //      locked: Map(banner id → { level, free, target }) (banners you'll pull no matter what, at
   //      that level, with that banner's free pulls and the card you'd spark when nothing else
@@ -183,8 +183,8 @@
     const card = (id) => D.card(id);
     const trainee = (id) => D.trainee(id);
     const spark = (B.meta && B.meta.spark) || 200;
-    const minCups = Math.max(1, o.minCups != null ? +o.minCups : 2);
-    const minPct = Math.max(0, o.minPct != null ? +o.minPct : 0.1);
+    const minCups = Math.max(1, o.minCups != null ? +o.minCups : 1);
+    const minPct = Math.max(0, o.minPct != null ? +o.minPct : 0.03);
     const parentsOn = o.parents !== false;
     const fade = Math.min(0.9, Math.max(0, +o.fade || 0));
     const sel = Object.assign({ free: true, paid: true, uma: true }, o.selectors || {});

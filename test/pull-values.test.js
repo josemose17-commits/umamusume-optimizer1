@@ -98,7 +98,7 @@ test("your decks now: six cards each, kept as they were before the route", () =>
   assert.ok(free.length > 0 && free.every((id) => v.poolFor(late).some((c) => c.id === id && c.lb === 4)), "the free event SSRs are in your cards for the deck, at LB4");
 });
 
-test("a card counts only where it's clearly stronger, in enough cups; a banner only if its likely result is", () => {
+test("a card counts where it beats the card it replaces (3%+ by default, stricter if you ask); a banner only if its likely result does", () => {
   const v = prepared();
   const sup = v.items.filter((it) => it.kind === "support");
   const vals = sup.map((it) => ({ it, v1: v.value(it.key, 1), v2: v.value(it.key, 2) }));
@@ -108,7 +108,7 @@ test("a card counts only where it's clearly stronger, in enough cups; a banner o
   const strict = make({ minPct: 0.3, minCups: 3, reuse: v });
   strict.pairs.forEach((pair) => strict.buildPair(pair));
   strict.prepare();
-  const loose = make({ minPct: 0.05, minCups: 1, reuse: v });
+  const loose = make({ minPct: 0.01, minCups: 1, reuse: v });
   loose.pairs.forEach((pair) => loose.buildPair(pair));
   loose.prepare();
   assert.deepEqual(strict.pairs.map((p) => p.base.map((c) => c.id)), v.pairs.map((p) => p.base.map((c) => c.id)), "reused decks");
@@ -121,7 +121,7 @@ test("a card counts only where it's clearly stronger, in enough cups; a banner o
   const zero = vals.find((x) => x.v1 === 0 && x.v2 > 0);
   if (zero) {
     const r = v.review(zero.it.key);
-    assert.ok(r.cards.some((c) => c.clear >= 2), "clear at LB4 in two cups, not at LB1");
+    assert.ok(r.cards.some((c) => c.clear >= 1), "clear at LB4 in a cup, not at LB1");
   }
 });
 
@@ -470,4 +470,18 @@ test("styleFor: the style worth most on the cup, avoiding a teammate's style", (
   assert.equal(PV.styleFor(cup, t, ["Senkou"], UV).style, "Sasi");
   // No values for the cup: her best style grade.
   assert.equal(PV.styleFor(cup, t, [], null).style, "Senkou");
+});
+
+test("the default counts every real gain (3%+, any cup): never less than the old 10% in 2 cups", () => {
+  const v = prepared();
+  const old = make({ minPct: 0.1, minCups: 2, reuse: v });
+  old.pairs.forEach((pair) => old.buildPair(pair));
+  old.prepare();
+  let more = 0;
+  v.items.filter((it) => it.kind === "support").forEach((it) => {
+    const now = v.value(it.key, 2), was = old.value(it.key, 2);
+    assert.ok(now >= was - 1e-6, it.key);
+    if (now > was + 1e-6) more++;
+  });
+  assert.ok(more > 0, "some banner the old bar ignored now counts");
 });
