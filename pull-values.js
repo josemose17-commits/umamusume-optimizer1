@@ -155,6 +155,15 @@
     return TL.coreFor(cup, pool, k).map((c) => ({ tid: c.t.id, style: c.style, value: c.noValue ? null : c.v }));
   }
 
+  // One uma's running style on a cup, as the team picks it: the style worth the most lengths
+  // there, avoiding a style a teammate already runs when another fits (taken: [style]).
+  // → { style, value } (value null without measured values: her best style grade on the cup).
+  function styleFor(cup, t, taken, UV) {
+    const TL = teamLogic(UV), used = new Set(taken || []);
+    const ops = TL.optionsFor(t, cup, null).map((op) => Object.assign({}, op, { s: op.v - (used.has(op.style) ? TL.SAME_STYLE : 0) })).sort((a, b) => b.s - a.s);
+    return ops.length ? { style: ops[0].style, value: ops[0].noValue ? null : ops[0].v } : null;
+  }
+
   // The flex pick for one cup: your best other uma there (ids: yours), in a style the core picks
   // don't run when one fits. → { tid, style, value } or null.
   function flexPick(cup, ids, core, UV, D) {
@@ -1309,7 +1318,7 @@
     return { locked, freePulls, yours, lockedPicks, budget, done: new Set(Object.keys(done).concat(rows.filter((x) => rowDone(x, today, done)).map(rowKey))) };
   }
 
-  const api = { create, teamPick, flexPick, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
+  const api = { create, teamPick, flexPick, styleFor, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaPullValues = api;
 })(typeof window !== "undefined" ? window : globalThis);

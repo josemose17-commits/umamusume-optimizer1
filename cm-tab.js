@@ -393,6 +393,15 @@
     };
 
     // ---------- CM & decks: the cup and your team ----------
+    // Her stamina need for this track and style (two debuffers, none on Sprint), from the race
+    // simulator; redrawn once it's worked out.
+    let staminaWait = null;
+    function staminaLine() {
+      const html = ctx.staminaSummary(() => { if (staminaWait) { staminaWait = null; ctx.rerender(); } });
+      if (!html) return "";
+      staminaWait = /Calculating/.test(html) ? true : null;
+      return `<p class="mini cmp-stamina" role="status">Her stamina check: ${html}</p>`;
+    }
     function teamHTML() {
       const c = st();
       aces(c);
@@ -414,6 +423,7 @@
       const team = ctx.pullTeam(p).filter((m) => ctx.myUmas().has(+m.tid));
       return `<label class="field grow"><span>Champions Meeting or League of Heroes</span><select id="cmpCup">${cupOpts}</select></label>
         <div class="row-wrap cmp-chips" aria-label="Your team"><span class="mini"><b>Your team</b> (up to ${MAX_ACES}; the deck below is for the one picked)</span>${chips}${list.length < MAX_ACES ? `<button type="button" class="btn ghost small" id="cmpAddAce"${mine.length ? "" : " disabled"}>+ Add an ace</button>` : ""}${team.length ? `<button type="button" class="linkish" id="cmpTeam">Use my Pull planner team</button>` : ""}</div>${editor}
+        ${selected && ctx.staminaSummary ? staminaLine() : ""}
         ${!mine.length ? `<p class="mini">Your team comes from My umas: tick them in the Trainees tab, or import your umaextractor export in <button type="button" class="linkish" data-goto-tab="parents" data-goto-section="import">Parents</button>.</p>` : ""}`;
     }
 
@@ -468,7 +478,7 @@
         return `<tr${left[i] ? "" : ' class="cmp-cut"'}><td>${l}</td><td class="num">${pred.target[i]}</td><td class="num">${pred.stats[i]}</td><td class="num ${g ? "short" : ""}">${g ? "−" + g : "+" + (pred.stats[i] - pred.target[i])}</td>${give ? `<td class="num">${give[i] >= 1 ? "+" + fmtN(give[i]) : "—"}</td>` : ""}<td>${picks.length ? picks.map((p) => `${esc(p.who)} ~+${fmtN(p.add)}`).join("<br>") : "—"}</td><td class="num ${after[i] > ROLL ? "short" : ""}">${after[i] > ROLL ? "−" + after[i] : after[i] ? `≈ ✓ <span class="mini">(−${after[i]})</span>` : g ? "✓" : "—"}</td></tr>`;
       }).join("");
       const who = r && r.p1 ? familyWho(r) : "";
-      return `<div class="table-wrap"><table class="plan cmp-gaps"><thead><tr><th>Stat</th><th class="num">Target</th><th class="num">Predicted</th><th class="num">Gap</th>${give ? '<th class="num">Her family gives</th>' : ""}<th>Blue you can still pick</th><th class="num">Still short</th></tr></thead><tbody>${rows}</tbody></table></div>
+      return (ctx.staminaSummary ? staminaLine() : "") + `<div class="table-wrap"><table class="plan cmp-gaps"><thead><tr><th>Stat</th><th class="num">Target</th><th class="num">Predicted</th><th class="num">Gap</th>${give ? '<th class="num">Her family gives</th>' : ""}<th>Blue you can still pick</th><th class="num">Still short</th></tr></thead><tbody>${rows}</tbody></table></div>
         <p class="mini">${plan.picks.length ? `<b>${plan.exact ? "✓ These close every gap" : plan.closed ? "✓ These close every gap (≈: within one inspiration roll)" : "Closes the most it can"}:</b> ${plan.text}.${plan.closed ? "" : ` Still short after them: ${after.map((v, i) => v > ROLL ? F.STAT_LABELS[i] + " −" + v : "").filter(Boolean).join(", ")}; a stronger deck in CM &amp; decks or lower targets would close the rest.`}` : gaps.some(Boolean) && after.some((v) => v > ROLL) ? "<b>No blue left to pick</b>: every borrowed slot is filled." : gaps.some(Boolean) ? "<b>✓ Her family closes every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}Only the umas you borrow have a blue you choose (one each); the parent you train gets a random stat.</p>`;
     }
     // The blue sparks you still choose, split to leave the least short: the grandparent's own
@@ -1030,7 +1040,11 @@
         const list = aces(c), i = +ds.cmpAce, tid = t.value ? +t.value : null;
         if (!tid) list.splice(i, 1);
         else if (list.some((x, j) => j !== i && trainee(x.tid).cid === trainee(tid).cid)) { ctx.flash("She's already on the team."); ctx.rerender(); return true; }
-        else { list[i] = { tid, style: bestStyle(trainee(tid)) }; c.sel[c.cup] = tid; editAce = null; }
+        else {
+          // The style worth most on this track, not one teammates already run (the team's rule).
+          const pick = ctx.styleFor && ctx.styleFor(cup(c), tid, list.filter((x, j) => x && j !== i).map(styleOf));
+          list[i] = { tid, style: (pick && pick.style) || bestStyle(trainee(tid)) }; c.sel[c.cup] = tid; editAce = null;
+        }
         c.byCup[c.cup] = list.filter(Boolean);
         ctx.save(); ctx.rerender();
         return true;
