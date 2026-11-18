@@ -73,14 +73,15 @@
     return catalogs[file] || (catalogs[file] = fetch(file + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { delete catalogs[file]; throw e; })); };
   const STAMINA_STYLES = ["Nige", "Senkou", "Sasi", "Oikomi"];
   const HP_FACTORS = { Nige: 0.95, Senkou: 0.89, Sasi: 1, Oikomi: 0.995 };
-  function staminaDebuffs(preset, strategy) {
-    if (preset.course.dist === "Sprint") return [];
+  // The drains a field's debuffers aim at her (copies: how many debuffers, 0 to 2; none on Sprint).
+  function staminaDebuffs(preset, strategy, copies = 2) {
+    if (preset.course.dist === "Sprint" || !(copies > 0)) return [];
     const wards = { Nige: ["200831", "200841"], Senkou: ["200861", "200871"],
       Sasi: ["200891", "200901"], Oikomi: ["200921", "200931"] };
     const distanceSkills = { Medium: ["201161"], Long: ["201221"] };
     const skills = [...wards[strategy], "201441", ...(distanceSkills[preset.course.dist] || [])];
     // The stamina calculator accepts duplicate debuff skills, like Umalator's UI.
-    return skills.concat(skills);
+    return copies >= 2 ? skills.concat(skills) : skills;
   }
 
   function staminaHorse(input, catalog, skills = []) {
@@ -95,11 +96,12 @@
     return build;
   }
 
-  function staminaRequest(preset, input, catalog, samples, seed, setup) {
+  // o: { debuffers: 0-2 (default 2) } for the default setup; a linked setup brings its own.
+  function staminaRequest(preset, input, catalog, samples, seed, setup, o = {}) {
     const { data: { course, racedef, options } } = request(preset, input, [], [], catalog, samples, seed);
     const sprint = preset.course.dist === "Sprint";
     const debuffer = setup?.debuffer || { ...input, strategy: "Sasi", strategyAptitude: "A", wisdom: 1100, mood: 0, outfitId: "" };
-    const effects = sprint ? [] : setup ? debuffer.skills : staminaDebuffs(preset, input.strategy);
+    const effects = sprint ? [] : setup ? debuffer.skills : staminaDebuffs(preset, input.strategy, o.debuffers == null ? 2 : o.debuffers);
     if (setup || preset.kind !== "loh") racedef.orderRange = null; // Upstream CM stamina calculator.
     return { msg: "hpcalc", data: { nsamples: samples, course, racedef,
       uma: staminaHorse(input, catalog, setup?.ace.skills), debufUma: staminaHorse(debuffer, catalog, effects),
@@ -115,12 +117,13 @@
     return Number.isFinite(stamina) ? Math.max(1, Math.round(stamina)) : null;
   }
 
-  async function staminaTarget(preset, input, catalog, run, setup) {
+  // o: { debuffers: 0-2 (default 2), goal: share of races with a full spurt (default 0.95) }.
+  async function staminaTarget(preset, input, catalog, run, setup, o = {}) {
     const samples = setup?.samples || 120, step = 25, seed = setup?.seed ?? 4242, high = 3000;
-    const goal = Math.ceil(samples * 0.95), tested = new Map();
+    const share = o.goal === 1 ? 1 : 0.95, goal = Math.ceil(samples * share - 1e-9), tested = new Map();
     const race = async stamina => {
       if (tested.has(stamina)) return tested.get(stamina);
-      const answer = await run(staminaRequest(preset, { ...input, stamina }, catalog, samples, seed, setup));
+      const answer = await run(staminaRequest(preset, { ...input, stamina }, catalog, samples, seed, setup, o));
       const hits = answer.results.runData.nspurt;
       if (!Number.isInteger(hits) || hits < 0 || hits > samples) throw new Error("Invalid full-spurt count.");
       const result = { hits, estimate: staminaEstimate(answer.results.results.requiredHp, input.strategy, preset.course.distance) };
@@ -129,7 +132,7 @@
     };
     const at = Math.max(1, Math.min(high, input.stamina || preset.stats.stamina)), initial = await race(at);
     const output = { samples, high, at, atHits: initial.hits, estimate: initial.estimate,
-      mode: preset.course.dist === "Sprint" ? "sprint" : setup ? "link" : "two" };
+      mode: preset.course.dist === "Sprint" ? "sprint" : setup ? "link" : ["none", "one", "two"][o.debuffers == null ? 2 : o.debuffers], goal: share };
     let lo = 1, hi = high / step;
     // The linked or entered stat and the upstream estimate narrow the search.
     if (initial.hits >= goal) hi = Math.max(lo, Math.ceil(at / step));
