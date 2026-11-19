@@ -15,6 +15,17 @@
   const SkillEvents = root.UmaSkillEvents || (typeof require !== "undefined" ? require("./skill-events.js") : null);
   const SkillBudget = root.UmaSkillBudget || (typeof require !== "undefined" ? require("./skill-budget.js") : null);
   const SupportEvents = root.UmaSupportEvents || (typeof require !== "undefined" ? require("./support-events.js") : null);
+  const GMs = root.UmaGrandMasters || (typeof require !== "undefined" ? require("./grand-masters.js") : null);
+  // Grand Masters (GameTora's scenario guide; the drop chances are estimates): each goddess
+  // level's training bonus, Red's energy discount, the year-end races (after turns 24, 48, 72:
+  // all stats +10/+15/+20 and SP, Darley's SP and Turk's random stats when her level is at least
+  // the year) and the Grand Masters race (+20 all, +80 SP).
+  const GM_TRAIN = [0, 5, 8, 11, 13, 15], GM_CUT = [0, 10, 15, 18, 20, 23];
+  const GM_YEAR = { 24: [1, 10, 50, 20], 48: [2, 15, 60, 30], 72: [3, 20, 70, 45] };
+  // A plain action drops one fragment, sometimes two; a friendship training two (Wit rarely);
+  // a goal race two. Each fragment held adds about 1 to a stat the training gives (crystals more):
+  // about 0.6 per fragment to the main stat and 0.3 to SP, on average over fragment types.
+  const GM_DOUBLE = 0.1, GM_WIT_DOUBLE = 0.1, GM_FRAG_MAIN = 0.6, GM_FRAG_SP = 0.3;
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const SP_VALUE = 0.35;
   // Value points per length (L) of race gain. Roughly what 1 L of speed stat costs, and in line
@@ -68,7 +79,8 @@
     if (calendar) { turns.length = 0; calendar.forEach(day => turns.push(day.turn)); }
     const race = raceOn(opts, target, caps);
     const camp = new Set(E.campTurns(sc));
-    const boost = sc.id === "grandlive" ? 1 : E.scenarioBoost({ fcal: [] }, sc);
+    // Grand Concert and Grand Masters run their own mechanics; the rest a flat scenario boost.
+    const boost = sc.id === "grandlive" || (sc.id === "grandmasters" && GMs && opts.gmModel !== false) ? 1 : E.scenarioBoost({ fcal: [] }, sc);
     const t = opts.trainee ? D.trainee(opts.trainee) : null;
     return {
       sc, w: b.w, target, caps, turns, camp, boost, calendar,
@@ -85,6 +97,7 @@
       // scoring in every scenario (stats and skills both in lengths).
       skillBudget: (sc.id === "grandlive" || !!race) && opts.skillBudget !== false,
       coupledEvents: sc.id === "grandlive" && opts.coupledEvents !== false,
+      gmModel: sc.id === "grandmasters" && !!GMs && opts.gmModel !== false,
       runs: opts.runs || 10,
       seed: opts.seed || 12345,
       helloProcRate: opts.helloProcRate != null ? Math.max(0, Math.min(1, +opts.helloProcRate)) : 0.4,
@@ -245,12 +258,14 @@
     let fm = 1, te = 0, me = 0, sp = 0, all = 0, failMult = 1, costDown = 0, witRec = 0;
     const bonus = [0, 0, 0, 0, 0];
     let anyRainbow = false;
-    for (let k = 0; k < n; k++) if (D.isRainbow(members[k].card, members[k].bond, facStat)) { anyRainbow = true; break; }
+    const gm = ctx.gmTurn;
+    const rainbowOf = (m) => (gm && gm.yellow) || D.isRainbow(m.card, m.bond, facStat);
+    for (let k = 0; k < n; k++) if (rainbowOf(members[k])) { anyRainbow = true; break; }
     let rainbows = 0;
     for (let k = 0; k < n; k++) {
       const m = members[k];
       const eff = fx(m, { facStat, members: n, facilityLevel: L, energy: ctx.energy != null ? ctx.energy : 60, maxEnergy: ctx.maxEnergy || 100, deckTypes: ctx.deckTypes, totalBond: ctx.totalBond != null ? ctx.totalBond : 300, rainbow: anyRainbow });
-      if (D.isRainbow(m.card, m.bond, facStat)) { fm *= 1 + (eff[1] || 0) / 100; rainbows++; if (facStat === "wit") witRec += eff[31] || 0; }
+      if (rainbowOf(m)) { fm *= 1 + (eff[1] || 0) / 100; rainbows++; if (facStat === "wit") witRec += eff[31] || 0; }
       if (eff[27]) failMult *= 1 - eff[27] / 100;
       costDown += eff[28] || 0;
       te += eff[8] || 0; me += eff[2] || 0; sp += eff[30] || 0; all += eff[41] || 0;
@@ -259,7 +274,7 @@
     const moodCoef = [-0.2, -0.1, 0, 0.1, 0.2][mood];
     const moodMult = 1 + (moodCoef > 0 ? moodCoef * (1 + me / 100) : moodCoef);
     if (rainbows && ctx.live) fm *= 1 + ctx.live.friendship / 100;
-    const common = fm * moodMult * (1 + te / 100) * (1 + 0.05 * n);
+    const common = fm * moodMult * (1 + te / 100) * (1 + 0.05 * n) * (gm ? 1 + gm.te / 100 : 1);
     const mainIdx = STATS.indexOf(facStat);
     const out = [0, 0, 0, 0, 0];
     for (let i = 0; i < 5; i++) {
@@ -267,11 +282,11 @@
       if (!(b > 0)) continue;
       const lvAdd = i === mainIdx ? L - 1 : Math.floor((L - 1) / 2);
       // The game caps one training's gain per stat at 100; scenario bonuses come on top.
-      out[i] = Math.min(100, Math.floor((b + lvAdd + bonus[i] + all) * common * (1 + (ctx.growth[i] || 0) / 100))) * ctx.boost + (ctx.live && i === mainIdx ? ctx.live.extra[i] : 0);
+      out[i] = Math.min(100, Math.floor((b + lvAdd + bonus[i] + all) * common * (1 + (ctx.growth[i] || 0) / 100))) * ctx.boost + (ctx.live && i === mainIdx ? ctx.live.extra[i] : 0) + (gm && i === mainIdx ? gm.frag * GM_FRAG_MAIN : 0);
     }
     const baseEnergy = row[6] - 1.5 * (L - 1);
-    const energy = row[6] < 0 ? Math.floor(baseEnergy * Math.max(0, 1 - costDown / 100)) : row[6] + witRec;
-    return { g: out, sp: Math.floor((row[5] + sp) * common) * ctx.boost + (ctx.live ? ctx.live.extraSp : 0), rainbows, energy, failMult };
+    const energy = row[6] < 0 ? Math.floor(baseEnergy * Math.max(0, 1 - costDown / 100) * (gm ? 1 - gm.cut / 100 : 1)) : row[6] + witRec;
+    return { g: out, sp: Math.floor((row[5] + sp) * common) * ctx.boost + (ctx.live ? ctx.live.extraSp : 0) + (gm ? gm.frag * GM_FRAG_SP : 0), rainbows, energy, failMult };
   }
 
   // Simulates `runs` careers with these cards. cards: [{ card, lb }].
@@ -312,6 +327,7 @@
     const purchase = ctx.skillBudget ? SkillBudget.create({ skills: ctx.skills, costs: ctx.costs, learned: ctx.learned, available: ctx.available, must: ctx.must, lengthValue: L_VALUE, spValue: SP_VALUE }) : null;
     const eventCtx = purchase ? Object.assign({}, ctx, { known: ctx.learned, must: ctx.must.filter((id) => !ctx.available.includes(id)), eventUtility: purchase.hintUtility, eventUtilityKey: purchase.key }) : ctx;
     const scheduled = new Map((ctx.calendar || []).map(day => [day.turn, day]));
+    const gmTotals = { wisdoms: 0, red: 0, blue: 0, yellow: 0 };
     for (let run = 0; run < R; run++) {
       const runHints = deck.map(() => 0);
       const runLevels = {}, trainingLevels = deck.map(() => ({})), eventLevels = deck.map(() => ({})), eventTrace = [];
@@ -334,6 +350,23 @@
       const live = ctx.sc.id === "grandlive" ? GC.create(ctx, rng((ctx.seed + run * 7919) ^ 0x68e31d)) : null;
       const hello = deck.map((d) => d.hello ? { p: d.hello, met: false, metTurn: 0, unlocked: false, done: 0, hints: {} } : null);
       ctx.live = live && live.state;
+      // Grand Masters: fragments held, goddess levels, and this turn's Wisdom (gmTurn, read by gain()).
+      const gmS = ctx.gmModel ? { held: 0, levels: { red: 0, blue: 0, yellow: 0 }, wisdoms: 0 } : null;
+      let gmUsed = false, gmDrop = 0;
+      ctx.gmTurn = null;
+      const gmEnd = (turn) => {
+        if (!gmS) return;
+        if (turn >= 3 && !gmUsed) {
+          const n = gmDrop || (rand() < GM_DOUBLE ? 2 : 1);
+          gmS.held += gmS.held >= 8 ? 0 : gmS.held === 7 ? 1 : n;
+        }
+        const y = GM_YEAR[turn];
+        if (y) {
+          const [year, all, spv, darley] = y, lv = gmS.levels;
+          for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + all + (lv.yellow >= year ? 2 * year : 0));
+          sp += spv + (lv.red >= year ? darley : 0);
+        }
+      };
       const applyEvent = (event) => {
         if (event.me) maxEnergy = Math.max(1, maxEnergy + event.me);
         for (let i = 0; i < 5; i++) if ((event.s || [])[i]) x[i] = Math.max(0, Math.min(ctx.caps[STATS[i]], x[i] + event.s[i]));
@@ -344,6 +377,7 @@
         return energy - before;
       };
       const finishTurn = (turn) => {
+        gmEnd(turn);
         if (!live) return;
         support.forEach((model, k) => {
           if (!model || model.profile.mode !== "coupled") return;
@@ -398,6 +432,19 @@
       });
       for (let ti = 0; ti < ctx.turns.length; ti++) {
         const turn = ctx.turns[ti];
+        gmUsed = false; gmDrop = 0;
+        if (gmS) {
+          // A full table: obtain its Wisdom at the start of the turn, in the color the goddess plan
+          // wants (you steer it with the 1st and 5th fragments).
+          const one = {};
+          if (gmS.held >= 8) {
+            const next = GMs.nextColor(gmS.levels, turn, "red"), c = next ? next.color : "red";
+            gmS.levels[c] = Math.min(5, gmS.levels[c] + 1); gmS.held = 0; gmS.wisdoms++; gmUsed = true; one[c] = true;
+            if (c === "red") { energy = Math.min(maxEnergy, energy + 50); mood = 4; }
+          }
+          const lv = gmS.levels;
+          ctx.gmTurn = { te: GM_TRAIN[lv.red] + GM_TRAIN[lv.blue] + GM_TRAIN[lv.yellow], cut: GM_CUT[lv.red], frag: gmS.held, red: !!one.red, blue: !!one.blue, yellow: !!one.yellow };
+        }
         deck.forEach((d, k) => { bond[k] = Math.min(100, bond[k] + eventBond[k]); });
         for (let i = 0; i < 5; i++) x[i] = Math.max(0, Math.min(ctx.caps[STATS[i]], x[i] + (EVENT_STATS + evStats[i]) / ctx.turns.length));
         sp += evSp / ctx.turns.length;
@@ -423,6 +470,7 @@
           sp += Math.floor(day.sp * multiplier + 1e-9);
           energy = Math.max(0, energy - day.energy);
           requiredRaces++;
+          gmDrop = 2;
           finishTurn(turn);
           continue;
         }
@@ -476,7 +524,7 @@
         });
         ctx.energy = energy; ctx.maxEnergy = maxEnergy; ctx.totalBond = bond.reduce((a, n) => a + n, 0);
         for (let f = 0; f < 5; f++) {
-          const L = camp ? 5 : Math.min(5, 1 + Math.floor(count[f] / 4));
+          const L = ctx.gmTurn && ctx.gmTurn.red ? 6 : camp ? 5 : Math.min(5, 1 + Math.floor(count[f] / 4));
           const members = at[f].map((k) => ({ card: deck[k].card, level: deck[k].level, bond: bond[k] }));
           const g = gain(ctx, fx, ctx.sc.train[STATS[f]], STATS[f], members, L, mood);
           let v = g.sp * SP_VALUE;
@@ -520,11 +568,18 @@
         typ = typ ? typ * 0.9 + bestRaw * 0.1 : bestRaw;
         energy = Math.max(0, Math.min(maxEnergy, energy + bestG.energy));
         train[best]++;
-        if (rand() < bestFail) { fails++; finishTurn(turn); continue; }
+        if (gmS && bestG.rainbows) gmDrop = STATS[best] === "wit" ? (rand() < GM_WIT_DOUBLE ? 2 : 1) : 2;
+        if (rand() < bestFail) { fails++; gmDrop = 1; finishTurn(turn); continue; }
         if (!camp) count[best]++; // failed and camp trainings don't level facilities
         for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + trained(x[i], bestG.g[i]));
         sp += bestG.sp;
         rainbowTotal += bestG.rainbows;
+        // Blue Wisdom: every card on the training gives a skill hint and a few stats.
+        if (ctx.gmTurn && ctx.gmTurn.blue) at[best].forEach((k) => {
+          const hs = deck[k].card.hs || [];
+          if (hs.length) addHint(k, hs[Math.floor(rand() * hs.length)], 1, "training");
+          x[best] = Math.min(ctx.caps[STATS[best]], x[best] + 2); sp += 2;
+        });
         at[best].forEach((k) => {
           bond[k] = Math.min(100, bond[k] + D.BOND_PER_TRAINING);
           if ((deck[k].card.hs || []).length && rand() < deck[k].hintRate) { hints[k]++; runHints[k]++; bond[k] = Math.min(100, bond[k] + D.BOND_PER_HINT); const hs = deck[k].card.hs; addHint(k, hs[Math.floor(trainingRand[k]() * hs.length)], deck[k].hintLv, "training"); }
@@ -547,6 +602,12 @@
         }
         finishTurn(turn);
         if (!live && ti === Math.floor(ctx.turns.length / 3)) deck.forEach((d, k) => { bondAt[k] += bond[k]; });
+      }
+      if (gmS) {
+        for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + 20);
+        sp += 80;
+        gmTotals.wisdoms += gmS.wisdoms; gmTotals.red += gmS.levels.red; gmTotals.blue += gmS.levels.blue; gmTotals.yellow += gmS.levels.yellow;
+        ctx.gmTurn = null;
       }
       if (live) {
         hello.forEach((h) => {
@@ -601,6 +662,7 @@
       runs: R,
       outings: outings / R,
       recreations: recreations / R,
+      grandMasters: ctx.gmModel ? { model: "goddess-levels-v1 (estimate)", wisdoms: gmTotals.wisdoms / R, levels: { red: gmTotals.red / R, blue: gmTotals.blue / R, yellow: gmTotals.yellow / R } } : null,
       grandConcert: ctx.sc.id === "grandlive" ? Object.assign(
         Object.fromEntries(Object.entries(liveTotals).map(([k, n]) => [k, n / R])), {
           earnedTokens: earnedTokens.map((n) => n / R), spentTokens: spentTokens.map((n) => n / R), finalTokens: finalTokens.map((n) => n / R),

@@ -185,8 +185,18 @@ def main():
             if s.get("cost"):
                 skill_cost[s["id"]] = s["cost"]
 
+    # Evolved skills (upgraded from a gold at a career's end; JP has them, Global not yet): how
+    # many are out on Global. The app says so once there are any, since its race simulator data
+    # and skill plans then need them added.
+    evolved = [x for x in skills if x.get("pre_evo")]
+    evolved_global = [x for x in evolved if "en" not in (x.get("unreleased") or [])]
+    if evolved_global:
+        print("::warning::%d evolved skills are now on Global (e.g. %s): refresh the Global race simulator data and add them to skill plans."
+              % (len(evolved_global), evolved_global[0].get("enname") or evolved_global[0].get("name_en") or evolved_global[0]["id"]))
+
     data = {
-        "meta": {"source": "GameTora (gametora.com)", "built": datetime.date.today().isoformat(), "cards": len(out_cards), "trainees": len(out_trainees)},
+        "meta": {"source": "GameTora (gametora.com)", "built": datetime.date.today().isoformat(), "cards": len(out_cards), "trainees": len(out_trainees),
+                 "evolved": {"jp": len(evolved), "global": len(evolved_global), "globalExamples": [x.get("enname") or x.get("name_en") or str(x["id"]) for x in evolved_global[:5]]}},
         "effects": effect_meta,
         "uniqueText": UNIQUE_TEXT,
         "supports": out_cards,

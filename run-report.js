@@ -17,6 +17,7 @@
       if (state[key] !== undefined) out[key] = state[key];
     });
     if (state.deck) out.deck = { trainee: state.deck.trainee, slots: (state.deck.slots || []).map((s) => s && { id: s.id, card: D.card(s.id) ? D.card(s.id).n : String(s.id), lb: s.lb, bond: s.bond, met: s.met, dates: s.dates }) };
+    if (state.gm) out.gm = clone(state.gm);
     if (state.gl) {
       out.gl = {};
       ["tokens", "songs", "songPeriods", "lessons", "focus", "tokenTypes", "shop", "carry", "holdSong", "carriedPeriods", "hints", "pendingConcert", "finalizationEvent"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
@@ -33,6 +34,7 @@
 
   function checkpoint(state, sc) {
     return { turn: state.turn, energy: state.energy, maxEnergy: state.maxEnergy || 100, mood: state.mood, stats: clone(state.stats || {}), conditions: clone(state.conditions || {}), badCondition: !!state.badCondition, practicePoor: !!state.practicePoor,
+      gm: state.gm ? clone(state.gm) : null,
       tokens: sc.id === "grandlive" ? vector((state.gl || {}).tokens) : null, songs: clone((state.gl || {}).songs || {}), lessons: clone((state.gl || {}).lessons || {}) };
   }
 
@@ -277,6 +279,11 @@
         if (o.helloTypesAssumed) lines.push(o.helloTypesAssumed + " Hello event type(s) used the first tied-lowest color; amounts were recorded, colors remain assumed.");
         if (o.helloCheckWithoutEvent) lines.push("Hello's prior +20 is checked, but no actual Hello token event was logged. Balance corrections cannot identify its timing or type.");
       }
+    }
+    if (state.gm) {
+      const g = state.gm, L = g.levels || {};
+      lines.push("Goddess levels: Red " + (L.red || 0) + ", Blue " + (L.blue || 0) + ", Yellow " + (L.yellow || 0) + " (skill goddess " + (g.skill || "red") + "). Knowledge Table: " + ((g.table || []).join(", ") || "empty") + ".",
+        "Wisdoms: " + ((g.wisdoms || []).map((w) => w.color + " on turn " + w.turn).join(", ") || "none logged") + ".");
     }
     report.concerts.forEach((c) => lines.push("Concert turn " + c.turn + (c.pending ? " (pending — Step on stage to resolve)" : c.finalized ? " (resolved)" : c.recorded ? "" : " (unrecorded)") + (c.afterCommand ? ": " + c.afterCommand.total + " total songs; " + c.afterCommand.hype.since + " this period; " + c.afterCommand.hype.need + " short of full Hype" : c.recorded ? "" : " (end-of-command progress unavailable)")));
     lines.push("Details include available inputs, recommendations, chosen commands, offers, purchases and token accounting. Missing observations stay unknown.");
