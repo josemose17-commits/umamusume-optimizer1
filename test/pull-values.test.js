@@ -485,3 +485,20 @@ test("the default counts every real gain (3%+, any cup): never less than the old
   });
   assert.ok(more > 0, "some banner the old bar ignored now counts");
 });
+
+test("a card can take another type's slot when the deck then matches another of the guide's makeups", () => {
+  const SD = require("../data/scenario-decks.js");
+  const v = make({ scenarioDecks: SD, reuse: null });
+  v.pairs.forEach((pair) => v.buildPair(pair));
+  v.prepare();
+  let moved = 0;
+  v.pairs.filter((p) => p.makeups && p.gains).forEach((pair) => {
+    pair.gains.forEach((g) => {
+      if (!g.makeup) return;
+      moved++;
+      assert.ok(pair.makeups.includes(g.makeup), "one of the guide's makeups for this distance");
+      assert.notEqual(D.card(pair.deck[g.slot].id).ty === undefined, true);
+    });
+  });
+  assert.ok(moved > 0, "some card is credited for moving a deck to another makeup");
+});
