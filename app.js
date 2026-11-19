@@ -408,6 +408,11 @@
     $("#clearFacs").addEventListener("click", () => { state.facilities = E.STATS.map(blankFacility); commit(true); });
     $("#quickEvents").addEventListener("click", (e) => {
       if (e.target.closest("#lh20Add, #lh20Undo")) { handleHelloReward(e); return; }
+      const G = window.UmaGrandMasters;
+      const ga = e.target.closest("[data-gm-add]"), gl = e.target.closest("[data-gm-lv]");
+      if (G && ga) { const k = G.add(G.of(state).table, ga.dataset.gmAdd, +ga.dataset.n); if (!k) flash("The Knowledge Table is full: obtain the Wisdom first."); commit(true); return; }
+      if (G && e.target.closest("[data-gm-pop]")) { G.of(state).table.pop(); commit(true); return; }
+      if (G && gl) { const g = G.of(state), c = gl.dataset.gmLv; g.levels[c] = Math.max(0, Math.min(5, g.levels[c] + +gl.dataset.d)); commit(true); return; }
       const b = e.target.closest("[data-training-bond]");
       if (b) {
         const sl = state.deck.slots[+b.dataset.trainingBond]; if (!sl) return;
@@ -433,6 +438,7 @@
       }
     });
     $("#quickEvents").addEventListener("change", (e) => {
+      if (e.target.dataset.gmSkill != null && window.UmaGrandMasters) { window.UmaGrandMasters.of(state).skill = e.target.value; commit(true); return; }
       if (e.target.dataset.quickUnlock == null) return;
       const sl = state.deck.slots[+e.target.dataset.quickUnlock];
       if (sl) { sl.dates = Object.assign({ done: 0 }, sl.dates, { unlocked: e.target.checked }); commit(true); }
@@ -1157,12 +1163,31 @@
     const sc = scenario(), slots = (state.deck && state.deck.slots) || [];
     const hello = slots.findIndex((s) => s && H.isHello(D.card(s.id)));
     const hp = hello >= 0 ? H.profile(D.card(slots[hello].id), slots[hello].lb) : null;
-    box.hidden = !slots.some(Boolean) && sc.id !== "grandlive";
+    box.hidden = !slots.some(Boolean) && sc.id !== "grandlive" && sc.id !== "grandmasters";
     const gl = state.gl || {};
     box.innerHTML = `<h3>Event shortcuts</h3>
+      ${sc.id === "grandmasters" && window.UmaGrandMasters ? gmPanelHTML() : ""}
       ${sc.id === "grandlive" && state.turn >= 5 ? `<div class="row-wrap"><b>Performance</b><button type="button" class="btn ghost small" data-token-all="10">All tokens +10</button><button type="button" class="btn ghost small" data-token-all="5">Link reward +5 all</button>${gl.tokenRewardUndo && gl.tokenRewardUndo.turn === state.turn ? '<button type="button" class="btn ghost small" data-token-reward-undo>Undo token reward</button>' : ""}</div><p class="mini">For rewards actually received. New collaborators' +10 each is automatic after Promo Lives from this version onward; do not add it twice.</p>` : ""}
       ${sc.id === "grandlive" && state.turn >= 5 && hp ? `<div class="row-wrap hello-actual"><button type="button" class="btn" id="lh20Add">Hello +20 lowest</button><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select>${hp.card.r === 1 ? '<select id="lhAmount" aria-label="Observed Light Hello tokens"><option value="20">+20</option><option value="10">+10</option></select>' : '<input id="lhAmount" type="hidden" value="20">'}<label class="chk"><input type="checkbox" id="lhMood">Mood +1 too</label>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo Hello event</button>' : ""}</div><p class="mini">Tap after Done for an actual event. Also records its Guts and bond. If lowest colors tie, auto uses the first; select the awarded color to override.</p><label class="chk"><input type="checkbox" data-quick-unlock="${hello}" ${slots[hello].dates && slots[hello].dates.unlocked ? "checked" : ""}> Hello outings unlocked</label>` : ""}
       ${slots.some(Boolean) ? `<div class="event-bond-list">${slots.map((sl,i) => { const c = sl && D.card(sl.id); return !c ? "" : `<div class="row-wrap"><span>${esc(shortName(c))}: <b>${Math.round(slotBond(sl))}</b> bond</span>${[5,10].map(n => `<button type="button" class="btn ghost small" data-training-bond="${i}" data-add="${n}" aria-label="+${n} bond for ${esc(c.n)}" ${slotBond(sl) >= 100 ? "disabled" : ""}>+${n} bond</button>`).join("")}</div>`; }).join("")}</div>` : ""}`;
+  }
+
+  // Grand Masters: your Knowledge Table (8 fragments), the Wisdom it makes, your goddess levels
+  // and which goddess the next Wisdom should raise. A training's fragments go on by Done when you
+  // set their color; rest, outing and race drops by the buttons here.
+  function gmPanelHTML() {
+    const G = window.UmaGrandMasters, gm = G.of(state), w = G.wisdomColor(gm.table), next = G.nextColor(gm.levels, state.turn, gm.skill);
+    const slot = (i) => { const c = gm.table[i]; return `<span class="gm-slot${c ? " gm-" + c : ""}${i === 0 || i === 4 ? " gm-decide" : ""}" title="${i === 0 || i === 4 ? "Deciding slot: sets the Wisdom's color" : "Fragment " + (i + 1)}">${c ? G.SHORT[c][0] : i + 1}</span>`; };
+    const wText = !w ? "no fragments yet" : w.tie ? `a coin flip between ${G.SHORT[w.tie[0]]} and ${G.SHORT[w.tie[1]]}` : `${G.NAME[w.color]}${w.sure ? "" : w.open ? " so far (the 5th fragment can change it)" : " so far (by count: the 1st and 5th differ)"}`;
+    const btn = (c, n) => `<button type="button" class="btn ghost small gm-${c}" data-gm-add="${c}" data-n="${n}">+${n} ${G.SHORT[c]}</button>`;
+    const lv = (c) => `<span class="gm-lv"><span class="gm-dot gm-${c}"></span>${G.SHORT[c]} <b>Lv ${gm.levels[c]}</b> <button type="button" class="linkish" data-gm-lv="${c}" data-d="-1" aria-label="${G.SHORT[c]} level down">−</button><button type="button" class="linkish" data-gm-lv="${c}" data-d="1" aria-label="${G.SHORT[c]} level up">+</button></span>`;
+    const warn = G.warnings(gm.levels, state.turn, gm.skill);
+    return `<div class="gm-panel"><div class="row-wrap"><b>Knowledge Table</b> <span class="gm-table">${[0, 1, 2, 3, 4, 5, 6, 7].map(slot).join("")}</span> <span class="mini">${gm.table.length}/8 · Wisdom: ${esc(wText)}</span></div>
+      <div class="row-wrap"><span class="mini">Rest, outing or race drop:</span>${G.COLORS.map((c) => btn(c, 1) + btn(c, 2)).join("")}${gm.table.length ? '<button type="button" class="linkish" data-gm-pop>Remove last</button>' : ""}</div>
+      <div class="row-wrap">${G.COLORS.map(lv).join(" ")}<label class="field"><span>Skill goddess</span><select data-gm-skill>${G.COLORS.map((c) => `<option value="${c}"${gm.skill === c ? " selected" : ""}>${G.NAME[c]}</option>`).join("")}</select></label></div>
+      ${next ? `<p class="mini"><b>Next Wisdom should be ${esc(G.SHORT[next.color])}</b> · ${esc(next.why)}. ${gm.table.length === 0 ? "Get her color into the 1st and 5th slots." : gm.table.length < 5 ? (gm.table[0] === next.color ? "The 1st slot is hers: get her color into the 5th too." : "The 1st slot is another color: her color in the 5th still wins if she has more of the 8.") : w && w.sure && w.color !== next.color ? "This table makes another color; aim the next one." : ""}</p>` : ""}
+      ${warn.map((x) => `<p class="mini warn">${esc(x)}</p>`).join("")}
+      <p class="mini">Set a training's fragment color on its card and Done logs it; obtaining a Wisdom raises its goddess and clears the table. Fix anything by hand here.</p></div>`;
   }
 
   function facilityHTML(f, idx) {
@@ -4084,6 +4109,12 @@
     return "";
   }
   const skillConditions = (catalog, list) => Object.fromEntries(list.map((id) => [id, ((catalog.skills[id] || {}).alternatives || []).map((a) => (a.condition || "") + " " + (a.precondition || "")).join(" ")]));
+  // Once Global has evolved skills (GameTora's daily data counts them), say the skill plans and
+  // race simulator don't have them yet.
+  function evolvedNote() {
+    const ev = HAS_DATA && D.DATA.meta && D.DATA.meta.evolved;
+    return ev && ev.global > 0 ? `<p class="mini warn"><b>Evolved skills are on Global now</b> (${ev.global}${ev.globalExamples && ev.globalExamples.length ? ", e.g. " + ev.globalExamples.slice(0, 3).map(esc).join(", ") : ""}). The skill plans and race simulator don't include them yet: they come from upgrading a gold at a career's end, so plan the gold.</p>` : "";
+  }
   function raceSkillsHTML(c) {
     const q = raceState(c), j = deckJob("cm"), r = currentSkillPlan(c) ? j.raceResult : null, p = presetById(c.preset);
     const pairs = [["distanceAptitude", "Distance"], ["surfaceAptitude", "Surface"], ["strategyAptitude", "Style"]];
@@ -4091,7 +4122,7 @@
     const dependency = id => skillCaveat(id, r && r.conditions[id], c.preset, c.style);
     const table = (rows, ranking) => `<div class="table-wrap"><table><thead><tr><th>Skill</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows.map(x=>`<tr><th>${skillNameHTML(x.id)}${g8Pill(c.preset, c.style, x.id)}${dependency(x.id) ? `<div class="mini">${esc(dependency(x.id))}</div>` : ""}</th><td>${x.cost}${ranking && x.cost > r.plan.budget ? '<div class="mini">over budget</div>' : ""}</td><td>${num((ranking ? x.result : x.marginal).mean)}</td><td>${num(x.per100)}</td></tr>`).join("") || '<tr><td colspan="4">No additional purchase fits.</td></tr>'}</tbody></table></div>`;
     return `<details class="pred-help" id="cmRaceInputs"${q.open ? " open" : ""}><summary>Skills for this build: equipped skills, hints and SP</summary>
-      <p class="mini">Compares affordable skill sets on this course. A new equipped skill changes the baseline and the remaining recommendations.</p>
+      <p class="mini">Compares affordable skill sets on this course. A new equipped skill changes the baseline and the remaining recommendations.</p>${evolvedNote()}
       <div class="row-wrap"><label class="field"><span>Inputs</span><select data-race-field="mode"><option value="plan"${q.mode === "plan" ? " selected" : ""}>Plan from this deck</option><option value="finished"${q.mode === "finished" ? " selected" : ""}>Finished uma: enter stats and SP left</option></select></label><label class="field"><span>Unique level</span><select data-race-field="uniqueLv">${[1,2,3,4,5,6].map(n=>`<option value="${n}"${+(q.uniqueLv || 1)===n?" selected":""}>${n}</option>`).join("")}</select></label><label class="field"><span>Mood</span><select data-race-field="mood">${[["-2","Awful"],["-1","Bad"],["0","Normal (CM rounds)"],["1","Good"],["2","Great (finals)"]].map(([v,l])=>`<option value="${v}"${String(q.mood||"0")===v?" selected":""}>${l}</option>`).join("")}</select></label><label class="field"><span>SP left (finished uma)</span><input type="number" min="0" max="20000" data-race-field="sp" value="${esc(q.sp)}"></label></div>
       <div class="tg-row">${E.STATS.map(s=>`<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" min="1" max="3000" data-race-stat="${s}" value="${q.stats[s] || ""}" placeholder="${((j.optResult || {}).est || {}).stats ? j.optResult.est.stats[E.STATS.indexOf(s)] : "Final stat"}"></label>`).join("")}</div>
       <div class="row-wrap">${pairs.map(([k,label])=>`<label class="field"><span>${label} aptitude</span><select data-race-apt="${k}"><option value="">Trainee's starting grade</option>${["G","F","E","D","C","B","A","S"].map(v=>`<option value="${v}"${q.apt[k]===v?" selected":""}>${v}</option>`).join("")}</select></label>`).join("")}</div>

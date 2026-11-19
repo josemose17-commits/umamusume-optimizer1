@@ -12,6 +12,7 @@
   const CardEvents = root.UmaCardEvents || (typeof require !== "undefined" ? require("./data/card-events.js") : null);
   const Hello = root.UmaLightHello || (typeof require !== "undefined" ? require("./light-hello.js") : null);
   const Conditions = root.UmaConditions || (typeof require !== "undefined" ? require("./conditions.js") : null);
+  const GMs = root.UmaGrandMasters || (typeof require !== "undefined" ? require("./grand-masters.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const STAT_LABELS = { speed: "Speed", stamina: "Stamina", power: "Power", guts: "Guts", wit: "Wit" };
   const MOODS = ["Awful", "Bad", "Normal", "Good", "Great"];
@@ -3337,13 +3338,41 @@
     },
 
     grandmasters: {
+      // A training's fragments: each one adds to the next Wisdom; one landing on a deciding slot
+      // (the table's 1st or 5th) in the goddess color you need next is worth more, in another
+      // color less. Nothing drops while the table is full or on a Wisdom turn.
       facility(f, ctx) {
         const n = (f.extras && f.extras.frag) || 0;
-        return n ? { add: n * 0.08 * ctx.typ, note: n + " fragment" + (n > 1 ? "s" : "") + " toward the next Goddess Wisdom" } : null;
+        if (!n) return null;
+        const gm = GMs && ctx.state.gm, table = (gm && gm.table) || [], color = f.extras.fragColor;
+        const k = GMs ? GMs.fits(table, n) : n;
+        if (!k) return { add: 0, note: "the Knowledge Table is full: obtain the Wisdom first, nothing drops until then" };
+        let add = k * 0.08 * ctx.typ, note = k + " fragment" + (k > 1 ? "s" : "") + " toward the next Goddess Wisdom" + (k < n ? " (only one fits: 7 held)" : "");
+        if (GMs && gm && color) {
+          const want = GMs.nextColor(gm.levels, ctx.state.turn, gm.skill), st = GMs.steer(table, color, k, want && want.color);
+          if (st.score) { add += st.score * 0.06 * ctx.typ; note += "; " + st.note; }
+        }
+        return { add, note };
+      },
+      // Logs the turn on the Knowledge Table: a Wisdom raises its goddess and clears the table
+      // (no fragments that turn); a training's fragments, in the color you set, go on the table.
+      afterTurn(s, option) {
+        if (!GMs) return;
+        const gm = GMs.of(s);
+        if (option.wisdomColor) {
+          gm.levels[option.wisdomColor] = Math.min(5, (gm.levels[option.wisdomColor] || 0) + 1);
+          gm.wisdoms = (gm.wisdoms || []).concat([{ turn: s.turn, color: option.wisdomColor, table: gm.table.slice() }]);
+          gm.table = []; return;
+        }
+        if (option.kind !== "train") return;
+        const fac = s.facilities.find((x) => x.stat === option.stat), ex = (fac && fac.extras) || {};
+        if (ex.frag && ex.fragColor) GMs.add(gm.table, ex.fragColor, ex.frag);
       },
       // Each Wisdom is tried on every training; the best version is offered as its own option.
       items(ctx, options) {
-        const w = ctx.state.extras && ctx.state.extras.wisdom;
+        // The Wisdom you set as ready, or the full table's own color when it's sure.
+        const gm = ctx.state.gm, made = GMs && gm && gm.table && gm.table.length >= GMs.SLOTS ? GMs.wisdomColor(gm.table) : null;
+        const w = (ctx.state.extras && ctx.state.extras.wisdom) || (made && made.sure ? made.color : "");
         if (!w) return;
         const trains = options.filter((o) => o.kind === "train");
         const mood = ctx.state.mood;
@@ -3371,6 +3400,7 @@
             v.notes.push("all " + o.cards + " card(s) here count as friendship");
           }
           v.prefix.unshift("Obtain " + w[0].toUpperCase() + w.slice(1) + " Wisdom (no turn used)");
+          v.wisdomColor = w;
           v.consume = Object.assign({}, v.consume, { wisdom: "" });
           v.value = sumParts(v.parts);
           return v;

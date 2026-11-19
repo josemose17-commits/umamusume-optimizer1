@@ -335,7 +335,8 @@
       keyCards: [],
       inputs: [
         { id: "frag", label: "Fragments", scope: "facility", type: "number", max: 2, help: "Fragments this training would drop (2 for x2)" },
-        { id: "wisdom", label: "Wisdom ready", scope: "turn", type: "select", options: [["", "None"], ["red", "Red: +50 energy, past Lv5"], ["blue", "Blue: hint per card"], ["yellow", "Yellow: all cards friendship"]] }
+        { id: "fragColor", label: "Color", scope: "facility", type: "select", options: [["", "?"], ["red", "Red"], ["blue", "Blue"], ["yellow", "Yellow"]], help: "The fragment's goddess color (the icon on the training's button). With it, Done puts the fragments on your Knowledge Table and the coach steers your next Wisdom's color." },
+        { id: "wisdom", label: "Wisdom ready", scope: "turn", type: "select", help: "Set it when you have a Wisdom to obtain. With 8 fragments logged on the Knowledge Table, the coach uses the table's color by itself.", options: [["", "None"], ["red", "Red: +50 energy, past Lv5"], ["blue", "Blue: hint per card"], ["yellow", "Yellow: all cards friendship"]] }
       ],
       events: [
         { turn: 3, label: "Fragments start", tip: "Every action can drop fragments from now on." },

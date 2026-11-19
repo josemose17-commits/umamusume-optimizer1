@@ -788,3 +788,17 @@ table.pred .over { color: var(--accent); }
 .skillopt, .skillopt .panel, .skillopt .field { min-width: 0; }
 .skillopt select, .skillopt input:not([type="checkbox"]) { max-width: 100%; min-width: 0; }
 .skillopt .field.grow { flex: 1 1 14rem; }
+
+/* Grand Masters: Knowledge Table and goddess levels */
+:root { --gm-red: #d0473f; --gm-blue: #2f6fd6; --gm-yellow: #c99a10; }
+.gm-panel { display: grid; gap: 6px; margin-bottom: 8px; }
+.gm-table { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.gm-slot { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; border: 1px dashed var(--line, #8886); color: var(--muted, #888); }
+.gm-slot.gm-decide { border-style: solid; border-width: 2px; }
+.gm-slot.gm-red, .gm-dot.gm-red { background: var(--gm-red); color: #fff; border-color: var(--gm-red); }
+.gm-slot.gm-blue, .gm-dot.gm-blue { background: var(--gm-blue); color: #fff; border-color: var(--gm-blue); }
+.gm-slot.gm-yellow, .gm-dot.gm-yellow { background: var(--gm-yellow); color: #fff; border-color: var(--gm-yellow); }
+.gm-slot.gm-decide.gm-red, .gm-slot.gm-decide.gm-blue, .gm-slot.gm-decide.gm-yellow { outline: 2px solid var(--ink, #222); outline-offset: 1px; }
+.gm-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+.gm-lv { white-space: nowrap; margin-right: 8px; }
+.btn.gm-red { border-color: var(--gm-red); } .btn.gm-blue { border-color: var(--gm-blue); } .btn.gm-yellow { border-color: var(--gm-yellow); }
