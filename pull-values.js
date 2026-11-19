@@ -459,6 +459,8 @@
           if (!own && !bp.some((x) => x.id === id)) { const b = borrowFor(pair).find((x) => x.id === id); if (b) bp.push(b); }
         });
         let best = null;
+        // Every makeup the guide lists for this distance: a new card can move the deck to another.
+        pair.makeups = mk.list.map((m) => ({ m, comp: asComp(m, pool, bp).comp }));
         mk.list.forEach((m) => {
           const { comp, locked } = asComp(m, pool, bp);
           const opts = Object.assign({}, pair.opts, { comp, locked: (pair.opts.locked || []).concat(locked) });
@@ -470,6 +472,7 @@
         if (best) { pair.opts = best.opts; pair.makeup = Object.assign({ guide: mk.guide }, best.m); return best.r; }
       }
       pair.makeup = null;
+      pair.makeups = null;
       return T.buildDeck(pair.opts, pool, bp);
     }
     function buildPair(pair) {
@@ -479,7 +482,7 @@
         pair.deck = old.base.map((c) => Object.assign({}, c));
         pair.base = old.base.map((c) => Object.assign({}, c));
         pair.borrowShort = old.borrowShort;
-        if (old.makeup) { pair.opts = old.opts; pair.makeup = old.makeup; }
+        if (old.makeup) { pair.opts = old.opts; pair.makeup = old.makeup; pair.makeups = old.makeups; }
         pair.error = null;
         altBorrow(pair);
         return;
@@ -515,9 +518,19 @@
         const k = cc.ty + "|" + (via ? 1 : 0);
         (groups[k] = groups[k] || []).push(c);
       });
-      const put = (r, j, base, extra, via) => {
+      const put = (r, j, base, extra, via, mk) => {
         const g = r.score - base - extra, k = r.id + ":" + r.lb, cur = pair.gains.get(k);
-        if (g > 1e-9 && (!cur || g > cur.gain)) pair.gains.set(k, { gain: g, base, slot: j, via, score: r.score });
+        if (g > 1e-9 && (!cur || g > cur.gain)) pair.gains.set(k, { gain: g, base, slot: j, via, score: r.score, makeup: mk || null });
+      };
+      // The guide's other makeups for this distance: a card of one type may take another type's
+      // slot when the deck then matches one of them (2 Speed 1 Guts instead of 1 Speed 2 Guts).
+      const counts = {};
+      pair.deck.forEach((c) => { const t = card(c.id).ty; counts[t] = (counts[t] || 0) + 1; });
+      const lockedIds = new Set((pair.opts.locked || []).map(Number));
+      const makeupAfter = (out, inTy) => {
+        if (!pair.makeups || out === inTy) return null;
+        const n = Object.assign({}, counts); n[out]--; n[inTy] = (n[inTy] || 0) + 1;
+        return pair.makeups.find((x) => Object.keys(Object.assign({}, x.comp, n)).every((t) => (x.comp[t] || 0) === (n[t] || 0))) || null;
       };
       Object.keys(groups).forEach((k) => {
         const [ty, v] = k.split("|"), via = v === "1", cands = groups[k], extra = via ? pair.altLoss : 0;
@@ -525,8 +538,9 @@
           if (!cs.length) return;
           let rest = pair.deck.filter((_, i) => i !== j);
           if (via) rest = rest.filter((x) => !x.borrowed).concat([pair.alt]);
-          T.rank(pair.opts, ty, rest, cs).forEach((r) => put(r, j, pair.deck[j].score, extra, via));
+          T.rank(pair.opts, ty, rest, cs).forEach((r) => put(r, j, pair.deck[j].score, extra, via, mk));
         };
+        let mk = null;
         const bySlot = new Map(), free = [];
         cands.forEach((c) => {
           const j = at && at.has(c.id) ? at.get(c.id) : pair.deck.findIndex((x) => !x.borrowed && x.id === c.id);
@@ -534,10 +548,33 @@
         });
         bySlot.forEach((cs, j) => run(j, cs));
         if (!free.length) return;
+        // A card whose character is in the deck already (another of her cards) can only take that
+        // card's slot: tried there, when the deck then keeps (or moves to) a makeup.
+        const twin = [];
+        free.forEach((c) => {
+          const cc = card(c.id), j = pair.deck.findIndex((x) => !x.borrowed && x.id !== c.id && card(x.id).cid === cc.cid && !lockedIds.has(+x.id));
+          if (j < 0) return;
+          twin.push(c);
+          const t = card(pair.deck[j].id).ty;
+          if (t === ty) run(j, [c]);
+          else { const m = makeupAfter(t, ty); if (m || (cp[t] == null && cp[ty] == null)) { mk = m; run(j, [c]); mk = null; } }
+        });
+        if (twin.length) { free.splice(0, free.length, ...free.filter((c) => twin.indexOf(c) === -1)); if (!free.length) return; }
         const same = owned.filter((x) => card(x.c.id).ty === ty).sort((a, c) => a.c.score - c.c.score)[0];
         if (same) run(same.j, free);
         const wty = weak ? card(weak.c.id).ty : null;
         if (weak && wty !== ty && cp[ty] == null && cp[wty] == null) run(weak.j, free);
+        // Another type's weakest slot, when that makes one of the guide's other makeups.
+        if (pair.makeups && !via) {
+          const tried = new Set();
+          owned.slice().sort((a, c) => a.c.score - c.c.score).forEach((x) => {
+            const t = card(x.c.id).ty;
+            if (t === ty || tried.has(t) || lockedIds.has(+x.c.id)) return;
+            tried.add(t);
+            const m = makeupAfter(t, ty);
+            if (m) { mk = m; run(x.j, free); mk = null; }
+          });
+        }
       });
     }
     // The limit breaks above what you'd have there, for cards you could have by the cup.
@@ -616,7 +653,9 @@
           pair.deck[bi] = Object.assign({}, pair.alt);
         }
         pair.deck[s.slot] = { id, lb, borrowed: false, score: s.score };
-        if (notes) notes.push({ pair, id, lb, gain: s.gain, pct: s.base > 0 ? s.gain / s.base : 0, replaced: replaced.id === id ? null : replaced.id, upgrade: replaced.id === id, clear: s.gain >= minPct * s.base - 1e-9, side: !!side });
+        // The swap moved the deck to another of the guide's makeups.
+        if (s.makeup) { pair.opts = Object.assign({}, pair.opts, { comp: s.makeup.comp }); pair.makeup = Object.assign({ guide: pair.makeup && pair.makeup.guide }, s.makeup.m); types.add(card(replaced.id).ty); }
+        if (notes) notes.push({ pair, id, lb, gain: s.gain, pct: s.base > 0 ? s.gain / s.base : 0, replaced: replaced.id === id ? null : replaced.id, upgrade: replaced.id === id, clear: s.gain >= minPct * s.base - 1e-9, side: !!side, makeup: s.makeup ? s.makeup.comp : null });
         slotScores(pair);
         altBorrow(pair, !s.via);
         rescore(pair, s.slot, types);

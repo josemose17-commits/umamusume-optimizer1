@@ -356,6 +356,8 @@
     // ---- the route ----
     // The decks a step makes clearly stronger, cup by cup (naming the card when the step brings
     // more than one; a card that came with the pulls for another is marked so).
+    const TYPE_WORD = { speed: "Speed", stamina: "Stamina", power: "Power", guts: "Guts", wit: "Wit", friend: "friend", group: "group" };
+    const makeupText = (comp) => Object.entries(comp).filter(([, n]) => n > 0).map(([t, n]) => n + " " + (TYPE_WORD[t] || t)).join(" / ");
     function decksText(notes, kind) {
       const clear = (notes || []).filter((x) => (kind === "trainee" ? true : x.clear));
       if (!clear.length) return { n: 0, cups: 0, html: "" };
@@ -364,7 +366,7 @@
       clear.forEach((x) => { const k = x.pair.cup.id; if (!by.has(k)) by.set(k, { cup: x.pair.cup, list: [] }); by.get(k).list.push(x); });
       const html = [...by.values()].map(({ cup, list }) => `<li>${esc(est(cup.global) + fmtDate(cup.global.start))} ${esc(cup.name)}: ${list.map((x) => esc(x.pair.trainee.n) + (kind === "trainee"
         ? " (" + esc(D.trainee(x.id) ? D.trainee(x.id).n : "") + " as Parent 1" + (x.pct != null ? ", +" + pct(x.pct) : "") + ")"
-        : (named ? ": " + esc(cardShort(x.id)) + (x.side ? " (came with the pulls)" : "") : "") + " +" + pct(x.pct) + (x.upgrade ? " (limit break)" : x.replaced ? " over " + esc(cardShort(x.replaced)) : ""))).join(", ")}</li>`).join("");
+        : (named ? ": " + esc(cardShort(x.id)) + (x.side ? " (came with the pulls)" : "") : "") + " +" + pct(x.pct) + (x.upgrade ? " (limit break)" : x.replaced ? " over " + esc(cardShort(x.replaced)) : "") + (x.makeup ? " (deck becomes " + esc(makeupText(x.makeup)) + ", another of the guide's makeups)" : ""))).join(", ")}</li>`).join("");
       return { n: clear.length, cups: by.size, html };
     }
     // A card's chances after the pulls, from what you'd have: [have … LB4] with their shares.
