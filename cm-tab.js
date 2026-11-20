@@ -492,7 +492,8 @@
       const covered = W.filter((w) => w.deck != null && w.deck >= 0.5).sort((a, b) => b.L - a.L).slice(0, 8);
       const carry = W.filter((w) => !(w.deck != null && w.deck >= 0.5)).sort((a, b) => b.priority - a.priority).slice(0, 8);
       const item = (w) => `${esc(ctx.skillName(w.id))} <span class="mini">(${w.L.toFixed(2)} L${w.deck != null ? `, her deck ${Math.round(w.deck * 100)}%` : ""})</span>`;
-      const field = ctx.fieldValues && ctx.fieldValues(cup(st()).id, r.style) ? " Values from full-field races." : "";
+      // Her purchase plan's values come from its solo race check; without one, Parents' values.
+      const field = r.x.skillPlan ? " Values from her purchase plan's race check." : ctx.fieldValues && ctx.fieldValues(cup(st()).id, r.style) ? " Values from full-field races." : "";
       return `<p class="mini cmp-whites"><b>Her whites here.</b> Her ace deck covers: ${covered.map(item).join(", ") || "none of the valuable ones"}. Her parents should carry: ${carry.map(item).join(", ") || "nothing else"}.${field}</p>`;
     }
     // The blue sparks you still choose, split to leave the least short: the grandparent's own
@@ -815,7 +816,9 @@
       const course = r.x.race && r.x.race.preset && r.x.race.preset.course, scope = (root.UmaSkillStyles && root.UmaSkillStyles.scope) || {};
       const cupOwn = course ? (id) => { const sc = scope[id]; return !!sc && (sc.dist == null || sc.dist === { Sprint: 1, Mile: 2, Medium: 3, Long: 4 }[course.dist]) && (sc.surface == null || sc.surface === (course.surface === "Dirt" ? 2 : 1)); } : null;
       const ssLikely = !!(f.learning && f.learning.ssShare >= root.UmaCmPlan.SS_SHARE);
-      const list = CP.itSkills(r.x, f.learning ? f.learning.skills : f.offers || tr.deck.offers, 10, eventsAnyway(tr.deck.cards), CP.familyCover(f.s), cupOwn ? { own: cupOwn, double: ssLikely } : null);
+      // Her deck's skills by source: the priorities only steer event choices, so hint-only whites are left out.
+      const srcSets = { event: new Set(cards.flatMap((cd) => (cd.es || []).map(String))), hint: new Set(cards.flatMap((cd) => (cd.hs || []).map(String))) };
+      const list = CP.itSkills(r.x, f.learning ? f.learning.skills : f.offers || tr.deck.offers, 10, eventsAnyway(tr.deck.cards), CP.familyCover(f.s), cupOwn ? { own: cupOwn, double: ssLikely } : null, srcSets);
       const skills = list.map((k) => {
         const src = from(k.id).concat(k.gold && k.id !== k.white ? from(k.white) : []);
         return `<li><b>${esc(ctx.skillName(k.id))}</b>${k.gold ? " (gold)" : ""}${k.own && !k.double ? ' <span class="mini">· this cup</span>' : ""}${k.double ? ' <span class="mini">· this cup, ◎ (her SS chance is high)</span>' : ""} <span class="mini">${k.gamble ? "· no card of hers gives it: only if a random event offers it" : `· ${Math.round(k.p * 100)}% ${f.learning ? "estimated learned within SP" : "offered"} · ${esc([...new Set(src)].join(", ") || (f.learning ? "trainee, deck or inherited hint" : "her deck"))}${k.cover >= 0.1 ? ` · her family already gives it ~${Math.round(k.cover * 100)}%` : ""}`}</span></li>`;
@@ -824,7 +827,8 @@
       const anySS = fo && fo.rows.some((y) => y.hit > 0);
       const focus = fo ? `<p><b>Training Focus: ${fo.best.label}</b> <span class="mini">· ${fo.rows.map((y) => `${y.label} ${anySS ? `SS ${y.hit}/${y.of}, ` : ""}rating ~${fmtN(y.rating)}, ${Math.round(y.over * 100)}% blue 2★+`).join(" · ")} (16 careers each, before inheritance). ${fo.covered === false ? "A gap is left, so her blue's 2★ chance comes before rating." : "The ace's gaps are covered, so the most SS runs and the highest rating (her skills) decide, not her blue."} Stamina and Sprint lean slightly to Stamina and to Power; how much is an estimate, so a close call can go either way.</span></p>` : "";
       return `<div class="cmp-it"><h4>Independent Training settings</h4><p class="mini">For this deck and these ${plural(races.length, "extra G1")}.</p>${focus}
-        <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it picks the event choice that gives them). Whites only, for her white sparks: the skills her purchase plan buys first, then this cup's own (its distance and surface skills, at ◎ when her SS chance is high, and the greens that fit it), then the race's other whites her deck can hint, by value × chance:</p><ol class="mini">${skills || "<li>None of the race's whites come from her deck.</li>"}</ol>
+        <p class="mini"><b>Prioritized skills</b>, in this order (the game takes 10; it picks the event choice that gives them). Whites only, for her white sparks, and only ones an event can give, since the priorities steer event choices and not training hints: her deck's card events, then whites no card of hers has (only a random event can give those). In order: the skills her purchase plan buys first, then this cup's own (its distance and surface skills, at ◎ when her SS chance is high, and the greens that fit it), then the race's other whites, by value × chance. No white recoveries.</p><ol class="mini">${skills || "<li>None of the race's whites come from an event.</li>"}</ol>
+        ${list.hintOnly.length || list.recoveries.length ? `<p class="mini"><b>Left out:</b> ${list.hintOnly.length ? `her deck only hints ${list.hintOnly.slice(0, 6).map((k) => esc(ctx.skillName(k.id))).join(", ")} (the priorities only steer event choices, not hints)` : ""}${list.hintOnly.length && list.recoveries.length ? "; " : ""}${list.recoveries.length ? `white recoveries (${list.recoveries.slice(0, 4).map((k) => esc(ctx.skillName(k.id))).join(", ")}): not aimed for` : ""}.</p>` : ""}
         ${list.anyway.length ? `<p class="mini"><b>Come anyway, no slot needed</b> (every choice of the event gives them, when it happens): ${list.anyway.map((k) => esc(ctx.skillName(k.id)) + (k.gold ? " (gold)" : "")).join(", ")}.</p>` : ""}
         <p class="mini"><b>Agenda:</b> ${races.length ? races.map(esc).join(", ") : "her career goals only"}.</p></div>`;
     }
