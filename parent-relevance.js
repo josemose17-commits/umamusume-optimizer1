@@ -5,7 +5,8 @@
 // speed, vision: Prudent Positioning, Go with the Flow...) that fit it, which the Umalator can't
 // value. Greens, recoveries and position skills count at least 0.1 L. Never debuffs.
 // Greens and recoveries come from data/skill-kinds.js; a green whose condition depends on
-// something unknown before the race (gate, popularity, the other runners) doesn't count, and a
+// something unknown before the race (gate, popularity) doesn't count, and one that depends on the
+// other runners' styles counts by the assumed field (2 others of each style, see raceFacts), and a
 // recovery's in-race conditions (position, phase, corners) are taken as met.
 (function (root) {
   "use strict";
@@ -19,6 +20,12 @@
     if (c.turn === "Right" || c.turn === "Left") f.rotation = c.turn === "Right" ? 1 : 2;
     if (tracks && tracks[c.id] != null) f.track_id = tracks[c.id];
     ["ground", "weather", "season", "time"].forEach((k) => { if (d[k] != null) f[k === "ground" ? "ground_condition" : k] = d[k]; });
+    // The field, as you asked: each of the other two teams has one uma of every style, so 2 others
+    // of each style; her own team runs other styles. Her style: 3 of the field (9, or 12 in LoH).
+    const size = preset.kind === "loh" ? 12 : 9;
+    f.running_style_count_same = 3;
+    f.running_style_count_same_rate = Math.round(300 / size);
+    ["nige", "senko", "sashi", "oikomi"].forEach((k) => { f["running_style_count_" + k + "_otherself"] = 2; });
     return f;
   }
 

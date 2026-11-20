@@ -569,19 +569,18 @@ test("a CM parent's priorities: the plan's whites, then the cup's own skills (â—
   if (circles.length > 1) assert.notEqual(String(list[at].id), last, "its â—Ž when SS is likely");
 });
 
-test("Independent Training priorities: events only (a white her deck only hints is left out), no white recoveries", () => {
+test("Independent Training priorities: whites any card event gives (her deck's first), none other, no white recoveries", () => {
   const x = x0(), w = plan.want(x).white, K = require("../data/skill-kinds.js").skills;
   const offers = {}; w.forEach((k) => { offers[k.id] = 0.5; });
   const heal = (id) => K[String(id)] && K[String(id)][0] === "recovery";
   const ids = w.map((k) => String(k.id)).filter((id) => !heal(id));
-  const hinted = ids[0], evented = ids[1];
-  const list = plan.itSkills(x, offers, 10, new Set(), {}, null, { event: new Set([evented]), hint: new Set([hinted]) });
-  assert.ok(!list.some((k) => String(k.white) === hinted), "hint-only white left out");
-  assert.ok(list.hintOnly.some((k) => k.id === hinted));
-  assert.ok(list.some((k) => String(k.white) === evented && k.event), "her deck's event white is in");
+  const none = ids[0], mine = ids[1], other = ids[2];
+  const list = plan.itSkills(x, offers, 10, new Set(), {}, null, { event: new Set([mine]), pool: new Set([mine, other]) });
+  assert.ok(!list.some((k) => String(k.white) === none) && list.noEvent.some((k) => k.id === none), "no card event gives it: left out");
+  const a = list.findIndex((k) => String(k.white) === mine), b = list.findIndex((k) => String(k.white) === other);
+  assert.ok(a >= 0 && list[a].event, "her deck's event white is in");
+  assert.ok(b > a && list[b].gamble, "another card's event white after hers");
   assert.ok(!list.some((k) => heal(k.white)), "no white recoveries");
-  const before = list.findIndex((k) => k.gamble);
-  if (before >= 0) assert.ok(list.slice(before).every((k) => k.gamble), "random-event whites after her deck's");
 });
 
 test("Independent Training priorities fill all 10 slots with event whites (random-event ones after her deck's)", () => {
@@ -589,8 +588,22 @@ test("Independent Training priorities fill all 10 slots with event whites (rando
   const keep = new Set(w.slice(0, 1).map((k) => String(k.id)));
   const narrow = { targets: Object.fromEntries(Object.entries(x.rel.targets).filter(([id]) => keep.has(String(id)))), why: x.rel.why, L: x.rel.L };
   const planned = Object.assign({}, x, { rel: narrow, relAll: x.rel, skillPlan: { parentValues: {} } });
-  const list = plan.itSkills(planned, {}, 10, new Set(), {}, null, { event: new Set(), hint: new Set() });
+  const pool = new Set(w.map((k) => String(k.id)));
+  const list = plan.itSkills(planned, {}, 10, new Set(), {}, null, { event: new Set(), pool });
   const K = require("../data/skill-kinds.js").skills, heal = (id) => K[String(id)] && K[String(id)][0] === "recovery";
   const can = w.filter((k) => !heal(k.id)).length;
   assert.equal(list.length, Math.min(10, can), "as many as there are, up to 10");
+});
+
+test("the assumed field: 2 others of each style, so style-count greens (Maverick, Competitive Spirit, Wallflower) can't fire; style debuffs can", () => {
+  const PR = require("../parent-relevance.js"), P = require("../data/presets.js"), c = require("../data/race-skills.json");
+  const p = P.list.find((x) => x.id === "cm22"), conds = (id) => c.skills[id].alternatives.map((a) => [a.condition, a.precondition].filter(Boolean).join("&"));
+  ["Nige", "Senkou", "Sasi", "Oikomi"].forEach((st) => {
+    const f = PR.raceFacts(p, st);
+    assert.equal(f.running_style_count_same, 3); assert.equal(f.running_style_count_same_rate, 33);
+    assert.equal(PR.fits(conds("200272"), f, true), false, "Maverick");
+    assert.equal(PR.fits(conds("200282"), f, true), false, "Competitive Spirit");
+  });
+  const debuff = Object.keys(c.skills).find((id) => conds(id).some((x) => /running_style_count_senko_otherself/.test(x)));
+  assert.ok(PR.fits(conds(debuff), PR.raceFacts(p, "Nige"), true), "a Pace Chaser debuff still has targets");
 });

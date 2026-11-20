@@ -2439,12 +2439,29 @@
   // need her in the other half of the field (Leap Forward for a Pace Chaser), or a rival ahead of
   // a Front Runner, who runs in 1st (No Stopping Me!), are left out here, for every use:
   // data/skill-positions.js, parent-relevance.js positionFits.
+  // Skills that depend on how many runners share her style (Maverick, Competitive Spirit,
+  // Wallflower...) count by the assumed field: each other team has one uma of every style (2 others
+  // of hers). One that can't fire then is left out, from the solo chart (she races alone there) and
+  // the field values alike.
+  const countCache = {};
+  function fieldCountOk(pid, id) {
+    const key = pid + "|" + id;
+    if (key in countCache) return countCache[key];
+    const p0 = presetById(pid), cat = p0 ? raceCatalog(p0) : null, sk = cat && cat.skills[id];
+    if (!cat) return true; // not loaded yet: decide once it is
+    const conds = sk ? sk.alternatives.map((a) => [a.condition, a.precondition].filter(Boolean).join("&")) : null;
+    if (!conds || !conds.some((c) => /running_style_count/.test(c))) return (countCache[key] = true);
+    const PR = window.UmaParentRelevance, p = presetById(pid);
+    const ok = ["Nige", "Senkou", "Sasi", "Oikomi"].map((st) => PR.fits(conds, PR.raceFacts(p, st), true));
+    return (countCache[key] = ok);
+  }
+  const countFits = (pid, id, style) => { const ok = fieldCountOk(pid, String(id)); return ok === true || ok[["Nige", "Senkou", "Sasi", "Oikomi"].indexOf(style)]; };
   function skillRows(pid, style, field = false) {
     const pos = positionsFor(presetById(pid));
     const PR = window.UmaParentRelevance;
     // Field values already raced her in a pack: no position rules on top.
-    const rows = chartRows(pid, style, field);
-    if (rows.fieldBased) return rows;
+    const rows0 = chartRows(pid, style, field), rows = rows0.filter((r) => countFits(pid, r.id, style));
+    if (rows0.fieldBased) { rows.fieldBased = true; return rows; }
     // A rival-ahead skill for a Front Runner fighting for the lead counts at that share.
     return rows.filter((r) => PR.positionFits(pos, r.id, style)).map((r) => { const k = PR.aheadScale(pos, r.id, style); return k < 1 ? Object.assign({}, r, { L: r.L * k, mean: r.mean == null ? null : r.mean * k, ahead: k }) : r; });
   }
