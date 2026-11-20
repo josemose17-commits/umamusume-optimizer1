@@ -98,6 +98,8 @@
       skillBudget: (sc.id === "grandlive" || !!race) && opts.skillBudget !== false,
       coupledEvents: sc.id === "grandlive" && opts.coupledEvents !== false,
       gmModel: sc.id === "grandmasters" && !!GMs && opts.gmModel !== false,
+      // Buy golds first in each career (skill-budget.js) where full-field races showed it pays.
+      goldsFirst: !!opts.goldsFirst,
       runs: opts.runs || 10,
       seed: opts.seed || 12345,
       helloProcRate: opts.helloProcRate != null ? Math.max(0, Math.min(1, +opts.helloProcRate)) : 0.4,
@@ -335,7 +337,7 @@
     const eventExposures = [];
     const careers = [];
     const supportTotals = deck.map(() => ({ events: 0, complete: 0, ended: 0, s: [0, 0, 0, 0, 0], sp: 0, energy: 0, wastedEnergy: 0, b: 0, wastedBond: 0, me: 0, mo: 0 }));
-    const purchase = ctx.skillBudget ? SkillBudget.create({ skills: ctx.skills, costs: ctx.costs, learned: ctx.learned, available: ctx.available, must: ctx.must, lengthValue: L_VALUE, spValue: SP_VALUE }) : null;
+    const purchase = ctx.skillBudget ? SkillBudget.create({ skills: ctx.skills, costs: ctx.costs, learned: ctx.learned, available: ctx.available, must: ctx.must, goldsFirst: !!ctx.goldsFirst, lengthValue: L_VALUE, spValue: SP_VALUE }) : null;
     const eventCtx = purchase ? Object.assign({}, ctx, { known: ctx.learned, must: ctx.must.filter((id) => !ctx.available.includes(id)), eventUtility: purchase.hintUtility, eventUtilityKey: purchase.key }) : ctx;
     const scheduled = new Map((ctx.calendar || []).map(day => [day.turn, day]));
     const gmTotals = { wisdoms: 0, red: 0, blue: 0, yellow: 0 };

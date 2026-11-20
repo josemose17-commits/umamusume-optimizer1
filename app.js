@@ -2357,6 +2357,10 @@
     const key = p.id + "@" + share;
     return posCache[key] || (posCache[key] = window.UmaParentRelevance.withContest(base, share));
   }
+  // Golds first in the deck search's careers, where the cup's full-field check (data/field-skills.js
+  // goldsFirst: golds-first against the solo-chart pick, same SP, 5,200 races) found it clearly
+  // longer and winning at least as often. On CM 22: End Closers.
+  const goldsFirstFor = (pid, style) => { const FS = window.UmaFieldSkills, s = FS && FS.cups && FS.cups[pid] && FS.cups[pid].styles && FS.cups[pid].styles[style], g = s && s.goldsFirst; return !!(g && g.L > g.ci95 && g.winGolds >= g.winSolo); };
   // Position rules for Parents' relevant skills: off where the cup has full-field values (those
   // raced her in a pack already), positionsFor otherwise.
   const relPositions = (p, style) => (skillRows(p.id, style, true).fieldBased ? null : positionsFor(p));
@@ -2794,7 +2798,7 @@
       if (!est) {
         try {
           const sv = skillMap(p.id, c.style);
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, trainee: tid, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
+          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, trainee: tid, caps: E.capsFor(state, scenario()), raceShare, runs: 16, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
@@ -2836,7 +2840,7 @@
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
         if (ss && !tg && !staminaTrainingTarget(stamina)) ss.ignoreFit = true;
-        const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, trainee: tid, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
         const tick = () => {
           try {
@@ -3059,7 +3063,7 @@
     if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
     const p = presetById(r.preset), sv = skillMap(p.id, c.style);
     const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-    const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+    const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
     const job = OPT.sensitivity(sim, candidates);
     j.sensitivityJob = job; renderCM();
     const tick = () => {
@@ -3105,7 +3109,7 @@
       });
       const sv = skillMap(p.id, c.style);
       const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-      const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+      const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
       const token = {}; j.wishJob = token; j.wish = null; renderCM();
       const out = []; let at = 0;
       const tick = () => {
@@ -4289,7 +4293,7 @@
       ${q.skills.map((x,i)=>`<div class="row-wrap"><b>${skillNameHTML(x.id)}</b><label class="chip-toggle"><input type="checkbox" data-race-equipped="${i}"${x.learned?" checked":""}> Equipped</label><label class="field"><span>Hint</span><select data-race-hint="${i}">${[0,1,2,3,4,5].map(n=>`<option value="${n}"${+x.hint===n?" selected":""}>Lv${n}</option>`).join("")}</select></label><button type="button" class="linkish" data-race-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></div>`).join("")}
       <p class="mini">Her own unique is equipped automatically. Planning targets need a card, trainee or parent source; equipped purchases are charged first. For a finished uma, enter SP remaining after those purchases. Edits update an existing comparison automatically.</p>
       <button type="button" class="btn ghost small" id="cmRaceRun">${j.raceRunning ? "Restart skill comparison" : "Compare skills"}</button>
-      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini ${/^Full-field/.test(r.staticReason) ? "" : "warn"}">${/^Full-field/.test(r.staticReason) ? "" : "Course-chart fallback: "}${esc(r.staticReason)}${/^Full-field/.test(r.staticReason) ? "" : " This uses the chart and SP costs, without a new race simulation."}</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. ${r.staticReason ? "Adds" : "Mean"} +${num(r.plan.result.mean)} L against equipped skills.${r.staticReason ? "" : ` Lower 10% result: ${num(r.plan.result.low)} L.`}</p>${duelHTML(r.plan, !!r.staticReason)}${prunedHTML(r.plan)}${g8PairHTML(p.id, r.plan.selected.map((x) => x.id).concat(q.skills.filter((x) => x.learned).map((x) => String(x.id))))}<p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. ${["Normal","Good","Great"][Math.max(0,Math.min(2,+(q.mood||0)))]} mood.</p>
+      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">${j.raceStage === "golds" ? "Golds-first check: racing both sets in the full field…" : `Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%`}</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini ${/^Full-field/.test(r.staticReason) ? "" : "warn"}">${/^Full-field/.test(r.staticReason) ? "" : "Course-chart fallback: "}${esc(r.staticReason)}${/^Full-field/.test(r.staticReason) ? "" : " This uses the chart and SP costs, without a new race simulation."}</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. ${r.staticReason ? "Adds" : "Mean"} +${num(r.plan.result.mean)} L against equipped skills.${r.staticReason ? "" : ` Lower 10% result: ${num(r.plan.result.low)} L.`}</p>${duelHTML(r.plan, !!r.staticReason)}${fieldCheckHTML(r)}${prunedHTML(r.plan)}${g8PairHTML(p.id, r.plan.selected.map((x) => x.id).concat(q.skills.filter((x) => x.learned).map((x) => String(x.id))))}<p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. ${["Normal","Good","Great"][Math.max(0,Math.min(2,+(q.mood||0)))]} mood.</p>
       ${!r.staticReason && (r.plan.result.fullSpurt||0)<0.95 ? `<p class="mini warn">With these skills she gets a full last spurt in only ${Math.round((r.plan.result.fullSpurt||0)*100)}% of simulated races (no stamina debuffers): raise stamina or add recovery skills.</p>` : ""}${sourceRowsHTML(r)}${table(r.plan.selected,false)}
       ${r.goals && r.goals.length ? `<p class="mini"><b>Parent targets:</b> ${[...new Set(r.goals.map(x=>ACCESS.white(x.id)).filter(Boolean))].map(id=>skillNameHTML(id)).join(", ")}. Targets to search or train for; these are not guaranteed purchases. <button type="button" class="linkish" data-goto-tab="parents">Plan their sources in Parents →</button></p>` : ""}
       <details><summary>Next skills from the equipped baseline</summary><p class="mini">Each is tested against equipped skills alone. The purchase list above tests combinations. Added L for its rows measures removing that purchase from the final set, so those rows do not add up.</p>${table(r.plan.ranking,true)}</details>
@@ -4301,7 +4305,7 @@
     const host = "cm", c = cm(host), j = deckJob(host), p = presetById(c.preset), q = JSON.parse(JSON.stringify(raceState(c)));
     if (!refineDeck && !fromParents) raceState(c).open = true;
     if (j.raceWorker) j.raceWorker.close();
-    const token = {}; j.raceToken = token; j.raceTouched = true; j.raceRunning = true; j.raceError = null; j.raceProgress = 0;
+    const token = {}; j.raceToken = token; j.raceTouched = true; j.raceRunning = true; j.raceError = null; j.raceProgress = 0; j.raceStage = null;
     const same = () => j.raceToken === token && cm("cm") === c;
     let initialKey = optKey(host), initialSourceKey=skillPlanKey(c);
     renderCM();
@@ -4386,7 +4390,12 @@
         const baselineGain=learned.length>ownUnique.length?(await compare(ownUnique,learned,96,314159)).mean:0;
         compared++;
         const score=(est && est.value || 0) - (est && est.skill || est && est.skillValue || 0) * +c.skillW + (plan.result.mean+baselineGain)*60*+c.skillW;
-        if(!chosen || score>chosenScore+1e-6) {chosenScore=score;chosen={plan,goalPlan,access,requested:q.skills,goals:goalPlan.selected.filter(x=>potential.includes(ACCESS.white(x.id))),parentValues,staticReason:unsupported,source,stats,apt,baselineCost,candidate,conditions:skillConditions(catalog,plan.ranking.map(x=>x.id))};}
+        if(!chosen || score>chosenScore+1e-6) {chosenScore=score;chosen={plan,goalPlan,access,requested:q.skills,goals:goalPlan.selected.filter(x=>potential.includes(ACCESS.white(x.id))),parentValues,staticReason:unsupported,source,stats,apt,baselineCost,candidate,conditions:skillConditions(catalog,plan.ranking.map(x=>x.id)),ctx:{available,learned,hints,sp,compare,catalog,values:baseValues}};}
+      }
+      // Golds first, decided in the full field (see goldsFirstCheck).
+      if (chosen && !chosen.staticReason && !fieldUnsupported(p) && same()) {
+        try { j.raceStage = "golds"; renderCM(); await goldsFirstCheck(chosen, p, c, t, q, same); }
+        catch (e) { if (same() && !/cancel/i.test(e.message || "")) chosen.fieldCheck = { error: e.message || String(e) }; }
       }
       if(same() && initialKey===optKey(host) && initialSourceKey===skillPlanKey(c)) {
         if(refineDeck && chosen && j.optResult && chosen.candidate.cards !== j.optResult.cards && candidates.length>1) {
@@ -4404,6 +4413,66 @@
     } catch(error) {if(same())j.raceError=error.message || String(error);}
     finally {if(worker)worker.close();if(j.raceToken===token){j.raceRunning=false;j.raceWorker=null;if(cm("cm")===c)renderCM();}}
     return currentSkillPlan(c);
+  }
+  // Golds first, raced in the full field. On CM 22 the solo race check's picks lost up to 1.6 L to
+  // a golds-first set for End Closers, but golds-first lost a little for Front Runners (field-race
+  // comparisons, docs in README): so neither rule decides. Her shop's highest-gain golds her SP
+  // allows (full-field values where the cup has them), then the rest by gain, made a full plan by
+  // the same search (its skills required); then that and the solo pick raced on the same 1,000
+  // full-field races (CM's style mix, rivals as strong as her). Golds-first is kept only when it
+  // gains clearly more lengths (past the 95% interval). ch.fieldCheck says how it went.
+  async function goldsFirstCheck(ch, p, c, t, q, same) {
+    const { available, learned, hints, sp, compare, catalog, values } = ch.ctx, RS = window.UmaRaceSkills;
+    const rar = (id) => (SV.skills[id] || [])[2], field = fieldOf(p.id, c.style);
+    const val = (id) => (field && field.skills[id] && field.skills[id][0] != null ? field.skills[id][0] : values[id] || 0);
+    const opts = window.UmaSkillBudget.create({ learned, available, skills: values, includeZero: true }).options(hints).flat();
+    const must = (c.must || []).map(String), pick = [], fams = new Set();
+    let spent = 0;
+    const take = (o) => { if (!o || fams.has(o.family) || spent + o.cost > sp) return; pick.push(o); fams.add(o.family); spent += o.cost; };
+    opts.filter((o) => must.includes(String(o.id))).forEach(take);
+    opts.filter((o) => rar(o.id) === 2 && val(o.id) > 0).sort((a, b) => val(b.id) - val(a.id)).forEach(take);
+    opts.filter((o) => rar(o.id) !== 2 && val(o.id) > 0).sort((a, b) => val(b.id) - val(a.id)).forEach(take);
+    const soloIds = ch.plan.selected.map((x) => String(x.id)), goldIds = pick.map((o) => String(o.id));
+    const key = (xs) => xs.slice().sort().join(".");
+    if (!pick.some((o) => rar(o.id) === 2) || key(goldIds) === key(soloIds)) { ch.fieldCheck = { same: true }; return; }
+    const plan2 = await RS.optimize({ catalog, allowChartOnly: false, available, learned, hints, sp, values, must: must.concat(goldIds), compare, scale: raceScale(p, c.style, available), maxEvaluations: 12 });
+    if (!same()) return;
+    const ids2 = plan2.selected.map((x) => String(x.id));
+    if (key(ids2) === key(soloIds)) { ch.fieldCheck = { same: true }; return; }
+    const gs = await globalSim(), pool = await gs.G.RacePool.create({ size: Math.max(1, Math.min(6, (navigator.hardwareConcurrency || 4) - 1)) });
+    try {
+      const uid = t.us && t.us[0] ? String(t.us[0]) : null;
+      const her = { style: c.style, stats: { speed: ch.stats[0], stamina: ch.stats[1], power: ch.stats[2], guts: ch.stats[3], wisdom: ch.stats[4] }, apt: ch.apt, mood: +(q.mood || 0), unique: uid && gs.table[uid] ? { id: uid, level: +(q.uniqueLv || 1) } : null };
+      const mix = FR.MIX[p.kind === "loh" ? "loh" : "cm"], picks = {};
+      FR.STYLES.forEach((k) => { if (mix[k]) picks[k] = rivalSkills(p, k, Math.max(1200, sp), gs.table); });
+      const rivals = FR.rivals(her, { mix, strength: "equal", skillsFor: (k) => picks[k] });
+      const draws = FR.layouts(1 + rivals.length, 20), unsupported = new Set(), run = (req, seeds) => pool.runResults(req, seeds);
+      const races = async (ids) => {
+        const out = [];
+        for (let g = 0; g < draws.length; g++) {
+          if (!same()) throw new Error("cancelled");
+          const seeds = Array.from({ length: 50 }, (_, i) => g * 1000 + i + 1);
+          const rs = await FR.runSafe({ preset: p, table: gs.table, settings: gs.settings, run }, [FR.runner(Object.assign({}, her, { skills: learned.concat(ids) }))].concat(rivals.map(FR.runner)), draws[g], seeds, unsupported);
+          rs.forEach((r) => out.push({ t: r.results[0].finishTimeRaw, place: r.results[0].finishOrder }));
+        }
+        return out;
+      };
+      const a = await races(soloIds), b = await races(ids2);
+      const v = p.course.distance / (a.reduce((n, x) => n + x.t, 0) / a.length);
+      const d = FR.summary(b.map((x, i) => (a[i].t - x.t) * v / 2.5)), win = (r) => r.filter((x) => x.place === 0).length / r.length;
+      const golds = d.mean > d.ci95;
+      ch.fieldCheck = { solo: soloIds, golds: ids2, diff: d, winSolo: win(a), winGolds: win(b), races: a.length, chose: golds ? "golds" : "solo" };
+      if (golds) { ch.soloPlan = ch.plan; ch.plan = plan2; }
+    } finally { pool.close(); }
+  }
+  // The golds-first check's result, in a line.
+  function fieldCheckHTML(r) {
+    const f = r && r.fieldCheck;
+    if (!f) return "";
+    if (f.error) return `<p class="mini warn">Golds-first check didn't run: ${esc(f.error)}</p>`;
+    if (f.same) return `<p class="mini">Golds-first check: her highest-gain golds first gives this same set.</p>`;
+    const n = (x) => x.toFixed(2), other = (f.chose === "golds" ? f.solo : f.golds).map((id) => skillNameHTML(id)).join(", ");
+    return `<p class="mini"><b>Golds-first check</b> (the full field, ${f.races.toLocaleString("en-US")} races each): ${f.chose === "golds" ? `golds first won, by ${n(f.diff.mean)} ± ${n(f.diff.ci95)} L (wins ${Math.round(f.winGolds * 100)}% against ${Math.round(f.winSolo * 100)}%), so it's the pick. The solo race check's set was ${other}.` : `the golds-first set (${other}) ${f.diff.mean >= 0 ? "gained" : "lost"} ${n(Math.abs(f.diff.mean))} ± ${n(f.diff.ci95)} L against this pick (wins ${Math.round(f.winGolds * 100)}% against ${Math.round(f.winSolo * 100)}%): ${f.diff.mean > 0 ? "not clearly better, so this pick stays" : "this pick stays"}.`}</p>`;
   }
   function raceEdited() {const j=deckJob("cm");raceState(cm("cm")).open=true;save();if(j.raceTouched)runRaceSkills();else renderCM();}
   document.addEventListener("toggle",e=>{if(e.target.id==="cmRaceInputs" && e.target.isConnected){raceState(cm("cm")).open=e.target.open;save();}},true);

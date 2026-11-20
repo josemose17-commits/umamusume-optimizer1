@@ -75,8 +75,27 @@
       });
       return [...groups.values()];
     }
+    // opts.goldsFirst (where full-field races showed it pays, data/field-skills.js goldsFirst):
+    // must-have routes first, then her highest-value golds that fit (each family once, with its
+    // white's price), then the exact knapsack on the SP left. Otherwise the exact knapsack.
     function solve(levels, projectedSp) {
+      if (!opts.goldsFirst) return solveGroups(options(levels), projectedSp);
       const groups = options(levels), budget = Number.isFinite(+projectedSp) ? Math.max(0, Math.floor(+projectedSp)) : 0;
+      const gold = (o) => !!(metadata[o.id] && metadata[o.id][3] === 2), pre = [], used = new Set();
+      let left = budget;
+      const take = (o) => { if (!used.has(o.family) && o.cost <= left) { pre.push(o); used.add(o.family); left -= o.cost; } };
+      groups.flat().filter((o) => o.required.length).sort((a, b) => b.required.length - a.required.length || b.value - a.value).forEach(take);
+      groups.flat().filter((o) => gold(o) && o.value > 0).sort((a, b) => b.value - a.value).forEach(take);
+      const rest = solveGroups(groups.filter((g) => !used.has(g[0].family)), left);
+      const selected = pre.concat(rest.selected), spent = budget - rest.unspent;
+      const satisfied = new Set(selected.flatMap((x) => x.required).concat([...learned].filter((id) => must.has(id))));
+      return { budget, spent, unspent: budget - spent, selected, goldsFirst: true,
+        value: selected.reduce((n, o) => n + o.value, 0), L: selected.reduce((n, o) => n + o.L, 0),
+        unmetMust: [...must].filter((id) => !satisfied.has(id)),
+        offered: [...new Set(groups.flat().map((o) => o.id))], unsupported: rest.unsupported };
+    }
+    function solveGroups(groups, projectedSp) {
+      const budget = Number.isFinite(+projectedSp) ? Math.max(0, Math.floor(+projectedSp)) : 0;
       const limit = Math.min(budget, groups.reduce((n, g) => n + Math.max(...g.map((o) => o.cost)), 0));
       // Lexicographic objective: fulfill as many offered must-haves as possible,
       // then maximize the final set's additive race gain. SP counts through
