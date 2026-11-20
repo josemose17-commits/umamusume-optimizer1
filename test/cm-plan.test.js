@@ -557,7 +557,8 @@ test("a CM parent's priorities: the plan's whites, then the cup's own skills (â—
   const keep = new Set(w.slice(0, 1).map((k) => String(k.id)));
   const narrow = { targets: Object.fromEntries(Object.entries(x.rel.targets).filter(([id]) => keep.has(String(id)))), why: x.rel.why, L: x.rel.L };
   const planned = Object.assign({}, x, { rel: narrow, relAll: x.rel, skillPlan: { parentValues: {} } });
-  const last = String(w[w.length - 1].id);
+  const K = require("../data/skill-kinds.js").skills, notHeal = w.filter((k) => !(K[String(k.id)] && K[String(k.id)][0] === "recovery"));
+  const last = String(notHeal[notHeal.length - 1].id);
   const list = plan.itSkills(planned, offers, 10, new Set(), {}, { own: (id) => id === last, double: true });
   assert.equal(String(list[0].white), [...keep][0], "the plan's white first");
   const at = list.findIndex((k) => String(k.white) === last);
@@ -566,4 +567,19 @@ test("a CM parent's priorities: the plan's whites, then the cup's own skills (â—
   for (let i = 1; i < list.length; i++) assert.ok(tier(list[i]) >= tier(list[i - 1]), "plan, then the cup's own (its skills and fitting greens), then the rest");
   const fam = SB.DATA.skills[last][0], circles = Object.keys(SB.DATA.skills).filter((id) => SB.DATA.skills[id][0] === fam && SB.DATA.skills[id][3] === 1);
   if (circles.length > 1) assert.notEqual(String(list[at].id), last, "its â—Ž when SS is likely");
+});
+
+test("Independent Training priorities: events only (a white her deck only hints is left out), no white recoveries", () => {
+  const x = x0(), w = plan.want(x).white, K = require("../data/skill-kinds.js").skills;
+  const offers = {}; w.forEach((k) => { offers[k.id] = 0.5; });
+  const heal = (id) => K[String(id)] && K[String(id)][0] === "recovery";
+  const ids = w.map((k) => String(k.id)).filter((id) => !heal(id));
+  const hinted = ids[0], evented = ids[1];
+  const list = plan.itSkills(x, offers, 10, new Set(), {}, null, { event: new Set([evented]), hint: new Set([hinted]) });
+  assert.ok(!list.some((k) => String(k.white) === hinted), "hint-only white left out");
+  assert.ok(list.hintOnly.some((k) => k.id === hinted));
+  assert.ok(list.some((k) => String(k.white) === evented && k.event), "her deck's event white is in");
+  assert.ok(!list.some((k) => heal(k.white)), "no white recoveries");
+  const before = list.findIndex((k) => k.gamble);
+  if (before >= 0) assert.ok(list.slice(before).every((k) => k.gamble), "random-event whites after her deck's");
 });

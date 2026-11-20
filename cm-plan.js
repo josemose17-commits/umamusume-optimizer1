@@ -191,9 +191,15 @@
     // cup (optional): { own(id) → the skill is for this cup's distance or surface, or a green that
     // fits it; double → use the ◎ of a distance or surface skill (her SS chance is high) }. The
     // cup's own skills come right after the purchase plan's (a CM parent's priorities).
-    function itSkills(x, offers, n = 10, anyway = new Set(), cover = {}, cup = null) {
+    // src: { event, hint } (Sets of skill ids her deck's cards give by event and by training hint).
+    // Independent Training's priorities only steer event choices, so a white her deck only hints is
+    // left out (listed in hintOnly); one an event of her deck gives counts, and one no card of hers
+    // has can still come from a random event.
+    // White recoveries aren't aimed for (you asked): left out too (listed in recoveries).
+    const KINDS = () => ((root.UmaSkillKinds || (typeof require !== "undefined" ? require("./data/skill-kinds.js") : null)) || {}).skills || {};
+    function itSkills(x, offers, n = 10, anyway = new Set(), cover = {}, cup = null, src = null) {
       if (!famMembers) { famMembers = {}; Object.keys(meta).forEach((id) => { (famMembers[meta[id][0]] = famMembers[meta[id][0]] || []).push(id); }); }
-      const o2 = offers || {}, rows = [], seen = new Set();
+      const o2 = offers || {}, rows = [], seen = new Set(), hintOnly = [], recoveries = [], K = KINDS();
       const add = (rel, xx, extra) => {
         const fams = fam.families(rel), eff = fam.worthOf(xx);
         Object.keys(fams).forEach((f) => {
@@ -202,12 +208,19 @@
           const all = famMembers[f] || fams[f].ids, p = Math.min(1, Math.max(0, ...all.map((id) => o2[id] || 0)));
           if (extra && !(p > 0)) return;
           seen.add(f);
+          // The list holds whites, so only an event that gives a white tier (○, ◎) counts, not one
+          // that gives the gold.
+          const ev = !!src && all.concat(fams[f].ids).some((id) => meta[id] && meta[id][3] === 1 && src.event.has(String(id)));
+          const hint = !!src && all.concat(fams[f].ids).some((id) => src.hint.has(String(id)));
+          const wid = String(fam.baseWhite(fams[f].ids[0]));
+          if (K[wid] && K[wid][0] === "recovery") { recoveries.push({ family: f, id: wid, L: eff[f] }); return; }
+          if (src && hint && !ev) { hintOnly.push({ family: f, id: String(fam.baseWhite(fams[f].ids[0])), L: eff[f] }); return; }
           const white = String(fam.baseWhite(fams[f].ids[0])), c = cover[f] || 0;
           const golds = all.filter((id) => meta[id] && meta[id][3] === 2).map(String);
           const own = !!(cup && cup.own && (cup.own(white) || all.some((id) => cup.own(String(id))) || fams[f].why === "green"));
           // The ◎ of a cup's own ○ skill when she'll likely hit SS (the video's "double circle").
           const dbl = own && cup.double ? all.map(String).filter((id) => meta[id] && meta[id][3] === 1 && id !== white && meta[id][1] > (meta[white] ? meta[white][1] : 0)).sort((a, b) => meta[b][1] - meta[a][1])[0] : null;
-          rows.push({ family: f, id: dbl || white, white, gold: false, double: !!dbl, own, p, L: eff[f], cover: c, extra, score: eff[f] * p * (1 - c), gamble: !(p > 0), anyway: anyway.has(white) || golds.some((g) => anyway.has(g)) });
+          rows.push({ family: f, id: dbl || white, white, gold: false, double: !!dbl, own, p, L: eff[f], cover: c, extra, score: eff[f] * p * (1 - c), gamble: src ? !ev : !(p > 0), event: ev, anyway: anyway.has(white) || golds.some((g) => anyway.has(g)) });
         });
       };
       add(x.rel, x, false);
@@ -215,8 +228,10 @@
       const byScore = (a, b) => b.score - a.score || b.L - a.L;
       const live = rows.filter((r) => !r.gamble && !r.anyway);
       const offered = live.filter((r) => !r.extra).sort(byScore).concat(live.filter((r) => r.extra && r.own).sort(byScore), live.filter((r) => r.extra && !r.own).sort(byScore));
-      const rest = x.skillPlan ? [] : rows.filter((r) => r.gamble).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
-      return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L) });
+      // Whites only a random event can give: after her deck's (with src always; without it only
+      // when she has no purchase plan).
+      const rest = x.skillPlan && !src ? [] : rows.filter((r) => r.gamble && !r.anyway).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
+      return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L), hintOnly: hintOnly.sort((a, b) => b.L - a.L), recoveries: recoveries.sort((a, b) => b.L - a.L) });
     }
     // Her blue spark's stat is random (1 in 5 each); its stars depend on that stat's value in her
     // predicted careers (learning.blueStars, per stat), else 20/70/10% as for a stat over 1100.
