@@ -2357,6 +2357,9 @@
     const key = p.id + "@" + share;
     return posCache[key] || (posCache[key] = window.UmaParentRelevance.withContest(base, share));
   }
+  // Position rules for Parents' relevant skills: off where the cup has full-field values (those
+  // raced her in a pack already), positionsFor otherwise.
+  const relPositions = (p, style) => (skillRows(p.id, style).fieldBased ? null : positionsFor(p));
   function simNote(p) {
     const v = simVariant(p);
     if (v.kind === "global") return "Run on the Global Umalator: Global's skills as they are now.";
@@ -2391,7 +2394,38 @@
     if (mine) return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).sort((a, b) => b.L - a.L);
     const data = svCache[pid];
     if (!data || typeof data === "string" || !data[style]) return [];
-    return data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
+    return fieldRows(pid, style, data[style]) || data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
+  }
+  // Full-field values (data/field-skills.js, tools/build_field_skills.mjs) where the cup has them:
+  // each skill raced in a field of 9 with and without it, on top of a typical build for her style,
+  // so passing, blocking, position and debuffs meet a real pack. The rows say so (field: [L, ci95,
+  // fire share, where p10/p50/p90 m, place, win, kind]). A chart skill the field run couldn't race
+  // gets the field's value of the measured skills nearest it on the chart (the median of the 7 with
+  // the closest solo value: big chart skills lose more in a full build than small ones). Both simulators
+  // report lengths at the finish, so field values are used as measured next to the solo stat
+  // curves (the field run's +50-stat check is kept in the data: they disagree on power's line on
+  // dirt, see docs/race-mechanics-notes.md). null without.
+  const fieldOf = (pid, style) => { const FS = window.UmaFieldSkills, c = FS && FS.cups && FS.cups[pid], s = c && c.styles && c.styles[style]; return s && !s.partial && s.skills ? s : null; };
+  const fieldCache = new Map();
+  function fieldRows(pid, style, solo) {
+    const s = fieldOf(pid, style);
+    if (!s) return null;
+    const key = pid + "|" + style;
+    if (fieldCache.has(key)) return fieldCache.get(key);
+    const measured = Object.entries(s.skills).filter(([, x]) => x[0] != null);
+    const soloL = Object.fromEntries((solo || []).map(([id, med]) => [String(id), med / 100]));
+    const pairs = measured.filter(([id, x]) => soloL[id] > 0.05 && x[8] === 0).map(([id, x]) => [soloL[id], x[0]]);
+    const near = (v) => {
+      const xs = pairs.slice().sort((a, b) => Math.abs(Math.log(a[0] / v)) - Math.abs(Math.log(b[0] / v))).slice(0, 7).map((x) => x[1]).sort((a, b) => a - b);
+      return xs.length ? xs[Math.floor(xs.length / 2)] : v;
+    };
+    const rows = measured.map(([id, x]) => ({ id: +id, L: x[0], mean: null, field: x }));
+    const have = new Set(measured.map(([id]) => id));
+    (solo || []).forEach(([id, med]) => { if (!have.has(String(id)) && med > 0) { const L = Math.max(0, near(med / 100)); rows.push({ id, L, mean: null, scaled: med / 100 }); } });
+    rows.sort((a, b) => b.L - a.L);
+    rows.fieldBased = true;
+    fieldCache.set(key, rows);
+    return rows;
   }
   // A race's skill values for a style. The Umalator runs one horse without a pack, so skills that
   // need her in the other half of the field (Leap Forward for a Pace Chaser), or a rival ahead of
@@ -2400,13 +2434,17 @@
   function skillRows(pid, style) {
     const pos = positionsFor(presetById(pid));
     const PR = window.UmaParentRelevance;
+    // Field values already raced her in a pack: no position rules on top.
+    const rows = chartRows(pid, style);
+    if (rows.fieldBased) return rows;
     // A rival-ahead skill for a Front Runner fighting for the lead counts at that share.
-    return chartRows(pid, style).filter((r) => PR.positionFits(pos, r.id, style)).map((r) => { const k = PR.aheadScale(pos, r.id, style); return k < 1 ? Object.assign({}, r, { L: r.L * k, mean: r.mean == null ? null : r.mean * k, ahead: k }) : r; });
+    return rows.filter((r) => PR.positionFits(pos, r.id, style)).map((r) => { const k = PR.aheadScale(pos, r.id, style); return k < 1 ? Object.assign({}, r, { L: r.L * k, mean: r.mean == null ? null : r.mean * k, ahead: k }) : r; });
   }
   // The rows skillRows leaves out, by why: { ahead, back, front }, most valuable first.
   function skillsLeftOut(pid, style) {
-    const pos = positionsFor(presetById(pid)), out = { ahead: [], back: [], front: [] };
-    chartRows(pid, style).forEach((r) => { const why = window.UmaParentRelevance.positionMiss(pos, r.id, style); if (why) out[why].push(r); });
+    const pos = positionsFor(presetById(pid)), out = { ahead: [], back: [], front: [] }, rows = chartRows(pid, style);
+    if (rows.fieldBased) return out;
+    rows.forEach((r) => { const why = window.UmaParentRelevance.positionMiss(pos, r.id, style); if (why) out[why].push(r); });
     return out;
   }
   // For the race simulator's set search: { id: share } for rival-ahead skills, which it fires on a
@@ -2434,13 +2472,46 @@
     const map = {};
     const costs = {};
     skillRows(pid, style).forEach((r) => { map[r.id] = r.L; costs[r.id] = skillInfo(r.id)[1]; });
+    const heal = healValues(pid, style);
+    if (heal) Object.entries(heal).forEach(([id, h]) => { if (map[id] == null || h.L > map[id]) map[id] = h.L; });
     return { map, costs };
+  }
+  // Heals by the stamina check, for the ace CM & decks has open on this cup and style: a recovery
+  // skill restores a share of her max HP (course distance + 0.8 × her style's HP factor × stamina,
+  // the race mechanics document), which is worth the stamina that HP takes. Short of the stamina
+  // check's need (with the debuff skills you picked) that's what the stamina curve gives for it,
+  // at how often the heal fires (full-field share, else 85%); at or past the need, about nothing,
+  // so the heal keeps its own value. { id: { L, stamina, short, fire } } or null.
+  const HP_FACTOR = { Nige: 0.95, Senkou: 0.89, Sasi: 1, Oikomi: 0.995 };
+  const healCache = new Map();
+  function healValues(pid, style) {
+    const c = state.cm;
+    if (!c || c.goal !== "race" || c.preset !== pid || c.style !== style) return null;
+    const p = presetById(pid), check = staminaPeek(p, c), cat = raceCatalog(p);
+    if (!p || !cat || !check || !(check.need > 0)) return null;
+    const her = +(c.raceSkills && c.raceSkills.stats && c.raceSkills.stats.stamina) || +((predictedStats(p, c) || {}).stamina) || check.need;
+    const key = [pid, style, her, check.need, check.mode].join("|");
+    if (healCache.has(key)) return healCache.get(key);
+    const rv = raceValues(p, style, check), f = HP_FACTOR[style] || 1, out = {};
+    if (rv) {
+      const r = Object.assign({}, rv, { steps: [] }), L = (x) => OPT.raceL({ race: r }, [1000, x, 1000, 1000, 1000]);
+      const field = fieldOf(pid, style);
+      Object.entries(cat.skills).forEach(([id, sk]) => {
+        const pct = Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9).map((e) => e.modifier))) / 10000;
+        if (!(pct > 0)) return;
+        const hp = p.course.distance + 0.8 * f * her, stamina = pct * hp / (0.8 * f);
+        const gain = L(her + stamina) - L(her), fire = field && field.skills[id] && field.skills[id][2] > 0 ? field.skills[id][2] : 0.85;
+        if (gain > 0.005) out[id] = { L: +(fire * gain).toFixed(3), stamina: Math.round(stamina), short: Math.max(0, check.need - her), fire };
+      });
+    }
+    healCache.set(key, out);
+    if (healCache.size > 40) healCache.delete(healCache.keys().next().value);
+    return out;
   }
 
   // ---- game8's picks per cup (game8.js), pasted by hand from game8's Global cup guide ----
-  // Must-haves join each racing ace's must-have skills for that cup (✕ drops one for her);
-  // recommended ones get a tag and win ties in the skill-set comparisons. game8 doesn't rank its
-  // picks, so the simulator still values them.
+  // A tag only: game8 doesn't rank its picks and doesn't know her style, stats or SP, so the
+  // values decide everywhere (full-field races where the cup has them).
   const G8 = window.UmaGame8, G8_GUIDE = "https://game8.co/games/Umamusume-Pretty-Derby/archives/541155";
   const g8Entry = (pid) => (state.game8 && state.game8[pid]) || null;
   // A pick fits her style unless it's another style's skill (Front Runner Savvy for a Pace
@@ -2467,8 +2538,8 @@
     const e = g8Entry(pid), x = e.must.concat(e.rec).find((y) => y.id === String(id)), note = x && x.note;
     return ` <span class="pill g8" title="game8's ${kind === "must" ? "must-have" : "recommended"} skill for this cup${note ? " (" + esc(note) + ")" : ""}. game8 doesn't rank its picks: the simulator values them, and a game8 pick wins a close call.">game8${kind === "must" ? " must-have" : ""}</span>`;
   }
-  // game8's must-haves were once added to the ace's must-have skills; they're white sparks for her
-  // parents now (g8ParentWhites), so ones added that way are taken back out once.
+  // game8's must-haves were once added to the ace's must-have skills (game8 is a tag only now),
+  // so ones added that way are taken back out once.
   function g8Sync(c) {
     if (!c.g8added) return;
     const added = new Set(c.g8added.map(String));
@@ -2523,21 +2594,16 @@
       ${top.length ? `<p class="mini">The chart's strongest skills game8 doesn't list:</p><ul class="mini">${top.map(item).join("")}</ul>` : ""}</div>`;
   }
   // Which whites her parents will look for from game8's must-haves, in words.
-  function g8WhitesNote(e, c) {
-    const fits = g8Fits(c.preset, c.style), w = [...new Set(e.must.filter((x) => fits(x.id)).map((x) => ACCESS.white(x.id)).filter(Boolean))];
-    const none = e.must.filter((x) => fits(x.id) && !ACCESS.white(x.id));
-    return (w.length ? ` White sparks for her parents: ${w.map((id) => skillNameHTML(id)).join(", ")} <button type="button" class="linkish" data-goto-tab="parents">Parents →</button>.` : "") + (none.length ? ` No white spark: ${none.map((x) => skillNameHTML(x.id)).join(", ")} (an inherited unique comes from a parent who is that character).` : "");
-  }
   function g8BoxHTML(c) {
     const p = presetById(c.preset), e = g8Entry(p.id), fits = g8Fits(p.id, c.style);
     const pairOf = (id) => ((e && e.pairs) || []).find((x) => x.id === id);
     const chip = (x) => `<span class="chip${fits(x.id) ? "" : " warnchip"}">${skillNameHTML(x.id)}${pairOf(x.id) ? ` <span class="mini">+ ${pairOf(x.id).with.map((id) => esc(skillInfo(id)[0])).join(" or ")}</span>` : ""}${x.note ? ` <span class="mini" title="${esc(x.note)}">${esc(x.note.length > 60 ? x.note.slice(0, 57) + "…" : x.note)}</span>` : ""}${fits(x.id) ? "" : ` <span class="mini">not for a ${esc(STYLE_NAME[c.style] || c.style)}</span>`}</span>`;
     return `<details class="pred-help g8-box" data-cmp-open="cm-g8"><summary>game8's skills for this cup${e ? ` (${e.must.length} must-have, ${e.rec.length} recommended)` : ""}</summary>
-      <p class="mini">Copy the skill lists from <a href="${G8_GUIDE}" target="_blank" rel="noopener">game8's guide for this cup</a> (Champions Meeting → the cup → Recommended Skills) and paste them here: must-haves in the first box, the rest in the second. Paste the page as it copies: "・" and ★ bullets (a ★ line counts as a must-have), the "Icon" labels, "A / B" lines (both skills; the second counts as recommended), inherited uniques after their card, notes in brackets and headings ending in ":". game8 doesn't rank its picks, so the simulator still values them: must-haves become <b>white-spark targets for her parents</b> (the white version of each: a gold's white; inherited uniques have none) at the top of Parents' list, first in both uma.moe searches. Every pick gets a <span class="pill g8">game8</span> tag and wins close calls in <b>Skills for this build</b> and the Skill optimizer. To make the racing deck cover one too, star it in the skills table.</p>
+      <p class="mini">Copy the skill lists from <a href="${G8_GUIDE}" target="_blank" rel="noopener">game8's guide for this cup</a> (Champions Meeting → the cup → Recommended Skills) and paste them here: must-haves in the first box, the rest in the second. Paste the page as it copies: "・" and ★ bullets (a ★ line counts as a must-have), the "Icon" labels, "A / B" lines (both skills; the second counts as recommended), inherited uniques after their card, notes in brackets and headings ending in ":". game8 doesn't rank its picks and doesn't know her style, stats or SP, so they're a tag only: every pick gets a <span class="pill g8">game8</span> tag in the skill tables, and the values decide (full-field races where the cup has them). To make the racing deck or her parents cover one anyway, star it in the skills table.</p>
       <div class="row-wrap"><label class="field grow"><span>Must-have</span><textarea id="g8Must" rows="4" placeholder="Left-Handed ◯&#10;Tokyo Racecourse ◯">${esc(e ? e.text.must : "")}</textarea></label>
         <label class="field grow"><span>Recommended</span><textarea id="g8Rec" rows="4" placeholder="・ Solid Steps (requires 1000+ Power)&#10;・ Restraint">${esc(e ? e.text.rec : "")}</textarea></label></div>
       <div class="row-wrap"><button type="button" class="btn small" id="g8Save">Save for ${esc(presetLabel(p))}</button>${e ? '<button type="button" class="btn ghost small" id="g8Clear">Clear</button>' : ""}</div>
-      ${e ? `<p class="mini">Saved ${esc(fmtDate(e.at))}, for every ace racing this cup.${g8WhitesNote(e, c)}</p>${e.must.length ? `<div class="row-wrap"><span class="mini"><b>Must-have:</b></span>${e.must.map(chip).join("")}</div>` : ""}${e.rec.length ? `<div class="row-wrap"><span class="mini"><b>Recommended:</b></span>${e.rec.map(chip).join("")}</div>` : ""}` : ""}
+      ${e ? `<p class="mini">Saved ${esc(fmtDate(e.at))}, for every ace racing this cup.</p>${e.must.length ? `<div class="row-wrap"><span class="mini"><b>Must-have:</b></span>${e.must.map(chip).join("")}</div>` : ""}${e.rec.length ? `<div class="row-wrap"><span class="mini"><b>Recommended:</b></span>${e.rec.map(chip).join("")}</div>` : ""}` : ""}
       ${e && e.missed.length ? `<p class="mini warn">Not matched to a skill (check the spelling, or it's not out on Global by this cup): ${e.missed.map(esc).join("; ")}.</p>` : ""}
       ${g8CompareHTML(c)}
     </details>`;
@@ -2607,28 +2673,13 @@
   const released = (id, p) => window.UmaSkillRelease.outBy(SV.skills[id], skillsBy(p));
   // The parent's relevant skills for a race and style (parent-relevance.js): { targets, why },
   // why naming the rule ("L", "green", "recovery"). Global releases only if set.
-  // game8's must-haves for the ace's cup, as white sparks for her parents: each one's white
-  // (a gold's white; inherited uniques have none), at the top of her relevant skills (valued like
-  // her best one), why "game8". Only skills her style can use.
-  function g8ParentWhites(out, p, style) {
-    const e = g8Entry(p.id);
-    if (!e || !e.must.length || !out) return out;
-    const fits = g8Fits(p.id, style), top = Math.max(0, ...Object.values(out.targets || {}));
-    out.targets = Object.assign({}, out.targets); out.why = Object.assign({}, out.why);
-    e.must.filter((x) => fits(x.id)).forEach((x) => {
-      const w = ACCESS.white(x.id);
-      if (!w) return;
-      out.targets[w] = Math.max(out.targets[w] || 0, top || 1, (out.L && out.L[w]) || 0);
-      out.why[w] = "game8";
-    });
-    return out;
-  }
+  // game8's picks are a tag only: her parents' whites follow the values.
   function parentTargetsFor(c, p) {
-    return g8ParentWhites(parentTargetsBase(c, p), p, c.style);
+    return parentTargetsBase(c, p);
   }
   function parentTargetsBase(c, p) {
     const sv = skillMap(p.id, c.style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
-    const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(p) });
+    const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(p, c.style) });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id, p)) { delete out.targets[id]; delete out.why[id]; } });
     const training=state.cmp && state.cmp.training, decks=state.cmp && state.cmp.decks || {};
     const ace=training && decks[training.cup+"|"+training.tid] || state.cm;
@@ -2854,6 +2905,12 @@
   // drain twice; 4 adds the two aimed at her style; or none) and the share of races with a full
   // spurt (95% or 100%).
   const staminaOpts = (c) => ({ debuffs: c.staminaDebuffs === "0" ? 0 : c.staminaDebuffs === "4" ? 4 : 2, goal: c.staminaGoal === "1" ? 1 : 0.95 });
+  // The stamina check's result for this ace if it's worked out already (no new simulation).
+  function staminaPeek(p, c, tid = deckTrainee("cm")) {
+    const setup = linkedStamina(p, c), key = JSON.stringify([p.id, staminaInput(p, c, tid, setup), setup, staminaOpts(c)]);
+    const e = staminaCache.get(key);
+    return e && e.result && !e.result.unavailable ? e.result : null;
+  }
   function staminaEntry(p, c, tid = deckTrainee("cm")) {
     const setup = linkedStamina(p, c), input = staminaInput(p, c, tid, setup), opts = staminaOpts(c), key = JSON.stringify([p.id, input, setup, opts]);
     if (staminaCache.has(key)) return staminaCache.get(key);
@@ -2957,6 +3014,14 @@
     if (!node || !field || node.dataset.staminaKey !== entry.key) return;
     node.innerHTML = staminaNote(c, entry.result);
     field.placeholder = staminaPlaceholder(p, entry.result, c.style);
+    // Heals are valued by this check: redraw the skills table (only it, so typing isn't disturbed).
+    const table = deckElement("cm", "#cmSkillTable");
+    if (table && healValues(p.id, c.style)) {
+      const tmp = document.createElement("div");
+      tmp.innerHTML = cmSkills(p, c);
+      const fresh = tmp.querySelector("#cmSkillTable");
+      if (fresh) table.innerHTML = fresh.innerHTML;
+    }
   }
 
   // Your target stats for the optimizer (blank ones take the race build's), or null when none set.
@@ -3345,9 +3410,9 @@
     loadSkillValues(id);
     if (!(pasted[id] && pasted[id][race.style]) && typeof svCache[id] !== "object") return null;
     const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
-    const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(race.preset) });
+    const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(race.preset, race.style) });
     if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x, race.preset)) { delete out.targets[x]; delete out.why[x]; } });
-    return g8ParentWhites(Object.assign(out, { L }), race.preset, race.style);
+    return Object.assign(out, { L });
   }
 
   // The CM planner's decks, built the quick way CM & decks starts (Euophrys' scoring plus the
@@ -3488,6 +3553,8 @@
       styleFor: (p, tid, taken) => { const PV = window.UmaPullValues, t = D.trainee(tid); return PV && t ? PV.styleFor(p, t, taken, window.UmaUmaValues || null) : null; },
       // The course's bonus stats and what her targets do about them (Parents' Her gaps).
       courseBonus: (p, style, target) => thresholdText(p, style, target),
+      // Whether a cup and style has full-field skill values (data/field-skills.js).
+      fieldValues: (pid, style) => !!fieldOf(pid, style),
       pullTeam: (p) => {
         const PV = window.UmaPullValues, g = PV && PV.groupOf(p), teams = (state.pull && state.pull.teams) || {};
         if (!g) return [];
@@ -3581,7 +3648,7 @@
       // The ace's race whites (Parents tab's rules), out on Global by that cup.
       whites: (p, style) => {
         const sv = skillMap(p.id, style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
-        const out = window.UmaParentRelevance.aceTargets({ preset: p, style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: positionsFor(p) });
+        const out = window.UmaParentRelevance.aceTargets({ preset: p, style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(p, style) });
         return Object.keys(out.targets).filter((id) => released(id, p)).map((id) => out.targets[id]);
       },
       skillL: (p, style, id) => skillMap(p.id, style).map[id] || 0,
@@ -3968,10 +4035,43 @@
     }).join("")}</ul></div>`;
   }
 
+  // Where a position (m) is on a cup's course, in words: the final straight or corner, another
+  // straight or corner, uphill or downhill, and the race's leg (first sixth, middle to 2/3, late
+  // to 5/6, the last sixth), from the simulator's course data.
+  function courseSpot(p, x) {
+    const RS = window.UmaRaceSkills, cat = raceCatalog(p), co = cat && cat.courses && cat.courses[p.course.id];
+    if (!co || x == null) return "";
+    const d = co.distance, parts = [];
+    const corners = co.corners || [], straights = co.straights || [];
+    const ci = corners.findIndex((k) => x >= k.start && x < k.start + k.length);
+    const si = straights.findIndex((k) => x >= k.start && x < k.end);
+    if (ci >= 0) parts.push(ci === corners.length - 1 ? "final corner" : "corner " + (ci + 1) + " of " + corners.length);
+    else if (si >= 0) parts.push(straights[si].end >= d - 1 ? "final straight" : "a straight");
+    const sl = (co.slopes || []).find((k) => x >= k.start && x < k.start + k.length);
+    if (sl) parts.push(sl.slope > 0 ? "uphill" : "downhill");
+    parts.push(x < d / 6 ? "opening leg" : x < d * 2 / 3 ? "middle leg" : x < d * 5 / 6 ? "late leg" : "last sixth");
+    return parts.join(", ");
+  }
+  // A skill's full-field facts under its name: how often it fired, where, what it did for her
+  // place; the chart's scaled value when the field run couldn't race it; a heal's stamina worth.
+  function fieldNote(p, c, r) {
+    const out = [], heal = (healValues(p.id, c.style) || {})[r.id];
+    if (r.field) {
+      const [, ci, fire, lo, mid, hi, place, win, kind] = r.field;
+      if (kind === 1) out.push("debuff: valued by the places it gains her");
+      out.push(`±${ci.toFixed(2)} L`);
+      out.push(fire > 0 ? `fires in ${Math.round(fire * 100)}% of races` + (mid != null ? ` at about ${mid.toLocaleString("en-US")} m (${courseSpot(p, mid)})${hi - lo > 40 ? `, ${lo.toLocaleString("en-US")}–${hi.toLocaleString("en-US")} m` : ""}` : "") : "never fired");
+      if (Math.abs(place) >= 0.05) out.push(`${place > 0 ? "+" : ""}${place.toFixed(2)} places`);
+    } else if (r.scaled) out.push("not raced in the field: the field value of the skills nearest its chart value");
+    if (heal) out.push(`heal: ~${heal.stamina} stamina${heal.short ? `, she's ${Math.round(heal.short)} short of the stamina check, so it's worth ${heal.L.toFixed(2)} L here` : ""}`);
+    return out.length ? `<div class="mini sk-field">${esc(out.join(" · "))}</div>` : "";
+  }
   function cmSkills(p, c, host = "cm") {
     const status = svCache[p.id];
     const mine = pasted[p.id] && pasted[p.id][c.style];
     let rows = skillRows(p.id, c.style);
+    const fieldMode = !!rows.fieldBased, svd = svCache[p.id];
+    const soloL = fieldMode && svd && typeof svd === "object" && svd[c.style] ? Object.fromEntries(svd[c.style].map(([id, med]) => [id, med / 100])) : {};
     const src = skillSources(c);
     const deckIds = new Set((c.cards || []).map((sl) => sl.id));
     const trn = deckTrainee(host) ? D.trainee(deckTrainee(host)) : null;
@@ -3995,20 +4095,20 @@
       : "No skills match.";
     return `<section class="panel cm-skills" data-deck-host="${host}">
       <h3>Skills for this race · ${STYLE_LABEL[c.style]}</h3>
-      <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill. ${simNote(p)}`} SP totals include every required tier before hints. L per 100 SP uses that full price. The affordable-skill result applies the hints available in each simulated career.</p>
+      <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : fieldMode ? `<b>Full-field values</b>: each skill raced in a field of 9 (GlobalSim: CM's style mix, rivals as strong as the cup's stat line with their style's best skills) with and without it, on top of her style's typical build, on the same gate draws and seeds: the lengths she gains, how often it fires and where. Passing, blocking, position and debuffs meet a real pack here, unlike the solo chart (Solo L: one runner against a pacer, no other skills). Under each skill: its 95% range, how often and where it fired, and the places it gained her.` : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill. ${simNote(p)}`} SP totals include every required tier before hints. L per 100 SP uses that full price. The affordable-skill result applies the hints available in each simulated career.</p>
       <div class="db-controls">
         <label class="field grow"><span>Search</span><input data-cm="sq" value="${esc(c.sq || "")}" placeholder="Skill name" autocomplete="off"></label>
         <label class="field"><span>Show</span><select data-cm="sfilter">${opt([["all", "All skills"], ["cards", c.ownedOnly && ownedIds().length ? "Skills my cards can give" : "Skills Global cards can give"], ["deck", "Skills this deck can give"]], c.sfilter)}</select></label>
         <label class="chip-toggle" ${cut ? `title="Skills on Global now, plus the ones JP had by this cup's JP date (${fmtDate(p.jp.start)}): Global releases in JP's order."` : ""}><input type="checkbox" data-cm="globalSkills" ${c.globalSkills ? "checked" : ""}> ${cut ? "Out on Global by this cup" : "On Global only"}</label>
       </div>
-      <div id="cmSkillTable">${shown.length ? `<div class="table-wrap"><table class="skills"><thead><tr><th>Skill</th><th class="num">Median</th>${mine ? "" : '<th class="num opt-col">Mean</th>'}<th class="num">SP total</th><th class="num">L / 100 SP</th><th class="opt-col">From cards</th></tr></thead><tbody>
+      <div id="cmSkillTable">${shown.length ? `<div class="table-wrap"><table class="skills"><thead><tr><th>Skill</th><th class="num"${fieldMode ? ' title="Lengths she gains in a full field (with her style\'s typical build)"' : ""}>${fieldMode ? "Field L" : "Median"}</th>${mine ? "" : `<th class="num opt-col"${fieldMode ? ' title="The Umalator chart\'s median: one runner against a pacer, no other skills"' : ""}>${fieldMode ? "Solo L" : "Mean"}</th>`}<th class="num">SP total</th><th class="num">L / 100 SP</th><th class="opt-col">From cards</th></tr></thead><tbody>
         ${shown.map((r) => {
           const info = skillInfo(r.id);
           const cost = window.UmaSkillBudget.baseCost(r.id);
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
           const must = c.must.indexOf(String(r.id)) !== -1;
-          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}${g8Pill(c.preset, c.style, r.id)}${gateTag(r.id, c.style)}${r.ahead ? ` <span class="pill" title="Needs a rival ahead of her. You set Front Runners in this cup to fight for the lead, so its simulated value is counted at ${Math.round(r.ahead * 100)}%.">needs a rival ahead: counted at ${Math.round(r.ahead * 100)}%</span>` : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${releasePill(info, p, cut)}${changed[r.id] ? ` <span class="pill" title="Valued as JP's balance update of ${fmtDate(changed[r.id])} left it. Global runs JP's calendar in order, so it should have this version by this cup; it has an older one now.">${monthYear(changed[r.id])} JP version</span>` : ""}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}${g8Pill(c.preset, c.style, r.id)}${gateTag(r.id, c.style)}${r.ahead ? ` <span class="pill" title="Needs a rival ahead of her. You set Front Runners in this cup to fight for the lead, so its simulated value is counted at ${Math.round(r.ahead * 100)}%.">needs a rival ahead: counted at ${Math.round(r.ahead * 100)}%</span>` : ""}${fieldMode ? fieldNote(p, c, r) : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${fieldMode ? (soloL[r.id] != null ? soloL[r.id].toFixed(2) : "–") : r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       ${leftOutHTML(p, c, cut)}
@@ -4133,10 +4233,13 @@
   function commitLog() { save(); renderCM(); }
   document.addEventListener("toggle", (e) => { const d = e.target; if (d && d.dataset && d.dataset.logOpen) logOpen[d.dataset.logOpen] = d.open; }, true);
   // The head-to-head between the two best skill sets (race-skills.js duel), in plain words.
-  function duelHTML(plan) {
+  // added: the sets were compared by adding up values (full-field values, or a course the
+  // simulator can't race), not raced, so there's no race-to-race spread to report.
+  function duelHTML(plan, added) {
     const d = plan && plan.duel, num = (x) => Number.isFinite(x) ? x.toFixed(2) : "–";
     if (!d) return "";
     const other = d.other.length ? d.other.map((id) => skillNameHTML(id)).join(", ") : "no purchases";
+    if (added) return `<p class="mini">By these values the next-best set (${other}) adds ${num(Math.abs(d.diff.mean))} L less.</p>`;
     const by = `${num(Math.abs(d.diff.mean))} ± ${num(d.diff.ci95)} L over ${d.diff.samples} paired races`;
     if (d.verdict === "tie") return `<p class="mini"><b>No clear difference</b> from the next-best set (${other}): ${by}. That shows no clear advantage either way, not that they're equal; ${d.rule === "prefer" ? "the set with more of game8's picks is kept, then the one that spends less SP" : "the set that spends less SP is kept"}. Pick by hints you already have if you prefer.</p>`;
     return `<p class="mini"><b>Checked head-to-head:</b> this set beats the next-best (${other}) by ${by}${d.verdict === "swapped" ? ". The search had ranked that one first, but it lost the head-to-head" : ""}.</p>`;
@@ -4182,12 +4285,12 @@
       ${q.skills.map((x,i)=>`<div class="row-wrap"><b>${skillNameHTML(x.id)}</b><label class="chip-toggle"><input type="checkbox" data-race-equipped="${i}"${x.learned?" checked":""}> Equipped</label><label class="field"><span>Hint</span><select data-race-hint="${i}">${[0,1,2,3,4,5].map(n=>`<option value="${n}"${+x.hint===n?" selected":""}>Lv${n}</option>`).join("")}</select></label><button type="button" class="linkish" data-race-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></div>`).join("")}
       <p class="mini">Her own unique is equipped automatically. Planning targets need a card, trainee or parent source; equipped purchases are charged first. For a finished uma, enter SP remaining after those purchases. Edits update an existing comparison automatically.</p>
       <button type="button" class="btn ghost small" id="cmRaceRun">${j.raceRunning ? "Restart skill comparison" : "Compare skills"}</button>
-      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini warn">Course-chart fallback: ${esc(r.staticReason)} This uses the chart and SP costs, without a new race simulation.</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. Mean +${num(r.plan.result.mean)} L against equipped skills. Lower 10% result: ${num(r.plan.result.low)} L.</p>${duelHTML(r.plan)}${prunedHTML(r.plan)}${g8PairHTML(p.id, r.plan.selected.map((x) => x.id).concat(q.skills.filter((x) => x.learned).map((x) => String(x.id))))}<p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. ${["Normal","Good","Great"][Math.max(0,Math.min(2,+(q.mood||0)))]} mood.</p>
+      <div id="cmRaceOut">${j.raceRunning ? `<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress || 0)}%</p>` : j.raceError ? `<p class="mini warn">${esc(j.raceError)}</p>` : r ? `${r.staticReason ? `<p class="mini ${/^Full-field/.test(r.staticReason) ? "" : "warn"}">${/^Full-field/.test(r.staticReason) ? "" : "Course-chart fallback: "}${esc(r.staticReason)}${/^Full-field/.test(r.staticReason) ? "" : " This uses the chart and SP costs, without a new race simulation."}</p>` : ""}<p><b>Suggested purchases</b>: ${r.plan.spent} / ${r.plan.budget} SP; ${r.plan.unspent} left. ${r.staticReason ? "Adds" : "Mean"} +${num(r.plan.result.mean)} L against equipped skills.${r.staticReason ? "" : ` Lower 10% result: ${num(r.plan.result.low)} L.`}</p>${duelHTML(r.plan, !!r.staticReason)}${prunedHTML(r.plan)}${g8PairHTML(p.id, r.plan.selected.map((x) => x.id).concat(q.skills.filter((x) => x.learned).map((x) => String(x.id))))}<p class="mini">${esc(r.source)}${r.baselineCost ? ` Equipped purchases use ${r.baselineCost} SP first.` : ""} Stats: ${r.stats.join(" / ")}; ${esc(r.apt.join(" / "))} distance / surface / style. ${["Normal","Good","Great"][Math.max(0,Math.min(2,+(q.mood||0)))]} mood.</p>
       ${!r.staticReason && (r.plan.result.fullSpurt||0)<0.95 ? `<p class="mini warn">With these skills she gets a full last spurt in only ${Math.round((r.plan.result.fullSpurt||0)*100)}% of simulated races (no stamina debuffers): raise stamina or add recovery skills.</p>` : ""}${sourceRowsHTML(r)}${table(r.plan.selected,false)}
       ${r.goals && r.goals.length ? `<p class="mini"><b>Parent targets:</b> ${[...new Set(r.goals.map(x=>ACCESS.white(x.id)).filter(Boolean))].map(id=>skillNameHTML(id)).join(", ")}. Targets to search or train for; these are not guaranteed purchases. <button type="button" class="linkish" data-goto-tab="parents">Plan their sources in Parents →</button></p>` : ""}
       <details><summary>Next skills from the equipped baseline</summary><p class="mini">Each is tested against equipped skills alone. The purchase list above tests combinations. Added L for its rows measures removing that purchase from the final set, so those rows do not add up.</p>${table(r.plan.ranking,true)}</details>
       ${(r.plan.offPosition||[]).length ? `<p class="mini">Left out because they need a rival ahead and she leads alone (change <b>Front Runners in this cup</b> above if she fights for the lead): ${r.plan.offPosition.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${(r.plan.scaled||[]).length ? `<p class="mini">Counted at ${Math.round(contestShare(p.id)*100)}% of their simulated gain (they need a rival ahead): ${r.plan.scaled.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${r.plan.excluded.length ? `<p class="mini warn">Race or purchase effects unavailable; excluded: ${r.plan.excluded.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}${r.plan.failedSets ? `<p class="mini warn">${r.plan.failedSets} skill sets could not be simulated and were excluded.</p>` : ""}${r.plan.unmetMust.length ? `<p class="mini warn">Must-haves not purchased: ${r.plan.unmetMust.map(id=>skillNameHTML(id)).join(", ")}.</p>` : ""}
-      <details><summary>How these comparisons work</summary><p class="mini">${r.staticReason ? "Existing course-chart gains and legal SP costs are used. This mode does not measure new skill interactions or full-spurt frequency." : `${r.plan.method === "every full affordable combination" ? `Every full affordable combination raced (${r.plan.evaluations} sets), 24 paired races each.` : `${r.plan.evaluations} sets checked in a bounded search, 24 paired races each.`} Finalists and purchase contributions use another seed and 96 races. Full spurt in ${Math.round((r.plan.result.fullSpurt||0)*100)}% of validation races${(r.plan.result.fullSpurt||0)<0.95?' <span class="warn">(under 95%: she needs more stamina or recovery skills)</span>':""}. Wit checks are on. Positions, overtaking and opponents remain simplified.`} Mean gain ${num(r.plan.result.mean)} L${r.plan.result.ci95?` (± ${num(r.plan.result.ci95)} L, 95% interval from race-to-race noise; SD ${num(r.plan.result.sd)} L)`:""}; 10th percentile ${num(r.plan.result.low)} L. These are estimates, not CM win rates or LoH points.</p><p class="mini">Planning includes only sourced skills. Card offers and inheritance are sampled, with unknown spark hint levels conservatively taken as Lv1. Equipped planning targets condition on getting those sourced skills, and their SP is charged first. User-entered shop skills are accepted as observed only in finished-uma mode. Parent targets come from a separate conditional purchase plan; they do not grant skills to the ace. Predicted stats exclude inheritance unless entered. Fast Learner and scenario-specific price discounts are not modeled. The deck/parent search is bounded, not proof of a global optimum.</p></details>` : ""}</div>
+      <details><summary>How these comparisons work</summary><p class="mini">${r.staticReason ? (/^Full-field/.test(r.staticReason) ? "Each skill's value comes from full-field races: a field of 9 in CM's style mix, her style's typical build, each skill raced with and without it on the same gate draws and seeds (GlobalSim). The set is the best her SP buys by those values, with legal SP costs. Values add up within the set, so two skills that fire at the same moment may be worth a little less together." : "Existing course-chart gains and legal SP costs are used. This mode does not measure new skill interactions or full-spurt frequency.") : `${r.plan.method === "every full affordable combination" ? `Every full affordable combination raced (${r.plan.evaluations} sets), 24 paired races each.` : `${r.plan.evaluations} sets checked in a bounded search, 24 paired races each.`} Finalists and purchase contributions use another seed and 96 races. Full spurt in ${Math.round((r.plan.result.fullSpurt||0)*100)}% of validation races${(r.plan.result.fullSpurt||0)<0.95?' <span class="warn">(under 95%: she needs more stamina or recovery skills)</span>':""}. Wit checks are on. Positions, overtaking and opponents remain simplified.`} Mean gain ${num(r.plan.result.mean)} L${r.plan.result.ci95?` (± ${num(r.plan.result.ci95)} L, 95% interval from race-to-race noise; SD ${num(r.plan.result.sd)} L)`:""}; 10th percentile ${num(r.plan.result.low)} L. These are estimates, not CM win rates or LoH points.</p><p class="mini">Planning includes only sourced skills. Card offers and inheritance are sampled, with unknown spark hint levels conservatively taken as Lv1. Equipped planning targets condition on getting those sourced skills, and their SP is charged first. User-entered shop skills are accepted as observed only in finished-uma mode. Parent targets come from a separate conditional purchase plan; they do not grant skills to the ace. Predicted stats exclude inheritance unless entered. Fast Learner and scenario-specific price discounts are not modeled. The deck/parent search is bounded, not proof of a global optimum.</p></details>` : ""}</div>
     </details>`;
   }
   async function runRaceSkills(refineDeck = false, fromParents = false) {
@@ -4201,8 +4304,11 @@
     let worker;
     try {
       const RS = window.UmaRaceSkills, eng = RS.engine(p, SV.meta.sims), catalog = await RS.load(eng.catalog);
-      const unsupported = RS.supported(p, Object.assign({}, simVariant(p), { inBrowser: !!eng.sim }), catalog);
       await ensureSkills([p.id]);
+      // With full-field values for this cup and style, the set is the best her SP buys by them
+      // (added up, as for a cup the simulator can't race): the solo race check would undo them.
+      const fieldMode = skillRows(p.id, c.style).fieldBased ? "Full-field values: each skill raced in a field of 9 with and without it (data/field-skills.js); the set is the best her SP buys by them." : "";
+      const unsupported = fieldMode || RS.supported(p, Object.assign({}, simVariant(p), { inBrowser: !!eng.sim }), catalog);
       if(!same())return;initialKey=optKey(host);initialSourceKey=skillPlanKey(c);
       worker = unsupported ? null : RS.runner(eng.sim); j.raceWorker = worker;
       const t = D.trainee(deckTrainee(host)), idx = { Sprint:2,Mile:3,Medium:4,Long:5 }[p.course.dist], si = STYLES.findIndex(x=>x[0]===c.style);
@@ -4260,7 +4366,7 @@
           if(!raceMemo.has(key)) {const answer=await worker.run(RS.request(p,input,before,after,catalog,n,seed));raceMemo.set(key,Object.assign(RS.summary(answer.results.results),{fullSpurt:answer.results.runData.nspurt[1]/n}));if(raceMemo.size>2500)raceMemo.delete(raceMemo.keys().next().value);}
           return raceMemo.get(key);
         };
-        const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,prefer:Object.keys(g8Picks(p.id,c.style)),compare,scale:raceScale(p,c.style,available),maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
+        const plan=await RS.optimize({catalog,allowChartOnly:!!unsupported,available,learned,hints,sp,values:baseValues,must:c.must,compare,scale:raceScale(p,c.style,available),maxEvaluations:64,progress:f=>{if(!same())return;j.raceProgress=(ci+f)/candidates.length*100;const box=deckElement(host,"#cmRaceOut");if(box)box.innerHTML=`<p class="mini" role="status">Comparing equipped builds… ${Math.round(j.raceProgress)}%</p>`;}});
         if(q.mode === "plan" && plan.selected.some(row=>!access.byId[row.id]))throw new Error("A purchase lacks a verified skill source. Compare again after checking her deck and family.");
         // A separate, explicitly conditional purchase plan asks which white hints would be
         // worth seeking. These never enter the actual purchase list without a source.
@@ -4831,7 +4937,7 @@
       ${r.staticReason ? `<p class="mini warn">Course-chart only: ${esc(r.staticReason)}</p>` : ""}
       <p><b>Buy:</b> ${plan.selected.length ? plan.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing: no purchase gains length"}. ${plan.spent} / ${plan.budget} SP, ${plan.unspent} left. <b>+${soNum(plan.result.mean)} L</b> on average${plan.result.ci95 ? ` (± ${soNum(plan.result.ci95)})` : ""} over what she has; worst 10% of races ${soNum(plan.result.low)} L.</p>
       ${duelHTML(plan)}${prunedHTML(plan)}${g8PairHTML(p.id, plan.selected.map((x) => x.id).concat(b.skills.filter((x) => x.have).map((x) => x.id)))}
-      ${(plan.unmetMust || []).length ? `<p class="mini warn">game8 must-haves her SP can't cover: ${plan.unmetMust.map((id) => skillNameHTML(id)).join(", ")}.</p>` : plan.selected.some((x) => g8Picks(p.id, b.style)[x.id] === "must") ? `<p class="mini">game8's must-haves in her shop are bought first, then the rest by lengths.</p>` : ""}
+
       ${!r.staticReason && Number.isFinite(spurt) && spurt < 0.95 ? `<p class="mini warn">With these skills she reaches a full last spurt in only ${Math.round(spurt * 100)}% of races: more stamina or a recovery skill would help.</p>` : ""}
       <div class="table-wrap"><table><thead><tr><th>Buy</th><th>SP</th><th>Added L</th><th>L / 100 SP</th></tr></thead><tbody>${rows(plan.selected, "buy") || '<tr><td colspan="4">No purchase.</td></tr>'}</tbody></table></div>
       <p class="mini">Added L: what she loses if that one skill is left out of the set, so rows don't add up to the total.</p>
@@ -4973,9 +5079,8 @@
         if (!raceMemo.has(key)) { const answer = await worker.run(RS.request(p, input, before, after, catalog, n, seed)); raceMemo.set(key, Object.assign(RS.summary(answer.results.results), { fullSpurt: answer.results.runData.nspurt[1] / n })); if (raceMemo.size > 2500) raceMemo.delete(raceMemo.keys().next().value); }
         return raceMemo.get(key);
       };
-      // game8's must-haves in her shop are bought first; all its picks win close calls.
-      const g8 = g8Picks(p.id, b.style), g8Must = available.filter((id) => g8[id] === "must" && !learned.includes(id));
-      const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available, learned, hints, sp: +b.sp, values, must: g8Must, prefer: Object.keys(g8), compare, scale: raceScale(p, b.style, available), maxEvaluations: 96, fastLearner: b.fast,
+      // game8's picks are a tag only: the simulator decides.
+      const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available, learned, hints, sp: +b.sp, values, must: [], compare, scale: raceScale(p, b.style, available), maxEvaluations: 96, fastLearner: b.fast,
         progress: (f) => { if (!same()) return; soJob.progress = f * (b.goal === "win" && !fieldUnsupported(p) ? 40 : 100); const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
       if (same()) soJob.result = { plan, staticReason: unsupported, engineNote: soEngineNote(p), field: p.kind === "loh" ? 12 : 9, conditions: skillConditions(catalog, plan.ranking.map((x) => x.id).concat(available)) };
       if (same() && b.goal === "win" && !fieldUnsupported(p)) {

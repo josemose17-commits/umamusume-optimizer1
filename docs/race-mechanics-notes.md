@@ -34,6 +34,14 @@ release's length doesn't depend on how her early race went.
 The app shows both lines and keeps the simulator's for scoring. Practice races on a dirt cup at
 1250 vs 1320 power would settle it; it's also in the research prompts.
 
+**The full-field simulator disagrees too.** On CM 22 (Tokyo dirt 1600, Soft), GlobalSim (v77, whose
+authors checked it against recorded races) races +50 power from the cup's 1,300 at about 0.14–0.46 L
+for every style, where the Umalator's curve gives 0.85–1.06 L for the same step, nearly all of it
+its Conserve Power line just past 1,300. +50 speed goes the other way: 0.22–0.28 L in the field
+against 0.10–0.12 L solo. (`data/field-skills.js` keeps these as each style's `stats`; the field
+has her style's typical build and eight rivals.) So on dirt the solo curve likely overrates power
+past its line. Deck scoring still uses the solo curves.
+
 ## In the simulators already
 
 Target speed, last spurt speed and HP use (speed only counts from the late race on; guts adds to
