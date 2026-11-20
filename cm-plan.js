@@ -191,15 +191,15 @@
     // cup (optional): { own(id) → the skill is for this cup's distance or surface, or a green that
     // fits it; double → use the ◎ of a distance or surface skill (her SS chance is high) }. The
     // cup's own skills come right after the purchase plan's (a CM parent's priorities).
-    // src: { event, hint } (Sets of skill ids her deck's cards give by event and by training hint).
-    // Independent Training's priorities only steer event choices, so a white her deck only hints is
-    // left out (listed in hintOnly); one an event of her deck gives counts, and one no card of hers
-    // has can still come from a random event.
+    // src: { event, pool } (Sets of skill ids): her deck's card events, and every Global support
+    // card's events (R, SR, SSR). Independent Training's AI can only pick skills that come from
+    // events, and events from any card can pop up, so a white no card event gives is left out
+    // (listed in noEvent); her deck's event whites come first, the other cards' after.
     // White recoveries aren't aimed for (you asked): left out too (listed in recoveries).
     const KINDS = () => ((root.UmaSkillKinds || (typeof require !== "undefined" ? require("./data/skill-kinds.js") : null)) || {}).skills || {};
     function itSkills(x, offers, n = 10, anyway = new Set(), cover = {}, cup = null, src = null) {
       if (!famMembers) { famMembers = {}; Object.keys(meta).forEach((id) => { (famMembers[meta[id][0]] = famMembers[meta[id][0]] || []).push(id); }); }
-      const o2 = offers || {}, rows = [], seen = new Set(), hintOnly = [], recoveries = [], K = KINDS();
+      const o2 = offers || {}, rows = [], seen = new Set(), noEvent = [], recoveries = [], K = KINDS();
       const add = (rel, xx, extra) => {
         const fams = fam.families(rel), eff = fam.worthOf(xx);
         Object.keys(fams).forEach((f) => {
@@ -212,10 +212,10 @@
           // The list holds whites, so only an event that gives a white tier (○, ◎) counts, not one
           // that gives the gold.
           const ev = !!src && all.concat(fams[f].ids).some((id) => meta[id] && meta[id][3] === 1 && src.event.has(String(id)));
-          const hint = !!src && all.concat(fams[f].ids).some((id) => src.hint.has(String(id)));
+          const inPool = !!src && (ev || all.concat(fams[f].ids).some((id) => meta[id] && meta[id][3] === 1 && src.pool.has(String(id))));
           const wid = String(fam.baseWhite(fams[f].ids[0]));
           if (K[wid] && K[wid][0] === "recovery") { recoveries.push({ family: f, id: wid, L: eff[f] }); return; }
-          if (src && hint && !ev) { hintOnly.push({ family: f, id: String(fam.baseWhite(fams[f].ids[0])), L: eff[f] }); return; }
+          if (src && !inPool) { noEvent.push({ family: f, id: String(fam.baseWhite(fams[f].ids[0])), L: eff[f] }); return; }
           const white = String(fam.baseWhite(fams[f].ids[0])), c = cover[f] || 0;
           const golds = all.filter((id) => meta[id] && meta[id][3] === 2).map(String);
           const own = !!(cup && cup.own && (cup.own(white) || all.some((id) => cup.own(String(id))) || fams[f].why === "green"));
@@ -232,7 +232,7 @@
       // Whites only a random event can give: after her deck's (with src always; without it only
       // when she has no purchase plan).
       const rest = x.skillPlan && !src ? [] : rows.filter((r) => r.gamble && !r.anyway).sort((a, b) => b.L * (1 - b.cover) - a.L * (1 - a.cover));
-      return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L), hintOnly: hintOnly.sort((a, b) => b.L - a.L), recoveries: recoveries.sort((a, b) => b.L - a.L) });
+      return Object.assign(offered.concat(rest).slice(0, n), { anyway: rows.filter((r) => r.anyway).sort((a, b) => b.L - a.L), noEvent: noEvent.sort((a, b) => b.L - a.L), recoveries: recoveries.sort((a, b) => b.L - a.L) });
     }
     // Her blue spark's stat is random (1 in 5 each); its stars depend on that stat's value in her
     // predicted careers (learning.blueStars, per stat), else 20/70/10% as for a stat over 1100.
