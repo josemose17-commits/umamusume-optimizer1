@@ -49,3 +49,25 @@ test("field values: a skill that never fired is worth exactly nothing (its races
     });
   });
 });
+
+test("golds first: measured per style against the solo pick; only clear wins in lengths and wins switch the deck search", () => {
+  const styles = FS.cups.cm22.styles;
+  const on = Object.entries(styles).filter(([, s]) => s.goldsFirst && s.goldsFirst.L > s.goldsFirst.ci95 && s.goldsFirst.winGolds >= s.goldsFirst.winSolo).map(([st]) => st);
+  Object.values(styles).forEach((s) => assert.ok(s.goldsFirst && s.goldsFirst.races >= 2000));
+  assert.deepEqual(on, ["Oikomi"], "CM 22: End Closers buy golds first");
+});
+
+test("skill-budget golds first: must-haves, then the best golds, then the knapsack on what's left", () => {
+  const B = require("../skill-budget.js");
+  // A gold that a value-per-SP knapsack skips (two cheap whites beat it per SP).
+  const vals = { 202671: 1.6, 202672: 1.3, 200512: 0.9, 200542: 0.9 }, ids = Object.keys(vals);
+  const fam = (id) => B.DATA.skills[id][0], rar = (id) => B.DATA.skills[id][3];
+  const knap = B.create({ available: ids, skills: vals }).solve({}, 400);
+  const golds = B.create({ available: ids, skills: vals, goldsFirst: true }).solve({}, 400);
+  assert.ok(golds.goldsFirst);
+  assert.ok(golds.selected.some((o) => rar(o.id) === 2), "a gold is bought first");
+  assert.ok(golds.spent <= 400 && new Set(golds.selected.map((o) => fam(o.id))).size === golds.selected.length);
+  assert.ok(knap.value >= golds.value - 1e-9, "the knapsack is the best by added-up values");
+  const must = B.create({ available: ids, skills: vals, goldsFirst: true, must: ["200512"] }).solve({}, 400);
+  assert.ok(must.selected.some((o) => o.id === "200512" || o.required.includes("200512")), "must-haves first");
+});

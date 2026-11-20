@@ -26,6 +26,11 @@
 //     keeps stats (solo curves) and skills (field) on one scale.
 // Usage: node tools/build_field_skills.mjs cm22 [--style Senkou] [--races 400] [--part f]
 //        node tools/build_field_skills.mjs cm22 --stats [--style Senkou] --part f
+//   --golds: two 1,400-SP sets from the measured skills raced on 2,000 races with no other skills:
+//     her highest field-value golds first (then the rest by value) against the best set by the solo
+//     chart's values (what the deck search buys). goldsFirst: { L, ci95 (golds minus solo), win
+//     shares }. The deck search buys golds first where it's clearly better (L > ci95).
+//        node tools/build_field_skills.mjs cm22 --golds [--style Senkou] --part f
 //        node tools/build_field_skills.mjs --merge f1 f2 ...   (writes data/field-skills.js)
 import fs from "node:fs";
 import path from "node:path";
@@ -85,6 +90,7 @@ if (args[0] === "--merge") {
   // Debuffs: place gained → lengths, at the field's place gained per length (fitted per style on
   // the other skills, through the origin).
   Object.values(cups).forEach((c) => Object.values(c.styles).forEach((s) => {
+    if (s.placePerL != null || !s.skills) return; // converted by an earlier merge (or no skills here)
     const own = Object.values(s.skills).filter((x) => x[8] === 0 && x[2] > 0.05);
     const sxy = own.reduce((n, x) => n + x[0] * x[6], 0), sxx = own.reduce((n, x) => n + x[0] * x[0], 0);
     s.placePerL = sxx > 0 ? +(sxy / sxx).toFixed(4) : null;
@@ -187,6 +193,25 @@ for (const id of cupIds.length ? cupIds : ["cm22"]) {
       else if (mine) { fired = run(without(mine).concat(sid), block); d = add(diff(base, run(without(mine), block)), diff(fired, base)); }
       else { fired = run(build.concat(sid), block); d = diff(fired, base); }
       return { d: d.map((x, i) => (fired[i].at[sid] != null ? x : [0, 0, 0])), fired };
+    }
+    if (args.includes("--golds")) {
+      const vals = {}, BUDGET = 1400, prev = require(path.join(ROOT, "data/field-skills.js")).cups[id].styles[st].skills;
+      Object.entries(prev).forEach(([sid, x]) => { if (x[0] != null && x[0] > 0) vals[sid] = x[0]; });
+      const ids = Object.keys(vals), budget = SB.create({ available: ids, skills: vals }), byId = new Map(budget.options({}).flat().map((o) => [o.id, o]));
+      const rar = (sid) => (SV.skills[sid] || [])[2], G = [], fams = new Set();
+      let spent = 0;
+      const take = (o) => { if (!o || fams.has(o.family) || spent + o.cost > BUDGET) return; G.push(o.id); fams.add(o.family); spent += o.cost; };
+      ids.filter((sid) => rar(sid) === 2).sort((a, b) => vals[b] - vals[a]).forEach((sid) => take(byId.get(sid)));
+      ids.filter((sid) => rar(sid) !== 2).sort((a, b) => vals[b] - vals[a]).forEach((sid) => take(byId.get(sid)));
+      const soloVals = {};
+      chart(p.id, st).forEach(([sid, med]) => { if (vals[String(sid)] != null && med > 0) soloVals[String(sid)] = med / 100; });
+      const C = SB.create({ available: Object.keys(soloVals), skills: soloVals }).solve({}, BUDGET).selected.map((o) => o.id);
+      const both = (skills) => [0, 1, 2, 3, 4].flatMap((b) => { memo.clear(); return run(skills, b); });
+      const rg = both(G), rc = both(C), d = summary(diff(rg, rc).map((x) => x[0]));
+      const win = (r) => r.filter((x) => x.place === 0).length / r.length;
+      cup.styles[st] = { goldsFirst: { L: +d.m.toFixed(3), ci95: +d.ci.toFixed(3), winGolds: +win(rg).toFixed(3), winSolo: +win(rc).toFixed(3), races: rg.length, sp: BUDGET, golds: G, solo: C } };
+      process.stderr.write(`${id} ${st} golds first minus solo pick: ${d.m.toFixed(2)} ±${d.ci.toFixed(2)} L, wins ${(win(rg) * 100).toFixed(1)}% vs ${(win(rc) * 100).toFixed(1)}%\n`);
+      continue;
     }
     if (args.includes("--stats")) {
       // Field L of +50 in each stat, paired on 1,600 races, and the solo curve's L for the same.
