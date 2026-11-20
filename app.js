@@ -2359,7 +2359,7 @@
   }
   // Position rules for Parents' relevant skills: off where the cup has full-field values (those
   // raced her in a pack already), positionsFor otherwise.
-  const relPositions = (p, style) => (skillRows(p.id, style).fieldBased ? null : positionsFor(p));
+  const relPositions = (p, style) => (skillRows(p.id, style, true).fieldBased ? null : positionsFor(p));
   function simNote(p) {
     const v = simVariant(p);
     if (v.kind === "global") return "Run on the Global Umalator: Global's skills as they are now.";
@@ -2389,12 +2389,16 @@
   const skillInfo = (id) => (SV && SV.skills[id]) || [D.DATA.skills[id] || "#" + id, D.skillCost(id) || 0, 1, 1];
 
   // Skills ranked by median length gain for a preset and style. Your pasted Umalator results win.
-  function chartRows(pid, style) {
+  // field: full-field values where the cup has them (the skills table and Parents' relevance).
+  // Buying skills keeps the solo values and race check: field values were measured one skill at a
+  // time on a build, and added up they overrate many cheap whites that fire together (a 9-white set
+  // they picked lost 0.6-2.9 L to a 4-gold set in the full field on CM 22).
+  function chartRows(pid, style, field = false) {
     const mine = pasted[pid] && pasted[pid][style];
     if (mine) return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).sort((a, b) => b.L - a.L);
     const data = svCache[pid];
     if (!data || typeof data === "string" || !data[style]) return [];
-    return fieldRows(pid, style, data[style]) || data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
+    return (field && fieldRows(pid, style, data[style])) || data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
   }
   // Full-field values (data/field-skills.js, tools/build_field_skills.mjs) where the cup has them:
   // each skill raced in a field of 9 with and without it, on top of a typical build for her style,
@@ -2431,11 +2435,11 @@
   // need her in the other half of the field (Leap Forward for a Pace Chaser), or a rival ahead of
   // a Front Runner, who runs in 1st (No Stopping Me!), are left out here, for every use:
   // data/skill-positions.js, parent-relevance.js positionFits.
-  function skillRows(pid, style) {
+  function skillRows(pid, style, field = false) {
     const pos = positionsFor(presetById(pid));
     const PR = window.UmaParentRelevance;
     // Field values already raced her in a pack: no position rules on top.
-    const rows = chartRows(pid, style);
+    const rows = chartRows(pid, style, field);
     if (rows.fieldBased) return rows;
     // A rival-ahead skill for a Front Runner fighting for the lead counts at that share.
     return rows.filter((r) => PR.positionFits(pos, r.id, style)).map((r) => { const k = PR.aheadScale(pos, r.id, style); return k < 1 ? Object.assign({}, r, { L: r.L * k, mean: r.mean == null ? null : r.mean * k, ahead: k }) : r; });
@@ -2468,10 +2472,10 @@
     return k < 1 ? `needs a rival ahead: counted at ${Math.round(k * 100)}%` : "";
   }
 
-  function skillMap(pid, style) {
+  function skillMap(pid, style, field = false) {
     const map = {};
     const costs = {};
-    skillRows(pid, style).forEach((r) => { map[r.id] = r.L; costs[r.id] = skillInfo(r.id)[1]; });
+    skillRows(pid, style, field).forEach((r) => { map[r.id] = r.L; costs[r.id] = skillInfo(r.id)[1]; });
     const heal = healValues(pid, style);
     if (heal) Object.entries(heal).forEach(([id, h]) => { if (map[id] == null || h.L > map[id]) map[id] = h.L; });
     return { map, costs };
@@ -2581,7 +2585,7 @@
   function g8CompareHTML(c) {
     const p = presetById(c.preset), e = g8Entry(p.id);
     if (!e) return "";
-    const rows = skillRows(p.id, c.style).filter((r) => released(String(r.id), p));
+    const rows = skillRows(p.id, c.style, true).filter((r) => released(String(r.id), p));
     if (!rows.length) return `<p class="mini">The comparison with the simulator shows once this cup's skill values load.</p>`;
     const cat = raceCatalog(p), picks = g8Picks(p.id, c.style), rank = new Map(rows.map((r, i) => [String(r.id), { i: i + 1, L: r.L }]));
     const item = (id) => { const r = rank.get(id), why = g8Why(p, c.style, id, cat, !!r); return `<li>${skillNameHTML(id)} <span class="mini">${r ? `#${r.i}, ${r.L.toFixed(2)} L` : "no chart value for her style"}${why ? " · " + esc(why) : ""}</span></li>`; };
@@ -2678,7 +2682,7 @@
     return parentTargetsBase(c, p);
   }
   function parentTargetsBase(c, p) {
-    const sv = skillMap(p.id, c.style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
+    const sv = skillMap(p.id, c.style, true), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
     const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(p, c.style) });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id, p)) { delete out.targets[id]; delete out.why[id]; } });
     const training=state.cmp && state.cmp.training, decks=state.cmp && state.cmp.decks || {};
@@ -3409,7 +3413,7 @@
     const id = race.preset.id;
     loadSkillValues(id);
     if (!(pasted[id] && pasted[id][race.style]) && typeof svCache[id] !== "object") return null;
-    const L = skillMap(id, race.style).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
+    const L = skillMap(id, race.style, true).map, rarity = (x) => (SV.skills[x] ? SV.skills[x][2] : null);
     const out = window.UmaParentRelevance.aceTargets({ preset: race.preset, style: race.style, raceSkills: L, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(race.preset, race.style) });
     if ((state.cm || {}).globalSkills !== false) Object.keys(out.targets).forEach((x) => { if (!released(x, race.preset)) { delete out.targets[x]; delete out.why[x]; } });
     return Object.assign(out, { L });
@@ -3647,7 +3651,7 @@
       },
       // The ace's race whites (Parents tab's rules), out on Global by that cup.
       whites: (p, style) => {
-        const sv = skillMap(p.id, style), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
+        const sv = skillMap(p.id, style, true), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
         const out = window.UmaParentRelevance.aceTargets({ preset: p, style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(p, style) });
         return Object.keys(out.targets).filter((id) => released(id, p)).map((id) => out.targets[id]);
       },
@@ -4069,7 +4073,7 @@
   function cmSkills(p, c, host = "cm") {
     const status = svCache[p.id];
     const mine = pasted[p.id] && pasted[p.id][c.style];
-    let rows = skillRows(p.id, c.style);
+    let rows = skillRows(p.id, c.style, true);
     const fieldMode = !!rows.fieldBased, svd = svCache[p.id];
     const soloL = fieldMode && svd && typeof svd === "object" && svd[c.style] ? Object.fromEntries(svd[c.style].map(([id, med]) => [id, med / 100])) : {};
     const src = skillSources(c);
@@ -4305,10 +4309,9 @@
     try {
       const RS = window.UmaRaceSkills, eng = RS.engine(p, SV.meta.sims), catalog = await RS.load(eng.catalog);
       await ensureSkills([p.id]);
-      // With full-field values for this cup and style, the set is the best her SP buys by them
-      // (added up, as for a cup the simulator can't race): the solo race check would undo them.
-      const fieldMode = skillRows(p.id, c.style).fieldBased ? "Full-field values: each skill raced in a field of 9 with and without it (data/field-skills.js); the set is the best her SP buys by them." : "";
-      const unsupported = fieldMode || RS.supported(p, Object.assign({}, simVariant(p), { inBrowser: !!eng.sim }), catalog);
+      // Sets are raced together on the race simulator (field values added up overrate cheap whites
+      // that overlap: see chartRows).
+      const unsupported = RS.supported(p, Object.assign({}, simVariant(p), { inBrowser: !!eng.sim }), catalog);
       if(!same())return;initialKey=optKey(host);initialSourceKey=skillPlanKey(c);
       worker = unsupported ? null : RS.runner(eng.sim); j.raceWorker = worker;
       const t = D.trainee(deckTrainee(host)), idx = { Sprint:2,Mile:3,Medium:4,Long:5 }[p.course.dist], si = STYLES.findIndex(x=>x[0]===c.style);
