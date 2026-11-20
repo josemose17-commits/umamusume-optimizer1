@@ -127,7 +127,18 @@
     const cup = data && data.cups && data.cups[cupId];
     const v = cup && cup.status === "ok" && cup.styles && cup.styles[style];
     if (!v || v.status !== "ok" || !v.curves) return null;
-    return { cup: cupId, style, curves: v.curves, need: v.base.need, showdown: !!v.showdown };
+    return { cup: cupId, style, curves: v.curves, need: v.base.need, showdown: !!v.showdown, steps: v.steps || [], base: v.base };
+  }
+  // Course stat thresholds (data/stat-curves.js steps): her speed bonus jumps when a stat the
+  // course lists passes 300, 600 or 900. The curves are stored without them, so each step counts
+  // here by her absolute stat, against the cup's line. → L.
+  const CURVE_KEYS = ["speed", "stamina", "power", "guts", "wisdom"];
+  function stepL(r, i, x) {
+    if (!r || !r.steps || !r.steps.length) return 0;
+    const line = r.base ? r.base[CURVE_KEYS[i]] : null;
+    let d = 0;
+    for (const s of r.steps) if (s[0] === i) d += (x >= s[1] - 0.5 ? s[2] : 0) - (line != null && line >= s[1] ? s[2] : 0);
+    return d;
   }
   // Use race scoring when the curves exist and the build can meet the spurt estimate.
   // Explicit stat targets or a cap below the estimate use target fit instead.
@@ -155,7 +166,7 @@
       const x = Math.max(0, +stats[i] || 0);
       // Stamina stops counting past a full spurt, except with stamina showdown (JP-dated cups over
       // 2100 m), where its curve runs to 2000.
-      L += i === 1 ? staminaL(r, x) : onCurve(r.curves[i], x, false);
+      L += (i === 1 ? staminaL(r, x) : onCurve(r.curves[i], x, false)) + stepL(r, i, x);
     }
     return L;
   }
@@ -1214,7 +1225,7 @@
     };
   }
 
-  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, stepL, onCurve, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
