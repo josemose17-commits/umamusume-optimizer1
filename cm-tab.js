@@ -480,7 +480,20 @@
       const who = r && r.p1 ? familyWho(r) : "";
       const bonus = ctx.courseBonus ? ctx.courseBonus(cup(c), styleOf(a), Object.fromEntries(F.STAT_LABELS.map((l, i) => [["speed", "stamina", "power", "guts", "wit"][i], pred.target[i]]))) : "";
       return (ctx.staminaSummary ? staminaLine() : "") + bonus + `<div class="table-wrap"><table class="plan cmp-gaps"><thead><tr><th>Stat</th><th class="num">Target</th><th class="num">Predicted</th><th class="num">Gap</th>${give ? '<th class="num">Her family gives</th>' : ""}<th>Blue you can still pick</th><th class="num">Still short</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="mini">${plan.picks.length ? `<b>${plan.exact ? "✓ These close every gap" : plan.closed ? "✓ These close every gap (≈: within one inspiration roll)" : "Closes the most it can"}:</b> ${plan.text}.${plan.closed ? "" : ` Still short after them: ${after.map((v, i) => v > ROLL ? F.STAT_LABELS[i] + " −" + v : "").filter(Boolean).join(", ")}; a stronger deck in CM &amp; decks or lower targets would close the rest.`}` : gaps.some(Boolean) && after.some((v) => v > ROLL) ? "<b>No blue left to pick</b>: every borrowed slot is filled." : gaps.some(Boolean) ? "<b>✓ Her family closes every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}Only the umas you borrow have a blue you choose (one each); the parent you train gets a random stat.</p>`;
+        <p class="mini">${plan.picks.length ? `<b>${plan.exact ? "✓ These close every gap" : plan.closed ? "✓ These close every gap (≈: within one inspiration roll)" : "Closes the most it can"}:</b> ${plan.text}.${plan.closed ? "" : ` Still short after them: ${after.map((v, i) => v > ROLL ? F.STAT_LABELS[i] + " −" + v : "").filter(Boolean).join(", ")}; a stronger deck in CM &amp; decks or lower targets would close the rest.`}` : gaps.some(Boolean) && after.some((v) => v > ROLL) ? "<b>No blue left to pick</b>: every borrowed slot is filled." : gaps.some(Boolean) ? "<b>✓ Her family closes every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}Only the umas you borrow have a blue you choose (one each); the parent you train gets a random stat.</p>${whitesSplitHTML(r)}`;
+    }
+    // The whites that matter for her here (CP.want: each family's value, by the chance her deck
+    // doesn't give it): the ones her ace deck covers (it hints or gives them in most careers) and
+    // the ones her parents should carry as white sparks.
+    function whitesSplitHTML(r) {
+      if (!r || !r.x) return "";
+      const W = CP.want(r.x).white.filter((w) => w.L >= 0.05);
+      if (!W.length) return "";
+      const covered = W.filter((w) => w.deck != null && w.deck >= 0.5).sort((a, b) => b.L - a.L).slice(0, 8);
+      const carry = W.filter((w) => !(w.deck != null && w.deck >= 0.5)).sort((a, b) => b.priority - a.priority).slice(0, 8);
+      const item = (w) => `${esc(ctx.skillName(w.id))} <span class="mini">(${w.L.toFixed(2)} L${w.deck != null ? `, her deck ${Math.round(w.deck * 100)}%` : ""})</span>`;
+      const field = ctx.fieldValues && ctx.fieldValues(cup(st()).id, r.style) ? " Values from full-field races." : "";
+      return `<p class="mini cmp-whites"><b>Her whites here.</b> Her ace deck covers: ${covered.map(item).join(", ") || "none of the valuable ones"}. Her parents should carry: ${carry.map(item).join(", ") || "nothing else"}.${field}</p>`;
     }
     // The blue sparks you still choose, split to leave the least short: the grandparent's own
     // (if not borrowed yet), Parent 2's own, and her two parents', each in any gap stat at 2★ or
