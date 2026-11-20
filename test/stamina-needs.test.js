@@ -143,8 +143,31 @@ test("automatic stamina is the deck target and moves the stamina shortfall in ra
   const ctx = OPT.buildCtx(opts), line = stamina => [1500, stamina, 1200, 700, 1100];
   assert.equal(ctx.target.stamina, 825);
   assert.ok(OPT.raceL(ctx, line(650)) < OPT.raceL(ctx, line(825)));
-  assert.equal(OPT.raceL(ctx, line(825)), OPT.raceL(ctx, line(950)));
+  // Past the target only the course's stamina threshold still pays (Tokyo dirt 1600 lists Speed
+  // and Stamina: 901+ is +2.5% speed).
+  assert.equal(OPT.raceL(ctx, line(825)), OPT.raceL(ctx, line(900)));
+  const step = raceValues.steps.find((x) => x[0] === 1 && x[1] === 901);
+  assert.ok(step && step[2] > 0.05, "the 901 stamina step was measured");
+  assert.ok(Math.abs(OPT.raceL(ctx, line(950)) - OPT.raceL(ctx, line(825)) - step[2]) < 1e-9);
   const manual = OPT.buildCtx({ ...opts, target: { stamina: 900 } });
   assert.equal(manual.target.stamina, 900);
   assert.equal(manual.race, null);
+});
+
+test("course stat thresholds: every cup lists its bonus stats; curves are stored without the steps", () => {
+  const C = require("../data/stat-curves.js"), RSK = require("../data/race-skills.json");
+  Object.entries(C.cups).forEach(([id, cup]) => {
+    if (cup.status !== "ok") return;
+    assert.ok(Array.isArray(cup.courseStats), id + " courseStats");
+    Object.entries(cup.styles).forEach(([st, v]) => {
+      if (v.status !== "ok") return;
+      assert.ok(v.pure, id + " " + st + " pure");
+      const listed = new Set(v.steps.map((x) => x[0]));
+      assert.deepEqual([...listed].sort(), cup.courseStats.slice().sort(), id + " " + st + " steps for each listed stat");
+      v.steps.forEach((x) => assert.ok([301, 601, 901].includes(x[1])));
+    });
+  });
+  const p = PRESETS.list.find((x) => x.id === "cm22");
+  assert.deepEqual(RSK.courses[p.course.id].courseSetStatus, [1, 2]);
+  assert.deepEqual(C.cups.cm22.courseStats, [0, 1], "Tokyo dirt 1600: Speed and Stamina");
 });
