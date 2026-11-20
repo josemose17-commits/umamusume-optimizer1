@@ -583,3 +583,14 @@ test("Independent Training priorities: events only (a white her deck only hints 
   const before = list.findIndex((k) => k.gamble);
   if (before >= 0) assert.ok(list.slice(before).every((k) => k.gamble), "random-event whites after her deck's");
 });
+
+test("Independent Training priorities fill all 10 slots with event whites (random-event ones after her deck's)", () => {
+  const x = x0(), w = plan.want(x).white;
+  const keep = new Set(w.slice(0, 1).map((k) => String(k.id)));
+  const narrow = { targets: Object.fromEntries(Object.entries(x.rel.targets).filter(([id]) => keep.has(String(id)))), why: x.rel.why, L: x.rel.L };
+  const planned = Object.assign({}, x, { rel: narrow, relAll: x.rel, skillPlan: { parentValues: {} } });
+  const list = plan.itSkills(planned, {}, 10, new Set(), {}, null, { event: new Set(), hint: new Set() });
+  const K = require("../data/skill-kinds.js").skills, heal = (id) => K[String(id)] && K[String(id)][0] === "recovery";
+  const can = w.filter((k) => !heal(k.id)).length;
+  assert.equal(list.length, Math.min(10, can), "as many as there are, up to 10");
+});

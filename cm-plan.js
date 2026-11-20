@@ -206,7 +206,8 @@
           if (seen.has(f) || !(eff[f] > 0)) return;
           if (o.outNow && !fams[f].ids.concat(famMembers[f] || []).some((id) => o.outNow(id))) return; // she can only learn what's out now
           const all = famMembers[f] || fams[f].ids, p = Math.min(1, Math.max(0, ...all.map((id) => o2[id] || 0)));
-          if (extra && !(p > 0)) return;
+          // With sources known, a white no card of hers has still fills a slot (a random event can give it).
+          if (extra && !(p > 0) && !src) return;
           seen.add(f);
           // The list holds whites, so only an event that gives a white tier (○, ◎) counts, not one
           // that gives the gold.
