@@ -46,7 +46,7 @@
     let editAce = null;         // the chip being edited, or the new ace's index
     const opened = {};          // boxes you opened or closed: kept across redraws
     const trainee = (id) => (id ? D.trainee(+id) : null);
-    const tName = (t) => (t ? t.n + (D.DATA.trainees.filter((x) => x.cid === t.cid).length > 1 ? " [" + t.t + "]" : "") : "");
+    const tName = (t) => (t ? t.n + (t.t && D.DATA.trainees.filter((x) => x.cid === t.cid).length > 1 ? " [" + t.t + "]" : "") : "");
     const cardName = (id) => { const c = D.card(id); return c ? c.n + " [" + c.t + "]" : "#" + id; };
     const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -423,8 +423,65 @@
       const team = ctx.pullTeam(p).filter((m) => ctx.myUmas().has(+m.tid));
       return `<label class="field grow"><span>Champions Meeting or League of Heroes</span><select id="cmpCup">${cupOpts}</select></label>
         <div class="row-wrap cmp-chips" aria-label="Your team"><span class="mini"><b>Your team</b> (up to ${MAX_ACES}; the deck below is for the one picked)</span>${chips}${list.length < MAX_ACES ? `<button type="button" class="btn ghost small" id="cmpAddAce"${mine.length ? "" : " disabled"}>+ Add an ace</button>` : ""}${team.length ? `<button type="button" class="linkish" id="cmpTeam">Use my Pull planner team</button>` : ""}</div>${editor}
+        ${makerHTML(c, p)}
         ${selected && ctx.staminaSummary ? staminaLine() : ""}
         ${!mine.length ? `<p class="mini">Your team comes from My umas: tick them in the Trainees tab, or import your umaextractor export in <button type="button" class="linkish" data-goto-tab="parents" data-goto-section="import">Parents</button>.</p>` : ""}`;
+    }
+
+    // ---------- Team maker: the best team for this cup from umas you list ----------
+    // c.maker: { pool: [{ tid, styles: [style], fixed }], open: { key: bool } }. Styles left
+    // empty mean her A/S styles (team-maker.js).
+    const TM = root.UmaTeamMaker;
+    function maker(c) {
+      if (!c.maker) c.maker = { pool: [], open: {} };
+      if (!Array.isArray(c.maker.pool)) c.maker.pool = [];
+      if (!c.maker.open) c.maker.open = {};
+      c.maker.pool = c.maker.pool.filter((m) => trainee(m.tid));
+      return c.maker;
+    }
+    const makerOpts = () => ({ D, UV: root.UmaUmaValues || null, k: MAX_ACES });
+    const HOW = { measured: "her unique raced here in this style", estimated: "unique from her other styles' runs here", aptitude: "not raced here: aptitudes only", grades: "no values for this cup: aptitude grades" };
+    const fmtL = (v) => (v >= 0 ? "+" : "") + v.toFixed(2);
+    function makerHTML(c, p) {
+      if (!TM) return "";
+      const m = maker(c), open = (k) => (m.open[k] ? " open" : "");
+      const mineIds = ctx.myUmas(), glob = new Set(ctx.chars());
+      const all = D.DATA.trainees.filter((t) => glob.has(t.cid) && (D.onGlobal ? D.onGlobal(t) : !!t.en)).sort((a, b) => a.n.localeCompare(b.n) || a.t.localeCompare(b.t));
+      const inPool = new Set(m.pool.map((x) => +x.tid));
+      const opt = (t) => `<option value="${t.id}">${esc(tName(t))}</option>`;
+      const yours = all.filter((t) => mineIds.has(t.id) && !inPool.has(t.id)), others = all.filter((t) => !mineIds.has(t.id) && !inPool.has(t.id));
+      const rows = m.pool.map((x, i) => {
+        const t = trainee(x.tid), def = TM.goodStyles(t), on = x.styles && x.styles.length ? x.styles : def;
+        return `<tr><td>${esc(tName(t))}${mineIds.has(t.id) ? "" : ' <span class="mini">(not in My umas)</span>'}</td>
+          <td><div class="row-wrap">${STYLES.map(([st, label]) => `<label class="chip-toggle" title="${label}: ${t.apt[6 + STYLES.findIndex((y) => y[0] === st)]}"><input type="checkbox" data-tm-style="${i},${st}"${on.includes(st) ? " checked" : ""}> ${label} <span class="mini">${t.apt[6 + STYLES.findIndex((y) => y[0] === st)]}</span></label>`).join("")}</div></td>
+          <td><label class="chip-toggle"><input type="checkbox" data-tm-fixed="${i}"${x.fixed ? " checked" : ""}> Fixed</label></td>
+          <td><button type="button" class="linkish" data-tm-del="${i}" aria-label="Remove ${esc(tName(t))}">✕</button></td></tr>`;
+      }).join("");
+      const r = m.pool.length ? TM.best(p, m.pool, makerOpts()) : null;
+      const pick = (x) => `${esc(tName(trainee(x.tid)))} · ${STYLE_LABEL[x.style]}`;
+      const result = r && r.team.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Pick</th><th class="num">L</th><th>Value from</th></tr></thead><tbody>${r.team.map((x) => `<tr><td><b>${pick(x)}</b>${x.fixed ? ' <span class="mini">fixed</span>' : ""}</td><td class="num">${fmtL(x.v)}</td><td class="mini">${HOW[x.how]}</td></tr>`).join("")}</tbody></table></div>
+          <p class="mini">Team total <b>${fmtL(r.total)} L</b>${r.repeats ? ` · <span class="warn">${r.repeats === 1 ? "two run one style" : "repeated styles"}: no other pick fits, and they'll fight for one spot</span>` : " · every pick in its own style"}.${r.alts.length ? ` Next best for each slot: ${r.alts.map((a) => `${pick(a)} for ${esc(tName(trainee(a.out)))} (${fmtL(-a.loss)} L)`).join("; ")}.` : ""}</p>
+          <div class="row-wrap"><button type="button" class="btn small" id="tmUse">Use this team</button>${r.team.some((x) => !mineIds.has(+x.tid)) ? '<span class="mini warn">Not all are in My umas yet.</span>' : ""}</div>` : "";
+      return `<details class="pred-help cmp-maker" data-tm-open="maker"${open("maker")}><summary><b>Team maker</b> · the best ${MAX_ACES} from umas you list${m.pool.length ? ` (${m.pool.length} in the pool)` : ""}</summary>
+        <p class="mini">List umas, tick the styles each may run (her A/S styles to start) and pin any as <b>Fixed</b>. For ${esc(p.name)} it keeps every fixed uma and fills the rest with the most lengths in all, no two in one style unless nothing else fits, and never two outfits of one character. Worth is what she brings herself: her own unique raced on this cup in that style plus her surface, distance and style aptitudes against A (as the Pull planner's teams use it). Her deck, stats and skills aren't in it: those come from her deck below.</p>
+        <div class="row-wrap"><label class="field grow"><span>Add an uma</span><select id="tmAdd"><option value="">Pick an uma…</option>${yours.length ? `<optgroup label="My umas">${yours.map(opt).join("")}</optgroup>` : ""}<optgroup label="Others on Global">${others.map(opt).join("")}</optgroup></select></label>
+          ${yours.length ? `<button type="button" class="btn ghost small" id="tmAddMine">Add all My umas (${yours.length})</button>` : ""}${m.pool.length ? '<button type="button" class="btn ghost small" id="tmClear">Clear the pool</button>' : ""}</div>
+        ${rows ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Uma</th><th>Styles she may run</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+        ${r && r.problems.length ? `<p class="mini warn">${r.problems.map(esc).join(" ")}</p>` : ""}
+        ${result}
+        ${m.pool.length ? everyCupHTML(c, m) : ""}
+      </details>`;
+    }
+    // Step 2: the best team for every cup ahead from the same pool.
+    function everyCupHTML(c, m) {
+      const list = P.list.filter((x) => x.global.end >= ctx.today).sort((a, b) => a.global.start.localeCompare(b.global.start));
+      if (!m.open.every) return `<details data-tm-open="every"><summary><b>Every cup ahead</b> from this pool (${list.length})</summary></details>`;
+      const e = TM.everyCup(list, m.pool, makerOpts());
+      const counts = Object.entries(e.count).sort((a, b) => b[1] - a[1]);
+      return `<details data-tm-open="every" open><summary><b>Every cup ahead</b> from this pool (${list.length})</summary>
+        <p class="mini">In the most teams: ${counts.map(([tid, n]) => `${esc(tName(trainee(tid)))} ${n}`).join(" · ")}${m.pool.filter((x) => !e.count[x.tid]).length ? ` · never picked: ${m.pool.filter((x) => !e.count[x.tid]).map((x) => esc(tName(trainee(x.tid)))).join(", ")}` : ""}.</p>
+        <div class="table-wrap"><table class="plan"><thead><tr><th>Cup</th><th>Best team</th><th class="num">L</th><th></th></tr></thead><tbody>${e.rows.map(({ cup: q, r }) => `<tr${q.id === c.cup ? ' class="cur"' : ""}><td>${esc(ctx.cupLabel(q))}<div class="mini">${esc(q.course.track)} ${q.course.distance}m ${esc(q.course.surface)}</div></td><td class="mini">${r.team.map((x) => `${esc(tName(trainee(x.tid)))} · ${STYLE_LABEL[x.style]}`).join("<br>")}${r.repeats ? ' <span class="warn">(style repeated)</span>' : ""}</td><td class="num">${r.team.length ? fmtL(r.total) : ""}</td><td>${r.team.length ? `<button type="button" class="linkish" data-tm-use="${q.id}">Use</button>` : ""}</td></tr>`).join("")}</tbody></table></div>
+        <p class="mini"><b>Use</b> sets that cup's team (and opens it).</p></details>`;
     }
 
     // ---------- Parents ----------
@@ -999,6 +1056,21 @@
         afterImport();
         return true;
       }
+      const tmSum = t.closest("[data-tm-open] > summary");
+      if (tmSum) { const d = tmSum.parentElement, k = d.dataset.tmOpen; maker(c).open[k] = !d.open; ctx.save(); if (k === "every" && !d.open) { e.preventDefault(); ctx.rerender(); return true; } return false; }
+      if (t.closest("#tmAddMine")) { const m = maker(c), have = new Set(m.pool.map((x) => +x.tid)); [...ctx.myUmas()].filter((id) => trainee(id) && !have.has(+id)).forEach((id) => m.pool.push({ tid: +id, styles: [], fixed: false })); ctx.save(); ctx.rerender(); return true; }
+      if (t.closest("#tmClear")) { maker(c).pool = []; ctx.save(); ctx.rerender(); return true; }
+      const tmDel = t.closest("[data-tm-del]");
+      if (tmDel) { maker(c).pool.splice(+tmDel.dataset.tmDel, 1); ctx.save(); ctx.rerender(); return true; }
+      if (t.closest("#tmUse") || t.closest("[data-tm-use]")) {
+        const id = t.closest("[data-tm-use]") ? t.closest("[data-tm-use]").dataset.tmUse : c.cup, q = P.list.find((x) => x.id === id);
+        const r = q ? TM.best(q, maker(c).pool, makerOpts()) : null;
+        if (!r || !r.team.length) return true;
+        c.byCup[id] = r.team.map((x) => ({ tid: +x.tid, style: x.style }));
+        c.sel[id] = r.team[0].tid; c.cup = id; editAce = null;
+        ctx.flash(`${q.name}: your team is ${r.team.map((x) => tName(trainee(x.tid)) + " (" + STYLE_LABEL[x.style] + ")").join(", ")}.`);
+        ctx.save(); ctx.rerender(); return true;
+      }
       if (t.closest("#cmpTeam")) { c.byCup[c.cup] = ctx.pullTeam(cup(c)).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES); editAce = null; ctx.save(); ctx.rerender(); return true; }
       if (t.closest("#cmpAddAce")) { editAce = aces(c).length; ctx.rerender(); return true; }
       if (t.closest("#cmpAceDone")) { editAce = null; ctx.rerender(); return true; }
@@ -1053,6 +1125,13 @@
     }
     function change(e) {
       const t = e.target, c = st(), ds = t.dataset, a = current(c);
+      if (t.id === "tmAdd") { if (t.value && trainee(t.value)) { const m = maker(c); if (!m.pool.some((x) => +x.tid === +t.value)) m.pool.push({ tid: +t.value, styles: [], fixed: false }); ctx.save(); ctx.rerender(); } return true; }
+      if (ds.tmStyle != null) {
+        const [i, sty] = ds.tmStyle.split(","), x = maker(c).pool[+i];
+        if (x) { const tr = trainee(x.tid), cur = x.styles && x.styles.length ? x.styles.slice() : TM.goodStyles(tr); const next = t.checked ? [...new Set(cur.concat(sty))] : cur.filter((y) => y !== sty); if (!next.length) { ctx.flash("Leave at least one style ticked."); ctx.rerender(); return true; } x.styles = STYLES.map((y) => y[0]).filter((y) => next.includes(y)); }
+        ctx.save(); ctx.rerender(); return true;
+      }
+      if (ds.tmFixed != null) { const x = maker(c).pool[+ds.tmFixed]; if (x) x.fixed = t.checked; ctx.save(); ctx.rerender(); return true; }
       if (t.id === "cmpCup") { c.cup = t.value; editAce = null; ctx.save(); ctx.rerender(); return true; }
       if (t.id === "cmpVetsFile") {
         const file = t.files && t.files[0];
