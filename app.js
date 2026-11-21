@@ -2716,7 +2716,7 @@
   }
   function parentTargetsBase(c, p) {
     // A general grandparent (General grandparents in Parents): uma.guide's list for the style.
-    if (c.general && window.UmaGeneralParents) return window.UmaGeneralParents.targets(c.style, { out: c.globalSkills ? (id) => released(id, p) : null });
+    if (c.general && window.UmaGeneralParents) return window.UmaGeneralParents.targetsAfter(c.style, (state.cmp.training || {}).hints, { out: c.globalSkills ? (id) => released(id, p) : null });
     const sv = skillMap(p.id, c.style, true), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
     const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(p, c.style) });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id, p)) { delete out.targets[id]; delete out.why[id]; } });
@@ -2801,7 +2801,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" : ""), c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -3657,7 +3657,10 @@
     const versions = (cid) => { const all = D.DATA.trainees.filter((t) => t.cid === +cid && onGlobal(t)), mine = all.filter((t) => !(D.isHiddenTrainee && D.isHiddenTrainee(t.id))); return mine.length ? mine : all; };
     const charName = (cid) => (D.DATA.trainees.find((t) => t.cid === +cid) || {}).n || "#" + cid;
     gpPanel = window.UmaGeneralParents.panel({
-      esc, A: window.UmaAffinity, flash, save, rerender: () => renderTab(),
+      esc, A: window.UmaAffinity, F: window.UmaFamily, flash, save, rerender: () => renderTab(),
+      rentals: () => (parents().family ? parents().family.rentalsList() : []),
+      umaMoe: (q) => (cmPlan() && cmPlan().umaMoe ? cmPlan().umaMoe(q) : null),
+      searchSummary: (x) => (cmPlan() && cmPlan().searchSummary ? cmPlan().searchSummary(x) : []),
       state: () => { const ps = parents().st(); return ps.general || (ps.general = {}); },
       skillName: (id) => skillInfo(id)[0], outNow: (id) => (SV.skills[id] ? !!SV.skills[id][3] : !!meta[id]),
       family: (id) => (meta[id] ? String(meta[id][0]) : String(id)),
@@ -3677,13 +3680,15 @@
     const pp = parents();
     if (!pp) return;
     pp.toBuilder(o.tid, o.must);
-    state.cmp.training = { general: o.style, parent: +o.tid };
+    // Her parents (your veteran and the borrow), and the list hints they give her: ③'s deck counts
+    // those skills less.
+    state.cmp.training = { general: o.style, parent: +o.tid, vet: o.vet != null ? o.vet : null, rental: o.rental || null, hints: o.hints || null };
     state.pcm = state.pcm || {};
     Object.assign(state.pcm, { goal: "ace", general: true, style: o.style, preset: defaultPreset().id, forTrainee: +o.tid });
     pp.st().races = o.races.slice();
     state.tab = "parents";
     save();
-    flash(`${D.trainee(o.tid).n} is ready to train as a general ${STYLE_LABEL[o.style]} grandparent: ${o.races.length} extra G1${o.races.length === 1 ? "" : "s"} in ②, the style's list in ③ and ④.`);
+    flash(`${D.trainee(o.tid).n} is ready to train as a general ${STYLE_LABEL[o.style]} grandparent: ${o.races.length} extra G1${o.races.length === 1 ? "" : "s"} in ②, the style's list in ③ and ④${o.hints ? " (less of what her parents hint)" : ""}.`);
     renderTab();
     showSection("who");
   }
