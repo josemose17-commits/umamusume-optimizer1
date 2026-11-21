@@ -783,6 +783,7 @@
 
     document.querySelector(".tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); } });
     $("#tabBody").addEventListener("click", (e) => {
+      if (state.tab === "parents" && gp() && gp().click(e)) return;
       if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
       if (state.tab === "cm" && cmLogClick(e.target)) return;
@@ -871,6 +872,7 @@
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
+    $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && gp() && gp().change(e)) e.stopImmediatePropagation(); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "skillopt") soChange(e); });
@@ -2300,11 +2302,19 @@
     const c = host === "parents" ? state.pcm : state.cm;
     if (host === "parents" && PARENT_GOALS.indexOf(c.goal) === -1) c.goal = "ace";
     // An ace parent is built for the ace's race: CM & decks' race and style, set there only.
+    // A general grandparent (General grandparents in Parents) has no ace: her style is the one
+    // she was set up for, and the cards are the ones out by the next CM.
     if (host === "parents") {
       const from = state.cmp.training;
-      const ace = from && (state.cmp.byCup[from.cup] || []).find(a => +a.tid === +from.tid);
-      c.preset = from && presetById(from.cup) ? from.cup : state.cm.preset;
-      c.style = ace ? ace.style || bestTraineeStyle(D.trainee(ace.tid)) : state.cm.style;
+      if (from && from.general) {
+        c.general = true; c.style = from.general;
+        if (!presetById(c.preset)) c.preset = defaultPreset().id;
+      } else {
+        delete c.general;
+        const ace = from && (state.cmp.byCup[from.cup] || []).find(a => +a.tid === +from.tid);
+        c.preset = from && presetById(from.cup) ? from.cup : state.cm.preset;
+        c.style = ace ? ace.style || bestTraineeStyle(D.trainee(ace.tid)) : state.cm.style;
+      }
     }
     // Parents are trained in Independent Training here, so its race count always applies.
     if (host === "parents") { c.independent = true; c.reachSS = state.cmp.parentRank; }
@@ -2695,7 +2705,9 @@
   // Out on Global for this cup (skill-release.js): Global's skills now, or for a cup Global hasn't
   // reached yet, also every skill JP released by that cup's JP date.
   const skillsBy = (p) => window.UmaSkillRelease.cutoff(p, TODAY);
-  const released = (id, p) => window.UmaSkillRelease.outBy(SV.skills[id], skillsBy(p));
+  // A skill the simulator has no entry for (lane, vision and wit skills: Prudent Positioning,
+  // Dodging Danger, Ignited Spirit WIT…) has no release record: out when the purchase data knows it.
+  const released = (id, p) => (SV.skills[id] ? window.UmaSkillRelease.outBy(SV.skills[id], skillsBy(p)) : !!window.UmaSkillBudget.DATA.skills[id]);
   // The parent's relevant skills for a race and style (parent-relevance.js): { targets, why },
   // why naming the rule ("L", "green", "recovery"). Global releases only if set.
   // game8's picks are a tag only: her parents' whites follow the values.
@@ -2703,6 +2715,8 @@
     return parentTargetsBase(c, p);
   }
   function parentTargetsBase(c, p) {
+    // A general grandparent (General grandparents in Parents): uma.guide's list for the style.
+    if (c.general && window.UmaGeneralParents) return window.UmaGeneralParents.targets(c.style, { out: c.globalSkills ? (id) => released(id, p) : null });
     const sv = skillMap(p.id, c.style, true), rarity = (id) => (SV.skills[id] ? SV.skills[id][2] : null);
     const out = window.UmaParentRelevance.aceTargets({ preset: p, style: c.style, raceSkills: sv.map, debuffs: window.UmaDebuffs, minL: 0.1, rarityOf: rarity, kinds: window.UmaSkillKinds, positions: relPositions(p, c.style) });
     if (c.globalSkills) Object.keys(out.targets).forEach((id) => { if (!released(id, p)) { delete out.targets[id]; delete out.why[id]; } });
@@ -2787,7 +2801,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal, c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" : ""), c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2820,7 +2834,7 @@
         } catch (err) { est = null; }
       }
       if ((scenario().id === "grandlive" || est && est.scoring === "race") && c.goal === "race" && est) r.skills = est.skills;
-      const result = Object.assign(r, { key, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      const result = Object.assign(r, { key, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
       if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
@@ -3228,7 +3242,8 @@
       <p class="mini" data-card-availability>${future ? `Cards expected by ${esc(fmtDate(by))}; ~ releases are estimates. Untick “Only cards I own” to try future cards at LB4.` : "Cards released on Global today; updated daily from GameTora."}${missingScores ? ` ${missingScores} card${missingScores === 1 ? " lacks" : "s lack"} scoring data and ${missingScores === 1 ? "is" : "are"} left out of searches.` : ""}</p>
 
       ${host === "parents" ? `<p class="mini">Finds relevant white skills for the ace, with the parent rating goal set above.</p>` : ""}
-      ${goal === "ace" ? note(`<p class="mini"><b>Ace parent:</b> picks the cards that give your parent the most white skills relevant on this race: worth more than 0.1 L (median) for the running style and weighted by it, the greens whose condition fits the race, and for Mile and longer the recoveries that fit it (never debuffs), so she can learn them and pass them down as skill sparks. Gold hints count through their white: a spark is always the base white skill's, and learning the gold raises its chance to 40% (20% for a white). Every skill counts, not just the best 8, and stats only count as much as you choose.</p>`) : ""}
+      ${goal === "ace" && c.general ? note(`<p class="mini"><b>General grandparent:</b> picks the cards that give your parent the most of uma.guide's general parent skills for the ${esc(STYLE_LABEL[c.style])} style (General grandparents, above): its first 4 count most, then the long-term list, then straights and corners that fire on any course. Gold hints count through their white, as for an ace parent. Stats only count as much as you choose.</p>`) : ""}
+      ${goal === "ace" && !c.general ? note(`<p class="mini"><b>Ace parent:</b> picks the cards that give your parent the most white skills relevant on this race: worth more than 0.1 L (median) for the running style and weighted by it, the greens whose condition fits the race, and for Mile and longer the recoveries that fit it (never debuffs), so she can learn them and pass them down as skill sparks. Gold hints count through their white: a spark is always the base white skill's, and learning the gold raises its chance to 40% (20% for a white). Every skill counts, not just the best 8, and stats only count as much as you choose.</p>`) : ""}
       ${goal !== "race" ? `<label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
 
       ${note(`<p class="mini">Builds the deck the way you'd use <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: it picks the best card, then the best card given that one, and so on, with Euophrys' own scoring for the scenario. On top, every skill a card can hint is scored by its median length gain on this race as a ${STYLE_LABEL[c.style]} runner. Then it rechecks each slot with the other five fixed.</p>`)}
@@ -3516,6 +3531,7 @@
       coachTargets: () => (state.targets && E.STATS.some((x) => state.targets[x] > 0) ? state.targets : null),
       sync: () => syncWorkflow(),
       familyHTML: () => parents().familyHTML(),
+      generalHTML: () => (gp() ? gp().html() : ""),
       family: () => parents().st().family || {},
       planFamily: (p1, train, userChoice) => {
         const f = parents().st().family, blank = () => ({ cid: null, tid: null, white: [], blue: [0, 0], pink: [0, 0], green: 0, wins: [] });
@@ -3606,6 +3622,7 @@
     const pp = parents();
     if (!pp) return;
     state.cmp.training = { cup: o.cup, tid: +o.ace.tid, parent: +o.p1.tid };
+    if (state.pcm) delete state.pcm.general;
     const c = state.cm || (state.cm = {});
     c.preset = o.cup; c.style = o.style;
     const ps = pp.st(), f = ps.family || (ps.family = {});
@@ -3629,6 +3646,46 @@
     if (!o.quiet) flash(`${D.trainee(o.p1.tid).n} is ready to train here: her family, ${o.races.length} extra race${o.races.length === 1 ? "" : "s"} in ②, the ace's race in ③.`);
     renderTab();
     if (section) showSection(section);
+  }
+  // General grandparents (general-parents.js): uma.guide's general parent skills per running
+  // style, checked against one character, her race plan, and your veterans; for any cup.
+  let gpPanel = null;
+  function gp() {
+    if (gpPanel || !window.UmaGeneralParents || !window.UmaAffinity || !parents()) return gpPanel;
+    const meta = window.UmaSkillBudget.DATA.skills, onGlobal = (t) => D.onGlobal(t);
+    const cids = [...new Set(D.DATA.trainees.filter(onGlobal).map((t) => t.cid))];
+    const versions = (cid) => { const all = D.DATA.trainees.filter((t) => t.cid === +cid && onGlobal(t)), mine = all.filter((t) => !(D.isHiddenTrainee && D.isHiddenTrainee(t.id))); return mine.length ? mine : all; };
+    const charName = (cid) => (D.DATA.trainees.find((t) => t.cid === +cid) || {}).n || "#" + cid;
+    gpPanel = window.UmaGeneralParents.panel({
+      esc, A: window.UmaAffinity, flash, save, rerender: () => renderTab(),
+      state: () => { const ps = parents().st(); return ps.general || (ps.general = {}); },
+      skillName: (id) => skillInfo(id)[0], outNow: (id) => (SV.skills[id] ? !!SV.skills[id][3] : !!meta[id]),
+      family: (id) => (meta[id] ? String(meta[id][0]) : String(id)),
+      cids: () => cids, charName, versions,
+      mine: () => new Set([...myUmas()].map((id) => (D.trainee(id) || {}).cid).filter(Boolean)), mineTids: () => myUmas(),
+      veterans: () => (parents().family ? parents().family.veterans().list : []),
+      vetName: (v) => { const t = D.trainee(v.tid); return charName(v.cid) + (t && versions(v.cid).length > 1 ? ` [${t.t}]` : "") + (v.score ? ` · ${v.score.toLocaleString("en-US")}` : ""); },
+      send: (o) => trainGeneral(o),
+      sent: () => { const t = state.cmp && state.cmp.training; return t && t.general && state.pcm && state.pcm.general ? { style: t.general, tid: t.parent } : null; },
+      trainingHTML: () => parents().trainingHTML(),
+    });
+    return gpPanel;
+  }
+  // A general grandparent set up to train: ① her, ② her race plan, ③ a deck for the style's list
+  // (cards out by the next CM), ④ the first 4 as spark ★.
+  function trainGeneral(o) {
+    const pp = parents();
+    if (!pp) return;
+    pp.toBuilder(o.tid, o.must);
+    state.cmp.training = { general: o.style, parent: +o.tid };
+    state.pcm = state.pcm || {};
+    Object.assign(state.pcm, { goal: "ace", general: true, style: o.style, preset: defaultPreset().id, forTrainee: +o.tid });
+    pp.st().races = o.races.slice();
+    state.tab = "parents";
+    save();
+    flash(`${D.trainee(o.tid).n} is ready to train as a general ${STYLE_LABEL[o.style]} grandparent: ${o.races.length} extra G1${o.races.length === 1 ? "" : "s"} in ②, the style's list in ③ and ④.`);
+    renderTab();
+    showSection("who");
   }
   // Open a workflow section and any folded sections containing it.
   function showSection(section) {
@@ -3711,8 +3768,8 @@
       relevant: () => {
         const c = cm("parents"), p = presetById(c.preset);
         loadSkillValues(p.id);
-        if (c.goal === "ace" && !(pasted[p.id] && pasted[p.id][c.style]) && typeof svCache[p.id] !== "object") return null;
-        return Object.assign(parentTargetsFor(c, p), { race: p.name, style: STYLE_LABEL[c.style] });
+        if (c.goal === "ace" && !c.general && !(pasted[p.id] && pasted[p.id][c.style]) && typeof svCache[p.id] !== "object") return null;
+        return Object.assign(parentTargetsFor(c, p), { race: c.general ? "general " + STYLE_LABEL[c.style] + " grandparent" : p.name, style: STYLE_LABEL[c.style] });
       },
       relevantLoading: () => svCache[cm("parents").preset] === "loading",
       // The family section: the ace races the CM set in CM & decks (state.cm, not ③'s parent race).
@@ -3739,9 +3796,10 @@
         return pool.skills.filter((x) => x.target && x.spark).map((x) => x.id);
       },
       setTrainee: (id) => {
-        const x = W.current(state);
-        if (x.ace) {
-          const prior = state.cmp.training;
+        const x = W.current(state), prior = state.cmp.training;
+        // Another version of a general grandparent stays a general grandparent.
+        if (prior && prior.general && D.trainee(id) && D.trainee(prior.parent) && D.trainee(id).cid === D.trainee(prior.parent).cid) state.cmp.training = Object.assign({}, prior, { parent: +id });
+        else if (x.ace) {
           const same = prior && prior.cup === x.cup && +prior.tid === +x.ace.tid && +prior.parent === +id;
           state.cmp.training = Object.assign({}, same ? prior : {}, { cup: x.cup, tid: x.ace.tid, parent: id });
         }
@@ -3761,7 +3819,8 @@
         loadSkillValues(p.id);
         euReady();
         // The race's skill table (must-have ☆, Global-only releases) in a closed box.
-        const race = `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-goto-tab="cm">change cup or ace in CM &amp; decks</button>).</p>`;
+        const race = c.general ? `<p class="mini">For a <b>general ${esc(STYLE_LABEL[c.style])} grandparent</b>: the deck goes after uma.guide's general parent skills for the style (General grandparents, above), not one race's. Cards out by ${esc(p.name)}.</p>`
+          : `<p class="mini">For the ace's race: <b>${esc(p.name)}</b> · ${esc(p.course.track)} ${p.course.distance}m ${esc(p.course.surface)} · ${esc(STYLE_LABEL[c.style])} (<button type="button" class="linkish" data-goto-tab="cm">change cup or ace in CM &amp; decks</button>).</p>`;
         return deckIds(`<div class="cm" data-deck-host="parents">${race}${cmOptimizer(p, c, "parents")}<details class="pp-skills"${ppSkillsOpen ? " open" : ""}><summary>Skills for this race: mark must-haves (☆), ${skillsBy(p) ? "skills out on Global by this cup" : "Global releases only"}</summary>${cmSkills(p, c, "parents")}</details></div>`, "parents");
       },
       // ② Races sets ③ Deck's Independent Training race count (no re-render: the page is drawing).
@@ -3877,7 +3936,7 @@
     const w = j.wish;
     const total = r.cards.reduce((a, x) => a + x.score, 0);
     return `<div class="opt-result">
-      <h4>${r.goal === "ace" ? "Best ace parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
+      <h4>${r.goal === "ace" && r.general ? `Best general ${STYLE_LABEL[r.style]} grandparent deck · cards out by ${esc(p.name)}` : `${r.goal === "ace" ? "Best ace parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]}`} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
       ${r.skillSetCheck ? `<p class="mini">The skill-set check compared ${r.skillSetCheck.decks} shortlisted deck${r.skillSetCheck.decks === 1 ? "" : "s"}, using equipped skills and affordable purchases together.</p>` : ""}
       ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
       ${!stale && r.racesFollowed && r.itRaces !== c.itRaces ? `<p class="mini">Searched for ${r.itRaces} extra G1${r.itRaces === 1 ? "" : "s"}; her plan (Parents step 3) now runs ${c.itRaces} with this deck, since that's how many keep her at SS with it. Searching again would aim the deck at ${c.itRaces}, which can move the count again, so this deck stays.</p>` : ""}

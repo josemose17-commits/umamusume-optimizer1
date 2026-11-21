@@ -450,6 +450,7 @@
           <div class="row-wrap cmp-chips" aria-label="Your team">${aces(c).filter((x) => trainee(x.tid)).map((x) => `<button type="button" class="chip${a && x.tid === a.tid ? " active" : ""}" data-cmp-sel="${x.tid}" aria-pressed="${!!a && x.tid === a.tid}">${esc(tName(trainee(x.tid)))}</button>`).join("")}<button type="button" class="linkish" data-goto-tab="cm">${a ? "Team and decks in CM & decks" : "Pick your team in CM & decks"} →</button></div>
         </section>
         ${steps}
+        ${ctx.generalHTML ? ctx.generalHTML() : ""}
         <details class="panel" id="cm-family" data-cmp-open="family-tools"${opened["family-tools"] ? " open" : ""}><summary><b>Family table</b> · enter and compare a family by hand</summary>${ctx.familyHTML()}</details>
         ${importHTML()}
         ${howHTML()}
@@ -916,10 +917,11 @@
           + (list.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Blue · pink</th><th class="num">Whites for her</th><th class="num">On her parents</th></tr></thead><tbody>${list.slice(0, 8).map((e) => `<tr><td>${esc(vetName(e.v))}</td><td>${stat(e.blue[0])} ${e.blue[1]}★ · ${apt(e.pink[0])} ${e.pink[1]}★${e.green ? ` · green ${e.green}★` : ""}</td><td class="num">${e.whites}</td><td class="num">${e.lineWhites}</td></tr>`).join("")}</tbody></table></div>`
             : `<p class="mini">None yet: no veteran has both. Your next loop run that rolls one is the exit point.</p>`);
       }
-      const marks = VP.cleanout(vets, { family, aptName: apt, whiteName: (f) => ctx.skillName(f) });
+      const GP = root.UmaGeneralParents;
+      const marks = VP.cleanout(vets, { family, aptName: apt, whiteName: (f) => ctx.skillName(f), general: GP ? (v, style) => GP.vetFit(v, style, family).score : null, styleName: (st) => GP ? GP.STYLE_LABEL[st] : st });
       const keep = vets.filter((v) => marks.get(v.id).keep), go = vets.filter((v) => !marks.get(v.id).keep);
       return exits + `<details data-cmp-open="cleanout"><summary class="mini">Veteran cleanout: ${keep.length} to keep, ${go.length} safe to transfer</summary>
-        <p class="mini">Keeps the best blue + pink for each pink, your best of each character (her green), and the only veteran with a 2★+ white. The rest are safe to transfer; the app removes nothing.</p>
+        <p class="mini">Keeps the best blue + pink for each pink, your best of each character (her green), the only veteran with a 2★+ white, and your best general grandparent of each style (General grandparents). The rest are safe to transfer; the app removes nothing.</p>
         <div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Sparks</th><th>Mark</th></tr></thead><tbody>${keep.concat(go).map((v) => { const m = marks.get(v.id); return `<tr${m.keep ? "" : ' class="cmp-cut"'}><td>${esc(vetName(v))}</td><td class="mini">${sparks(v.self)}</td><td>${m.keep ? "Keep <span class=\"mini\">· " + esc(m.why.join("; ")) + "</span>" : "Safe to transfer"}</td></tr>`; }).join("")}</tbody></table></div></details>`;
     }
     // Two grandparent rules side by side (shown only): which one is right changes how much her

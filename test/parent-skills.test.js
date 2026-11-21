@@ -35,3 +35,8 @@ test('gold prerequisite and ordinary upgrade coverage retain the original source
  const w=r.skills.find(s=>s.id==='w');assert.equal(w.sources[0].routes[0].via,'g');
  assert.equal(w.p,undefined);assert.equal(w.learned,undefined);assert.equal(w.affordable,undefined);
 });
+test('a white with no simulator entry (lane/vision/wit skills) is still a released white spark when the purchase data has it',()=>{
+ const r=P.build([{id:3,n:'C',en:'2020-01-01',hs:['pp'],es:[]}],{...options,purchases:{...purchases,pp:['pp',120,null,1]},targets:{pp:1}});
+ const pp=r.skills.find(s=>s.id==='pp');
+ assert.ok(pp && pp.spark && pp.release===true && pp.target);
+});
