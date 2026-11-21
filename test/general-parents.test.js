@@ -113,3 +113,61 @@ test("veteran cleanout keeps each style's best general grandparent", () => {
   assert.ok(marks.get("r").why.some((w) => /general End Closer/.test(w)));
   assert.ok(!marks.get("q").why.some((w) => /general/.test(w)), "not the best of any style");
 });
+
+// ---------- Her own parents: your veteran and a borrow ----------
+const F = require("../family.js");
+const m = (cid, white = [], wins = []) => ({ cid, tid: cid * 100 + 1, white, blue: [1, 3], pink: [0, 0], green: 0, wins });
+const vetOf = (id, cid, white, parents = [m(1003), m(1004)], wins = []) => ({ id, cid, tid: cid * 100 + 1, saddles: [10, 11], self: m(cid, white, wins), parents });
+const o = { A, F, family };
+const me = { cid: 1001, tid: 100101 };
+
+test("her parents: list hints from your veteran's side, her parents' sparks too, scaled by each one's affinity", () => {
+  const a = vetOf(1, 1002, [["201601", 3]]), b = vetOf(2, 1002, [["201601", 1]]);
+  const ha = G.parentHints("Senkou", me, a, null, o), hb = G.parentHints("Senkou", me, b, null, o);
+  const ga = ha.hints.find((h) => h.id === "201601");
+  assert.ok(ga && ga.p > hb.hints.find((h) => h.id === "201601").p, "3★ over 1★");
+  const own = A.individual({ trainee: 1001, p1: 1002, g11: 1003, g12: 1004 }, {}).p1;
+  const p = F.twice(F.WHITE, 3, own, 1);
+  assert.ok(Math.abs(ga.p - p) < 1e-9, "the family.js chance at her own affinity");
+  const line = vetOf(3, 1002, [], [m(1003, [["201601", 3]]), m(1004)]);
+  assert.ok(G.parentHints("Senkou", me, line, null, o).hints.some((h) => h.id === "201601" && h.from[0] === "g11"), "her parent's spark counts");
+  assert.equal(G.parentHints("Senkou", me, vetOf(4, 1002, [["201242", 3]]), null, o).hints.length, 0, "another style's skill doesn't");
+});
+
+test("her parents: veterans of her own character can't be her parent; rentals can't repeat her or your veteran", () => {
+  const vets = [vetOf(1, 1001, [["201601", 3]]), vetOf(2, 1002, [["201601", 2]]), vetOf(3, 1005, [["200492", 3]])];
+  const rows = G.rankParentVets("Senkou", me, vets, o);
+  assert.ok(!rows.some((x) => x.v.cid === 1001));
+  assert.ok(rows[0].value >= rows[1].value);
+  const rent = (friend, cid, white) => ({ friend, names: ["x"], parent: m(cid, white), parents: [m(1006), m(1007)] });
+  const rr = G.rankParentRentals("Senkou", me, vets[1], [rent("a", 1001, []), rent("b", 1002, []), rent("c", 1008, [["210101", 3]]), rent("d", 1009, [])], o);
+  assert.deepEqual(rr.map((x) => x.r.friend), ["c", "d"]);
+  assert.ok(rr[0].hints.some((h) => h.id === "210101" && h.from.includes("p2")));
+});
+
+test("her parents: the borrow's uma.moe query skips what your side already hints, list by tier, Stamina 3★ on her, no pink", () => {
+  const v = vetOf(2, 1002, [["201601", 3]]);
+  const side = { hints: [{ id: "201601", p: 0.6 }, { id: "200492", p: 0.2 }] };
+  const q = G.borrowQuery("Senkou", me, v, side, { outNow: (id) => id !== "210111" });
+  assert.equal(q.ace, 100101);
+  assert.deepEqual(q.p1, { tid: v.tid, saddles: [10, 11] });
+  assert.ok(!q.whites.some((w) => w.id === "201601"), "covered 50%+");
+  assert.ok(q.whites.some((w) => w.id === "200492" && w.priority === 0), "first 4: P0");
+  assert.ok(q.whites.some((w) => w.id === "201611" && w.priority === 1), "long-term: P1");
+  assert.ok(q.whites.some((w) => w.id === "200332" && w.priority === 2), "corners: P2");
+  assert.ok(!q.whites.some((w) => w.id === "210111"), "not on Global");
+  assert.deepEqual(q.blueRows, { main: [1, 3], line: [] });
+  assert.equal(q.pink, null);
+});
+
+test("her parents: the deck counts a skill less by the chance they hint it (never under a quarter); their G1s go first in her plan", () => {
+  const t = G.targetsAfter("Senkou", [{ id: "201601", p: 0.4 }, { id: "200492", p: 0.95 }]);
+  assert.ok(Math.abs(t.targets["201601"] - 0.6) < 1e-9);
+  assert.ok(Math.abs(t.targets["200492"] - 0.25) < 1e-9);
+  assert.equal(t.targets["201591"], 1);
+  const cids = [...new Set(D.trainees.filter((x) => x.en).map((x) => x.cid))], shares = G.goalShares(A, cids);
+  const sw = D.trainees.find((x) => x.cid === 1001 && x.en);
+  const free = G.racePlan(A, 1001, sw.apt, shares), rare = A.g1Races().map((r) => r.name).filter((n) => !free.goals.includes(n) && A.fits(sw.apt, A.g1Races().find((r) => r.name === n), "B")).sort((a, b) => (shares.get(a) || 0) - (shares.get(b) || 0))[0];
+  const withParents = G.racePlan(A, 1001, sw.apt, shares, [rare]);
+  assert.ok(withParents.extra.some((r) => r.name === rare && r.parents), "her parent's G1 is planned");
+});

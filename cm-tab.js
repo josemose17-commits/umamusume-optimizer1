@@ -1183,7 +1183,9 @@
       return false;
     }
 
-    return { teamHTML, renderParents, click, change, st, followDeck, refreshStatus: () => {} };
+    return { teamHTML, renderParents, click, change, st, followDeck, refreshStatus: () => {},
+      // The uma.moe link builder and its settings list (General grandparents' borrow search).
+      umaMoe: (q) => CP.umaMoe(q), searchSummary: (x) => CP.searchSummary(x, ctx.skillName) };
   }
 
   const api = { create, PLAN_RACES, MIN_AFFINITY };

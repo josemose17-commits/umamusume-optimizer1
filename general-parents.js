@@ -77,13 +77,82 @@
   // the ones most characters have as a goal first. Her own G1 goals are won anyway.
   // → { goals: [names], extra: [{ name, turn, share }], shared } (shared: expected G1 wins in
   // common with a typical child, the sum of the shares).
-  function racePlan(A, cid, apt, shares) {
-    const names = A.g1Races().map((r) => r.name).sort((a, b) => (shares.get(b) || 0) - (shares.get(a) || 0) || a.localeCompare(b));
+  // first: G1s her own parents won (each one she wins too is +3 affinity for her child's
+  // training, where her parents are the grandparents): planned before the rest.
+  function racePlan(A, cid, apt, shares, first) {
+    const pri = new Set(first || []);
+    const names = A.g1Races().map((r) => r.name).sort((a, b) => Number(pri.has(b)) - Number(pri.has(a)) || (shares.get(b) || 0) - (shares.get(a) || 0) || a.localeCompare(b));
     const out = A.planRaces({ self: cid, apt, minGrade: "B", links: [], extra: names, need: 0 });
     const goals = A.goalG1s(cid).map((g) => g.name);
-    const extra = out.agenda.filter((r) => !r.free).map((r) => ({ name: r.name, turn: r.turn, share: shares.get(r.name) || 0 }));
+    const extra = out.agenda.filter((r) => !r.free).map((r) => ({ name: r.name, turn: r.turn, share: shares.get(r.name) || 0, parents: pri.has(r.name) }));
     const shared = goals.concat(extra.map((r) => r.name)).reduce((n, name) => n + (shares.get(name) || 0), 0);
     return { goals, extra, shared, skipped: out.skipped };
+  }
+
+  // ---------- Her own parents (the ace's great-grandparents) ----------
+  // The uma you train as a general grandparent (g: { cid }) has two parents: one of your
+  // veterans (v: { cid, self, parents: [member, member] }) and a rental (r: { parent, parents }).
+  // They hand her hints for the style's list (her inspirations) and, as her child's
+  // grandparents later, sparks and shared G1s; nothing of theirs reaches the ace herself.
+  function lineage(g, v, r) {
+    const mem = { p1: v ? Object.assign({ cid: v.cid }, v.self) : null, g11: v && v.parents ? v.parents[0] : null, g12: v && v.parents ? v.parents[1] : null,
+      p2: r ? r.parent : null, g21: r && r.parents ? r.parents[0] : null, g22: r && r.parents ? r.parents[1] : null };
+    const L = { trainee: +g.cid }, wins = {};
+    Object.keys(mem).forEach((k) => { const m = mem[k]; if (m && m.cid) { L[k] = +m.cid; wins[k] = m.wins || []; } else mem[k] = null; });
+    return { mem, L, wins };
+  }
+  // Her chance of at least one hint for each list skill over her two inspirations: every family
+  // member's white spark for it (3/6/9% by stars × (1 + her own affinity ÷ 100), at both
+  // inspirations; family.js). o: { A, F, family }. → { hints: [{ id, tier, p, from }], value
+  // (Σ tier weight × p), own (each slot's affinity), total, symbol }.
+  function parentHints(style, g, v, r, o) {
+    const { mem, L, wins } = lineage(g, v, r);
+    const own = o.A.individual(L, wins), tot = o.A.total(L, wins), fam = o.family || ((id) => id);
+    const by = new Map(list(style).map((x) => [fam(x.id), x]));
+    const miss = new Map(), from = new Map();
+    Object.keys(mem).forEach((k) => {
+      const m = mem[k];
+      if (!m) return;
+      (m.white || []).forEach(([id, stars]) => {
+        const x = by.get(fam(String(id)));
+        if (!x) return;
+        const p = o.F.twice(o.F.WHITE, stars, own[k] || 0, o.F.slotScale(k));
+        miss.set(x.id, (miss.has(x.id) ? miss.get(x.id) : 1) * (1 - p));
+        from.set(x.id, (from.get(x.id) || []).concat(k));
+      });
+    });
+    const hints = list(style).filter((x) => miss.has(x.id)).map((x) => ({ id: x.id, tier: x.tier, p: 1 - miss.get(x.id), from: from.get(x.id) }));
+    return { hints, value: hints.reduce((n, h) => n + WEIGHT[h.tier] * h.p, 0), own, total: tot.total, symbol: tot.symbol };
+  }
+  // Your veterans as her parent (not her own character), best first by the list hints her side
+  // gives (her and her parents; the rental's side is added once you pick one).
+  function rankParentVets(style, g, vets, o) {
+    return (vets || []).filter((v) => +v.cid !== +g.cid).map((v) => Object.assign({ v }, parentHints(style, g, v, null, o)))
+      .sort((a, b) => b.value - a.value || b.total - a.total);
+  }
+  // Pasted rentals as her other parent with your veteran v: the game allows no character twice
+  // among her and her two parents.
+  function rankParentRentals(style, g, v, rentals, o) {
+    return (rentals || []).filter((r) => r.parent && +r.parent.cid !== +g.cid && (!v || +r.parent.cid !== +v.cid))
+      .map((r) => Object.assign({ r }, parentHints(style, g, v, r, o))).sort((a, b) => b.value - a.value || b.total - a.total);
+  }
+  // The uma.moe search for the borrow: her as the affinity target, your veteran as the other
+  // parent (with her G1 saddles), the list as preferred whites (first 4 P0, long-term P1,
+  // straights/corners P2) minus what your veteran's side already hints at 50%+, blue Stamina 3★
+  // on the rental, no pink filter (she's A in the style already; a rental's pink only moves her
+  // own aptitude). → the query for cm-plan.js umaMoe().
+  function borrowQuery(style, g, v, side, o = {}) {
+    const covered = new Set((side ? side.hints : []).filter((h) => h.p >= 0.5).map((h) => h.id));
+    const pri = { short: 0, long: 1, corner: 2 };
+    const whites = list(style).filter((x) => !covered.has(x.id) && (!o.outNow || o.outNow(x.id))).map((x) => ({ id: x.id, priority: pri[x.tier] }));
+    return { ace: g.tid, p1: { tid: v.tid, saddles: v.saddles || [] }, blue: 1, blueRows: { main: [1, 3], line: [] }, pink: null, whites, required: [], sort: "whites", quality: "recommended", own: false, covered: [...covered] };
+  }
+  // Deck targets with her parents' hints taken off: a skill they likely hint needs a card less
+  // (each target × (1 − her hint chance), never under a quarter: a card's hint still adds levels).
+  function targetsAfter(style, hints, o = {}) {
+    const t = targets(style, o), p = new Map((hints || []).map((h) => [h.id, h.p]));
+    Object.keys(t.targets).forEach((id) => { if (p.has(id)) t.targets[id] *= Math.max(0.25, 1 - p.get(id)); });
+    return t;
   }
 
   // A veteran's fit as a general grandparent of this style: her list whites (by tier weight ×
@@ -178,7 +247,7 @@
       if (!g.cid) return out;
       const t = version(g.cid, g.style), grade = gradeOf(t, g.style);
       if (!t) return out;
-      const plan = racePlan(ctx.A, +g.cid, t.apt, sharesOf()), pk = pinks(t.apt, g.style), have = own(t, g.style, ctx.family);
+      const fam = chosen(g), plan = racePlan(ctx.A, +g.cid, t.apt, sharesOf(), parentWins(fam)), pk = pinks(t.apt, g.style), have = own(t, g.style, ctx.family);
       const sent = ctx.sent(), here = sent && sent.style === g.style && +sent.tid === +t.id;
       const low = !(GRADE[grade] >= GRADE.A);
       out += `<ul class="mini">
@@ -188,10 +257,55 @@
         <li>Pink: ${pk.length ? pk.slice(0, 3).map((p) => `<b>${p.label}</b> (${p.grade})`).join(", ") : "none at A or S"}${pk[0] && pk[0].i === STYLE_APT[g.style] ? " (her style first: every ace of the style wants it)" : ""}.</li>
         <li>Races: her ${plan.goals.length} G1 goal${plan.goals.length === 1 ? "" : "s"} plus <b>${plan.extra.length} more G1s</b> that fit her, the ones most characters have as a goal first: about ${(3 * plan.shared).toFixed(0)} affinity from wins in common with a typical child.</li>
       </ul>
-      <details data-cmp-open="gp-races"><summary class="mini">Her extra G1s (${plan.extra.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Turn</th><th>Race</th><th class="num">Goal for</th></tr></thead><tbody>${plan.extra.map((r) => `<tr><td class="num">${r.turn}</td><td>${esc(r.name)}</td><td class="num">${Math.round(r.share * 100)}%</td></tr>`).join("")}</tbody></table></div>
-        <p class="mini">"Goal for": the share of characters with it as a career goal, so her child likely wins it too. Every extra race costs a training turn and some rating: untick any in ② once she's set up.</p></details>
-      <div class="row-wrap"><button type="button" class="btn small" data-gp-send="${t.id}">${here ? "Set her up again" : "Set her up to train"}</button><span class="mini">${here ? "She's set up below: ① her, ② these races, ③ a deck for the list, ④ the list in the shop." : "① her, ② these races, ③ a deck that gives the list, ④ the first 4 in the shop as spark ★."}</span></div>
+      <details data-cmp-open="gp-races"><summary class="mini">Her extra G1s (${plan.extra.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Turn</th><th>Race</th><th class="num">Goal for</th></tr></thead><tbody>${plan.extra.map((r) => `<tr><td class="num">${r.turn}</td><td>${esc(r.name)}${r.parents ? ' <span class="mini">her parent won it</span>' : ""}</td><td class="num">${Math.round(r.share * 100)}%</td></tr>`).join("")}</tbody></table></div>
+        <p class="mini">"Goal for": the share of characters with it as a career goal, so her child likely wins it too.${fam.v ? " G1s her parents won come first: each one she wins too adds 3 affinity when her child is trained (her parents are that child's grandparents)." : ""} Every extra race costs a training turn and some rating: untick any in ② once she's set up.</p></details>
+      ${parentsHTML(g, t, fam)}
+      <div class="row-wrap"><button type="button" class="btn small" data-gp-send="${t.id}">${here ? "Set her up again" : "Set her up to train"}</button><span class="mini">${here ? "She's set up below: ① her, ② these races, ③ a deck for the list, ④ the list in the shop." : `① her, ② these races, ③ a deck that gives the list${fam.v ? " (less of what her parents hint)" : ""}, ④ the first 4 in the shop as spark ★.${fam.v ? ` In the game, start her career with your ${esc(ctx.charName(fam.v.cid))}${fam.r ? ` and ${esc(fam.r.trainer || "the friend")}'s ${esc(fam.r.names ? fam.r.names[0] : ctx.charName(fam.r.parent.cid))} (${esc(String(fam.r.friend).replace(/(\d{3})(?=\d)/g, "$1 "))})` : ""} as her parents.` : ""}`}</span></div>
       ${here ? ctx.trainingHTML() : ""}`;
+      return out;
+    }
+
+    // ---------- Her own parents: your veteran and a borrow ----------
+    const hintOpts = () => ({ A: ctx.A, F: ctx.F, family: ctx.family });
+    // The veteran and rental picked for her (when they still exist and still fit).
+    function chosen(g) {
+      const vets = ctx.veterans(), rents = ctx.rentals ? ctx.rentals() : [];
+      const v = g.v != null ? vets.find((x) => x.id === g.v && +x.cid !== +g.cid) || null : null;
+      const r = v && g.r ? rents.find((x) => x.friend === g.r && x.parent && +x.parent.cid !== +g.cid && +x.parent.cid !== +v.cid) || null : null;
+      return { v, r };
+    }
+    const parentWins = (f) => [...new Set([].concat(f.v ? f.v.self.wins || [] : [], f.r && f.r.parent ? f.r.parent.wins || [] : []))];
+    const pct = (p) => Math.round(p * 100) + "%";
+    const hintText = (h, n) => h.hints.slice().sort((a, b) => WEIGHT[b.tier] * b.p - WEIGHT[a.tier] * a.p).slice(0, n).map((x) => `${esc(ctx.skillName(x.id))} ${pct(x.p)}`).join(", ") || "none";
+    function parentsHTML(g, t, f) {
+      const vets = ctx.veterans(), me = { cid: +g.cid, tid: t.id }, o = hintOpts();
+      let out = `<h4>Her parents (the ace's great-grandparents)</h4>
+        <p class="mini">One of your veterans and a borrow. They give her hints for the list (her two inspirations) and later, as her child's grandparents, sparks and shared G1s. Nothing of theirs reaches the ace herself: only parents and grandparents inspire.</p>`;
+      if (!vets.length) return out + `<p class="mini">Import your veterans (Parents, the import below) to pick yours.</p>`;
+      const rows = rankParentVets(g.style, me, vets, o), shown = rows.slice(0, 6);
+      if (f.v && !shown.some((x) => x.v.id === f.v.id)) shown.push(rows.find((x) => x.v.id === f.v.id));
+      const stat = ["Speed", "Stamina", "Power", "Guts", "Wit"];
+      out += `<p class="mini"><b>Your veteran</b>, by the list hints her side gives (her sparks and her parents', × each one's affinity with her):</p>
+        <div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th class="num">Affinity</th><th>List hints for her</th><th>Blue</th><th></th></tr></thead><tbody>${shown.filter(Boolean).map((x) => `<tr${f.v && f.v.id === x.v.id ? ' class="cur"' : ""}><td>${esc(ctx.vetName(x.v))}${x.v.parents && x.v.parents.some(Boolean) ? `<div class="mini">parents ${x.v.parents.filter(Boolean).map((m) => esc(ctx.charName(m.cid))).join(" + ")}</div>` : ""}</td><td class="num">${x.own.p1}</td><td class="mini">${hintText(x, 3)}</td><td class="mini">${x.v.self.blue && x.v.self.blue[1] ? `${stat[x.v.self.blue[0]]} ${x.v.self.blue[1]}★` : "—"}</td><td>${f.v && f.v.id === x.v.id ? "✓ picked" : `<button type="button" class="linkish" data-gp-vet="${x.v.id}">Use</button>`}</td></tr>`).join("")}</tbody></table></div>`;
+      if (!rows.length) out += `<p class="mini">None of your veterans can be her parent (the same character can't).</p>`;
+      if (!f.v) return out + `<p class="mini">Pick your veteran to get the borrow's search.</p>`;
+      // The borrow: the uma.moe search, then your pasted rentals ranked with her.
+      const side = parentHints(g.style, me, f.v, null, o), q = borrowQuery(g.style, me, f.v, side, { outNow: ctx.outNow });
+      const search = ctx.umaMoe ? ctx.umaMoe(q) : null, lines = search && ctx.searchSummary ? ctx.searchSummary(Object.assign({}, search, { q })) : [];
+      out += `<p class="mini"><b>The borrow</b> (Parent 2): ${search ? `<a class="btn small" href="${esc(search.url)}" target="_blank" rel="noopener">Search uma.moe</a>` : ""} ${esc(ctx.charName(g.cid))} as the affinity target, your ${esc(ctx.charName(f.v.cid))} as the other parent (with her G1 wins), the list as preferred whites${q.covered.length ? ` (not ${q.covered.map((id) => esc(ctx.skillName(id))).join(", ")}: your veteran's side hints ${q.covered.length === 1 ? "it" : "them"} 50%+ already)` : ""}, Stamina 3★ on her, no pink filter.</p>
+        ${lines.length ? `<details><summary class="mini">The search's settings</summary><ul class="mini">${lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul></details>` : ""}`;
+      const rents = ctx.rentals ? ctx.rentals() : [];
+      if (!rents.length) return out + `<p class="mini">Paste rentals from uma.moe (Parents, Family table → Paste rentals) to rank them here with your veteran.</p>`;
+      const rr = rankParentRentals(g.style, me, f.v, rents, o), top = rr.slice(0, 6);
+      if (f.r && !top.some((x) => x.r.friend === f.r.friend)) { const x = rr.find((y) => y.r.friend === f.r.friend); if (x) top.push(x); }
+      out += `<p class="mini">Your pasted rentals as Parent 2 with ${esc(ctx.vetName(f.v))}, by the list hints the whole family gives her:</p>
+        <div class="table-wrap"><table class="plan"><thead><tr><th>Rental (and her parents)</th><th class="num">Family</th><th>List hints for her</th><th></th></tr></thead><tbody>${top.map((x) => `<tr${f.r && f.r.friend === x.r.friend ? ' class="cur"' : ""}><td>${esc(x.r.names ? x.r.names[0] : ctx.charName(x.r.parent.cid))}<div class="mini">${esc(x.r.trainer || "")}${x.r.names && x.r.names[1] ? ` · + ${esc(x.r.names[1])} + ${esc(x.r.names[2] || "")}` : ""}</div></td><td class="num">${x.total} ${x.symbol}</td><td class="mini">${hintText(x, 4)}</td><td>${f.r && f.r.friend === x.r.friend ? "✓ picked" : `<button type="button" class="linkish" data-gp-rent="${esc(x.r.friend)}">Use</button>`}</td></tr>`).join("")}</tbody></table></div>
+        ${rr.length < rents.length ? `<p class="mini">${rents.length - rr.length} not shown: the same character as her or your veteran.</p>` : ""}`;
+      if (f.r) {
+        const all = parentHints(g.style, me, f.v, f.r, o), by = new Map(all.hints.map((h) => [h.id, h]));
+        const none = list(g.style).filter((x) => !by.has(x.id));
+        out += `<p class="mini"><b>Her family:</b> ${all.total} ${all.symbol}. Hint chances for the list: ${list(g.style).filter((x) => by.has(x.id)).map((x) => `${esc(ctx.skillName(x.id))} ${pct(by.get(x.id).p)}`).join(", ") || "none"}${none.length ? `; no hint from them: ${none.map((x) => esc(ctx.skillName(x.id))).join(", ")}` : ""}. ③'s deck counts each list skill less by the chance her parents hint it.</p>`;
+      }
       return out;
     }
 
@@ -231,12 +345,15 @@
       const g = st();
       let el;
       if ((el = hit("data-gp-style"))) { g.style = el.dataset.gpStyle; }
-      else if ((el = hit("data-gp-pick"))) { g.cid = +el.dataset.gpPick; ctx.flash(`${ctx.charName(g.cid)} picked: her plan is above.`); }
+      else if ((el = hit("data-gp-pick"))) { g.cid = +el.dataset.gpPick; g.v = null; g.r = null; ctx.flash(`${ctx.charName(g.cid)} picked: her plan is above.`); }
+      else if ((el = hit("data-gp-vet"))) { g.v = +el.dataset.gpVet; g.r = null; }
+      else if ((el = hit("data-gp-rent"))) { g.r = el.dataset.gpRent; }
       else if ((el = hit("data-gp-send"))) {
         const tid = +el.dataset.gpSend, tr = version(g.cid, g.style);
         if (!tr || tr.id !== tid) return true;
-        const plan = racePlan(ctx.A, +g.cid, tr.apt, sharesOf());
-        ctx.send({ tid, style: g.style, must: shortList(g.style).filter((id) => ctx.outNow(id)), races: plan.extra.map((r) => r.name) });
+        const f = chosen(g), plan = racePlan(ctx.A, +g.cid, tr.apt, sharesOf(), parentWins(f));
+        const hints = f.v ? parentHints(g.style, { cid: +g.cid }, f.v, f.r, hintOpts()).hints.map((h) => ({ id: h.id, p: Math.round(h.p * 1000) / 1000 })) : null;
+        ctx.send({ tid, style: g.style, must: shortList(g.style).filter((id) => ctx.outNow(id)), races: plan.extra.map((r) => r.name), hints, vet: f.v ? f.v.id : null, rental: f.r ? f.r.friend : null });
         return true;
       } else return false;
       ctx.save(); ctx.rerender();
@@ -245,14 +362,16 @@
     function change(e) {
       const t = e.target;
       if (t.dataset.gpUma == null) return false;
-      st().cid = t.value ? +t.value : null;
+      const g = st();
+      g.cid = t.value ? +t.value : null; g.v = null; g.r = null;
       ctx.save(); ctx.rerender();
       return true;
     }
     return { html, click, change, version };
   }
 
-  const api = { DATA, STYLES, STYLE_LABEL, STYLE_APT, WEIGHT, TIER_LABEL, BLUE, list, targets, shortList, altList, gradeOf, pinks, own, goalShares, racePlan, vetFit, rank, panel };
+  const api = { DATA, STYLES, STYLE_LABEL, STYLE_APT, WEIGHT, TIER_LABEL, BLUE, list, targets, shortList, altList, gradeOf, pinks, own, goalShares, racePlan, vetFit, rank, panel,
+    lineage, parentHints, rankParentVets, rankParentRentals, borrowQuery, targetsAfter };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaGeneralParents = api;
 })(typeof window !== "undefined" ? window : globalThis);
