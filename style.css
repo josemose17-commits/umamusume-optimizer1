@@ -713,6 +713,8 @@ table.pred .over { color: var(--accent); }
 /* General grandparents: a grid child grows to its widest table unless held to the column. */
 #cm-general { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 #cm-general .table-wrap { max-width: 100%; }
+/* CM & decks' cup and team panel: hold its grid to the page (the team maker's tables scroll inside). */
+.cm-head { grid-template-columns: minmax(0, 1fr); }
 .cmp .parents, .cmp .pp-sec { grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .cmp .fp-card { grid-template-columns: minmax(0, 1fr); }
 .cmp .pp-form input:not([type]), .cmp .fp-card input:not([type]) { width: 100%; min-width: 0; }

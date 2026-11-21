@@ -1357,7 +1357,7 @@
     return { locked, freePulls, yours, lockedPicks, budget, done: new Set(Object.keys(done).concat(rows.filter((x) => rowDone(x, today, done)).map(rowKey))) };
   }
 
-  const api = { create, teamPick, flexPick, styleFor, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
+  const api = { create, teamPick, flexPick, styleFor, teamLogic, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaPullValues = api;
 })(typeof window !== "undefined" ? window : globalThis);
