@@ -85,6 +85,7 @@
       const s = ctx.state(), p = st(), r = p.rating, race = ctx.aceRace(), t = trainee(tid);
       const undo = { trainee: p.selfTrainee, pcm: s.pcm ? { goal: s.pcm.goal, preset: s.pcm.preset, style: s.pcm.style } : null, must: r.must.slice(), shop: Object.assign({}, r.shop) };
       s.pcm = Object.assign(s.pcm || { independent: true }, { goal: "ace", preset: race.preset.id, style: race.style });
+      delete s.pcm.general; // a general grandparent set-up turns it back on after this
       (must || []).forEach((id) => { id = String(id); if (r.learned.indexOf(id) === -1 && r.shop[id] == null) r.shop[id] = 0; if (r.must.indexOf(id) === -1) r.must.push(id); });
       if (t) { p.self = t.cid; p.selfTrainee = t.id; p.apt = null; setTraineeLater(t.id); }
       return undo;
@@ -378,10 +379,11 @@
       return `<div class="parents">
         ${section("who", "① The parent", nt.who, whoBody(p))}
         ${section("races", "② Races", nt.races, racesHTML(p))}
-        ${section("deck", "③ Deck", "ace parent", ctx.deckHTML())}
+        ${section("deck", "③ Deck", deckNote(), ctx.deckHTML())}
         ${section("rating", "④ After the run", nt.rating, ratingHTML(p))}
       </div>`;
     }
+    const deckNote = () => { const c = ctx.state().pcm; return c && c.general ? "general grandparent" : "ace parent"; };
 
     function render(el) {
       const p = st();
@@ -393,7 +395,7 @@
         ${fp ? `${section("ace", "1 · The ace", nt.ace, fp.aceHTML())}${section("family", "2 · Her parents", nt.family, fp.parentsHTML())}<h3 class="pp-step">3 · Train Parent 1</h3>` : ""}
         ${section("who", "① The parent", nt.who, whoBody(p))}
         ${section("races", "② Races", nt.races, racesHTML(p))}
-        ${section("deck", "③ Deck", "ace parent", ctx.deckHTML())}
+        ${section("deck", "③ Deck", deckNote(), ctx.deckHTML())}
         ${section("rating", "④ After the run", nt.rating, ratingHTML(p))}
       </div>`;
     }

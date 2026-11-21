@@ -12,10 +12,13 @@
     function add(id, card, route) {
       id = String(id);
       if (!byId.has(id)) {
-        const m = info[id];
-        // Released: out on Global (by the ace's cup with opts.skillsBy, a JP date; else now).
-        byId.set(id, {id, rarity: m ? m[2] : null, release: m ? Release.outBy(m, opts.skillsBy || null) : null,
-          spark: !!(m && m[2] === 1 && !id.startsWith('9')), target: (opts.targets || {})[id] > 0,
+        const m = info[id], pm = purchase[id];
+        // Released: out on Global (by the ace's cup with opts.skillsBy, a JP date; else now). A
+        // skill the simulator has no entry for takes its rarity from the purchase data and counts
+        // as out (its cards are limited to those out already).
+        const rarity = m ? m[2] : pm ? pm[3] : null;
+        byId.set(id, {id, rarity, release: m ? Release.outBy(m, opts.skillsBy || null) : pm ? true : null,
+          spark: !!(rarity === 1 && !id.startsWith('9')), target: (opts.targets || {})[id] > 0,
           must: must.has(id), sources: []});
       }
       const skill = byId.get(id);

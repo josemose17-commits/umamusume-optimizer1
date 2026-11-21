@@ -185,7 +185,10 @@
       ctx.today = parent.today;
       ctx.cardAvailable = parent.cardAvailable;
       // Global only: out on Global by the ace's cup (skill-release.js; skillsBy null = out now).
-      ctx.allowSkill = id => !ctx.parentGlobal || Release.outBy(skillInfo.skills[id], parent.skillsBy || null);
+      // A skill the simulator has no entry for (lane, vision and wit skills: Prudent Positioning,
+      // Dodging Danger, Ignited Spirit WIT…) has no release record; the cards offering it are
+      // already limited to those out by then, so it's allowed.
+      ctx.allowSkill = id => !ctx.parentGlobal || !skillInfo.skills[id] || Release.outBy(skillInfo.skills[id], parent.skillsBy || null);
       [...ctx.known].forEach(id => parentRoutes.whites(id).forEach(white => ctx.known.add(white)));
     }
     // A must-have the trainee already has needs no card.
