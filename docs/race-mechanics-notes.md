@@ -76,3 +76,17 @@ These are why a skill's simulated gain can be off (tags in the skill tables):
 Added on JP's 5th anniversary: stat caps removed, Zenkai Spurt (Speed over 2000), and the Wit limit
 break buff (Wit over 1200 adds up to about 12% to gold, unique and evolved speed skills by style and
 phase). None of the cups the app simulates use them yet.
+
+
+## Runaway in the one-runner simulator (2026-11-22)
+
+Runaway (Oonige) counts as a Front Runner for skill conditions (the simulators' strategyMatches
+matches 1 and 5) and has HP coefficient 0.86 (Front Runner 0.95). In the Umalator's one-runner
+chart mode, position keep holds a lone Runaway to her lead, so a skill's gain mostly vanishes:
+CM 23 (Nakayama 2000, JP-dated simulator, cup stat line, 100 races), top Front Runner skills
+2.63 / 2.46 / 2.18 L; the same skills for a Runaway 0.19 / 0.11 / 0.29 L (0.37 / 0.39 / 1.12 L
+with +500 stamina); with position keep and spot struggle off, 2.88 / 2.69 / 2.30 L. Front Runner
+values with position keep match with it off (2.63 / 2.47 / 2.18), so a chart for a Runaway built
+this way would be an artifact of racing alone. The app reads Front Runner's charts, curves and
+values for her; only the stamina check races her as a Runaway. A full-field run (GlobalSim, which
+has Runaway) is the way to value her properly.
