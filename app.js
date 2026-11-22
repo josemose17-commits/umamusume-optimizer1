@@ -3613,13 +3613,18 @@
       // Whether a cup and style has full-field skill values (data/field-skills.js).
       fieldValues: (pid, style) => !!fieldOf(pid, style),
       pullTeam: (p) => {
-        const PV = window.UmaPullValues, g = PV && PV.groupOf(p), teams = (state.pull && state.pull.teams) || {};
+        const PV = window.UmaPullValues, g = PV && PV.groupOf(p), teams = PV ? PV.effectiveTeams((state.pull && state.pull.teams) || {}, pullKinds(), (id) => myUmas().has(id)) : {};
         if (!g) return [];
         const list = teams[g] || [], mine = myUmas(), UV = window.UmaUmaValues || null;
         const core = PV.teamPick(p, list, (id) => mine.has(id), UV, D);
         const flex = list.some((m) => m && m.rotate) ? PV.flexPick(p, [...mine], core, UV, D) : null;
         return core.concat(flex ? [flex] : []).map((x) => ({ tid: +x.tid, style: x.style || null }));
       },
+      // Parents are planned for the tracks whose Pull planner team is a full team (Medium & Long
+      // by default); a meta-uma track (one uma every cup) gets none unless you ask.
+      parentStyles: () => parentStyles(),
+      parentsPlanned: (p) => { const PV = window.UmaPullValues, g = PV && PV.groupOf(p); return !g || PV.parentGroupsOf(pullKinds()).includes(g); },
+      trackLabel: (p) => { const PV = window.UmaPullValues, g = PV && PV.groupOf(p); return g ? PV.GROUPS[g].label : ""; },
       trainParent: (o, section) => trainParent(o, section),
       // Parents step 3's "Improve this deck": ③'s deck optimizer for her, and how far it is (0-1, or null).
       improveDeck: () => runOptimizer("parents"),
@@ -3684,7 +3689,7 @@
       mine: () => new Set([...myUmas()].map((id) => (D.trainee(id) || {}).cid).filter(Boolean)), mineTids: () => myUmas(),
       veterans: () => (parents().family ? parents().family.veterans().list : []),
       vetName: (v) => { const t = D.trainee(v.tid); return charName(v.cid) + (t && versions(v.cid).length > 1 ? ` [${t.t}]` : "") + (v.score ? ` · ${v.score.toLocaleString("en-US")}` : ""); },
-      send: (o) => trainGeneral(o),
+      send: (o) => trainGeneral(o), teamStyles: () => parentStyles(),
       sent: () => { const t = state.cmp && state.cmp.training; return t && t.general && state.pcm && state.pcm.general ? { style: t.general, tid: t.parent } : null; },
       trainingHTML: () => parents().trainingHTML(),
     });
@@ -3708,6 +3713,11 @@
     renderTab();
     showSection("who");
   }
+  // Each track's team kind (Pull planner): "team" or "meta"; saves from before v4 take the new
+  // default (Medium & Long a team, the others one meta uma).
+  // The running styles of the teams you plan parents for (Medium & Long by default), in team order.
+  const parentStyles = () => { const PV = window.UmaPullValues; if (!PV) return []; const teams = PV.effectiveTeams((state.pull && state.pull.teams) || {}, pullKinds()); return [...new Set([].concat(...PV.parentGroupsOf(pullKinds()).map((g) => (teams[g] || []).filter((m) => m && m.id && m.style).map((m) => m.style))))]; };
+  const pullKinds = () => { const p = state.pull || {}, PV = window.UmaPullValues; return p.teamsV >= 4 && p.kinds ? p.kinds : PV ? PV.KINDS : {}; };
   // Open a workflow section and any folded sections containing it.
   function showSection(section) {
     const id = { family: "cm-family", who: "pp-who", races: "pp-races", deck: "pp-deck", rating: "pp-rating" }[section] || "cm-" + section;
