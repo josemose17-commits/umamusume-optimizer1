@@ -71,7 +71,7 @@
   // 2★ pink spark (3% base). Ranks for picking a rotating uma.
   const PINK_2 = 0.03, APT_L = 1;
   const RANK = { S: 8, A: 7, B: 6, C: 5, D: 4, E: 3, F: 2, G: 1 };
-  const DIST_IX = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }, STYLE_IX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 };
+  const DIST_IX = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }, STYLE_IX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9, Oonige: 6 };
   const STYLES = ["Senkou", "Sasi", "Oikomi", "Nige"];
   const EVENT_DAYS = 14; // a story event's SSR is yours (to LB4) by the end of its event
   const needsOf = (cup, style) => [cup.course.surface === "Dirt" ? 1 : 0, DIST_IX[cup.course.dist], STYLE_IX[style]].filter((i) => i != null);

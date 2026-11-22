@@ -45,7 +45,7 @@
     course.slopes.sort((a, b) => a.start - b.start);
     const count = preset.kind === "loh" ? 12 : 9;
     const half = Math.floor(count / 2);
-    const range = input.orderRange || ({ Nige: [1, 1], Senkou: [2, half], Sasi: [half + 1, count], Oikomi: [half + 1, count] })[input.strategy];
+    const range = input.orderRange || ({ Nige: [1, 1], Senkou: [2, half], Sasi: [half + 1, count], Oikomi: [half + 1, count], Oonige: [1, 1] })[input.strategy];
     const { ground, weather, season, time } = preset.racedef;
     return { msg: "compare", data: { nsamples: samples, course,
       racedef: { groundCondition: ground, weather, season, time, grade: 100, skillId: "", orderRange: range, numUmas: count },
@@ -71,8 +71,9 @@
   // kind "jp": the JP worker's skills and courses (JP-dated cups); else Global's.
   const load = (kind) => { const file = kind === "jp" ? "data/race-skills-jp.json" : "data/race-skills.json";
     return catalogs[file] || (catalogs[file] = fetch(file + version).then(r => { if (!r.ok) throw new Error("Race data did not load."); return r.json(); }).catch(e => { delete catalogs[file]; throw e; })); };
-  const STAMINA_STYLES = ["Nige", "Senkou", "Sasi", "Oikomi"];
-  const HP_FACTORS = { Nige: 0.95, Senkou: 0.89, Sasi: 1, Oikomi: 0.995 };
+  // Oonige: Runaway (runaway.js), HP coefficient 0.86 as the simulators have it.
+  const STAMINA_STYLES = ["Nige", "Senkou", "Sasi", "Oikomi", "Oonige"];
+  const HP_FACTORS = { Nige: 0.95, Senkou: 0.89, Sasi: 1, Oikomi: 0.995, Oonige: 0.86 };
   // The stamina debuff skills she faces (count: 2, 4 or 0; none on Sprint). 2: the cup's
   // distance drain twice (Mystifying Murmur on Medium, Stamina Siphon on Long). 4: those two plus
   // the two drains aimed at her running style. Mile has no distance drain (All-Seeing Eyes barely
@@ -82,7 +83,8 @@
     if (preset.course.dist === "Sprint" || !(count > 0)) return [];
     const wards = { Nige: ["200831", "200841"], Senkou: ["200861", "200871"],
       Sasi: ["200891", "200901"], Oikomi: ["200921", "200931"] };
-    const ward = wards[strategy] || [], drain = { Medium: "201161", Long: "201221" }[preset.course.dist];
+    // A Runaway counts as a Front Runner for debuffs aimed at a style.
+    const ward = wards[strategy === "Oonige" ? "Nige" : strategy] || [], drain = { Medium: "201161", Long: "201221" }[preset.course.dist];
     // The stamina calculator accepts duplicate debuff skills, like Umalator's UI.
     if (!drain) return ward.concat(count >= 4 ? ["201441", "201441"] : []);
     return [drain, drain].concat(count >= 4 ? ward : []);

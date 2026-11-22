@@ -5,9 +5,14 @@
 (function (root) {
   "use strict";
   const DATA = root.UmaGeneralParentsData || (typeof require !== "undefined" ? require("./data/general-parents.js") : null);
-  const STYLES = ["Nige", "Senkou", "Sasi", "Oikomi"];
-  const STYLE_LABEL = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer" };
-  const STYLE_APT = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 }; // in a trainee's aptitude list
+  // Runaway (Oonige, runaway.js): uma.guide has no list for it; Front Runner skills work for her
+  // (she counts as a Front Runner for skill conditions), so she takes the Front Runner lists. Only
+  // the characters who can learn the Runaway skill are offered.
+  const RW = root.UmaRunaway || (typeof require !== "undefined" ? require("./runaway.js") : null);
+  const STYLES = ["Nige", "Senkou", "Sasi", "Oikomi"].concat(RW ? [RW.STYLE] : []);
+  const STYLE_LABEL = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer", Oonige: "Runaway" };
+  const STYLE_APT = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9, Oonige: 6 }; // in a trainee's aptitude list (Runaway: Front Runner's)
+  const listStyle = (style) => (RW && RW.is(style) ? RW.BASE : style);
   const APT_LABELS = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const GRADE = { S: 7, A: 6, B: 5, C: 4, D: 3, E: 2, F: 1, G: 0 };
   // Deck-target weights by tier: the short list first, then the long-term list, then straights
@@ -20,7 +25,7 @@
 
   // The style's targets in order, each once: [{ id, tier }].
   function list(style) {
-    const s = DATA.styles[style];
+    const s = DATA.styles[listStyle(style)];
     if (!s) return [];
     const out = [], seen = new Set();
     const add = (ids, tier) => ids.forEach((id) => { id = String(id); if (!seen.has(id)) { seen.add(id); out.push({ id, tier }); } });
@@ -34,8 +39,8 @@
     list(style).forEach((x) => { if (o.out && !o.out(x.id)) return; t[x.id] = WEIGHT[x.tier]; why[x.id] = "general-" + x.tier; });
     return { targets: t, why };
   }
-  const shortList = (style) => (DATA.styles[style] ? DATA.styles[style].short.map(String) : []);
-  const altList = (style) => (DATA.styles[style] && DATA.styles[style].alt ? DATA.styles[style].alt.map(String) : null);
+  const shortList = (style) => (DATA.styles[listStyle(style)] ? DATA.styles[listStyle(style)].short.map(String) : []);
+  const altList = (style) => (DATA.styles[listStyle(style)] && DATA.styles[listStyle(style)].alt ? DATA.styles[listStyle(style)].alt.map(String) : null);
 
   // Her grade in the style (her best version's if versions are given).
   const gradeOf = (t, style) => (t && t.apt ? t.apt[STYLE_APT[style]] : null);
@@ -196,7 +201,7 @@
     const tri = trios(o.A, o.cids);
     return o.cids.map((cid) => {
       const t = o.version(cid, style), grade = gradeOf(t, style);
-      if (!t || !(GRADE[grade] >= GRADE.A)) return null;
+      if (!t || !(GRADE[grade] >= GRADE.A) || (RW && RW.is(style) && !RW.can(t))) return null;
       const plan = racePlan(o.A, cid, t.apt, o.shares), mine = own(t, style, o.family);
       const trio = tri.get(cid) || 0, shared = 3 * plan.shared;
       return { cid, t, grade, trio, shared, own: mine, races: plan.extra.length, score: trio + shared + 2 * mine.length };
@@ -239,7 +244,7 @@
     }
 
     function umaHTML(g) {
-      const all = ctx.cids(), mine = ctx.mine();
+      const all = ctx.cids().filter((c) => !(RW && RW.is(g.style)) || RW.CHARS[c] != null), mine = ctx.mine();
       const name = (c) => ctx.charName(c);
       const opts = (cs) => cs.slice().sort((a, b) => name(a).localeCompare(name(b))).map((c) => `<option value="${c}"${+g.cid === +c ? " selected" : ""}>${esc(name(c))}</option>`).join("");
       const yours = all.filter((c) => mine.has(+c)), rest = all.filter((c) => !mine.has(+c));
@@ -332,6 +337,7 @@
       return `<details class="panel" id="cm-general" data-cmp-open="gp-panel"><summary><b>General grandparents</b> · by running style, for any cup</summary>
         <p class="mini">A grandparent you can reuse under many aces: <a href="${esc(DATA.url)}" target="_blank" rel="noopener">uma.guide</a>'s general parent skills for the style${t ? `, checked against ${esc(ctx.charName(g.cid))}` : ""}. The cup steps above still pick the family for one ace; this is for building your loop.</p>
         <div class="row-wrap" role="group" aria-label="Running style">${STYLES.map((s) => `<button type="button" class="chip${s === g.style ? " active" : ""}" data-gp-style="${s}" aria-pressed="${s === g.style}">${esc(STYLE_LABEL[s])}</button>`).join("")}</div>
+        ${RW && RW.is(g.style) ? `<p class="mini"><b>Runaway</b> has no list on uma.guide: these are the Front Runner lists, since Front Runner skills work for her (she counts as a Front Runner for skill conditions). Only the characters who can learn the Runaway skill run it (${Object.keys(RW.CHARS).map((c) => esc(ctx.charName(c))).join(", ")}; Game8). Whether the Runaway skill itself passes down as a white spark isn't known, so it isn't a target here.</p>` : ""}
         ${listHTML(g.style, t)}
         <p class="mini">Also worth having for every style (uma.guide's special mentions): ${DATA.special.map(esc).join(", ")}.</p>
         ${umaHTML(g)}

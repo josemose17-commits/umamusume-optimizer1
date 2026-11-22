@@ -11,7 +11,7 @@ const SP = require("../data/skill-purchases.js");
 
 const meta = SP.skills || SP;
 const family = (id) => (meta[id] ? String(meta[id][0]) : String(id));
-const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4 };
+const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4, Oonige: 1 }; // Runaway counts as a Front Runner
 const cond = (id) => ((RS.skills[id] || {}).alternatives || []).map((a) => a.condition).join("|");
 
 test("general lists: every skill is a white the game knows, in every list of each style", () => {

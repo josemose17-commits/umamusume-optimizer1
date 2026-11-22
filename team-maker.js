@@ -9,22 +9,28 @@
 (function (root) {
   "use strict";
   const STYLES = ["Nige", "Senkou", "Sasi", "Oikomi"];
-  const STYLE_IX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 }, DIST_IX = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 };
+  const STYLE_IX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9, Oonige: 6 }, DIST_IX = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 };
   const GRADES = "SABCDEFG";
   const SAME_STYLE = 100; // a repeated style loses to any team without one
   const NO_VALUE_STEP = 1; // a grade under A, for a cup with no measured values
 
   // Her styles at A or S (the default allowed styles in the pool).
-  const goodStyles = (t) => STYLES.filter((st) => GRADES.indexOf(t.apt[STYLE_IX[st]]) <= 1);
+  // Runaway (runaway.js): a fifth style for the umas who can learn it, on her Front Runner grade.
+  const RW = root.UmaRunaway || (typeof require !== "undefined" ? require("./runaway.js") : null);
+  const stylesOf = (t) => (RW ? RW.stylesOf(t) : STYLES);
+  const goodStyles = (t) => stylesOf(t).filter((st) => GRADES.indexOf(t.apt[STYLE_IX[st]]) <= 1);
 
   // Her worth on the cup in a style: { v, how } with how "measured" (her unique raced there in
   // that style), "estimated" (raced in her other styles only: their average unique, plus this
   // style's grade), "aptitude" (not raced on this cup: aptitudes only, unique counted 0) or
   // "grades" (no values for the cup: each grade under A in surface, distance or style −1, S +0.2).
+  // Runaway without its own values reads Front Runner's (asFront: true).
   function worth(t, cup, st, UV) {
     const surf = cup.course.surface === "Dirt" ? 1 : 0, dist = DIST_IX[cup.course.dist];
     const grades = [t.apt[surf], t.apt[dist], t.apt[STYLE_IX[st]]];
-    const c = UV && UV.cups && UV.cups[cup.id];
+    const c0 = UV && UV.cups && UV.cups[cup.id];
+    if (RW && RW.is(st) && !(c0 && c0.apt && c0.apt[st])) return Object.assign(worth(t, cup, RW.BASE, UV), { asFront: true });
+    const c = c0;
     if (!c || c.status !== "ok" || !c.apt[st]) {
       const v = grades.reduce((n, g) => { const k = GRADES.indexOf(g); return n + (k === 0 ? 0.2 : k <= 1 ? 0 : -(k - 1) * NO_VALUE_STEP); }, 0);
       return { v, how: "grades" };
@@ -49,7 +55,7 @@
       const t = D.trainee(m.tid);
       if (!t || seen.has(t.id)) return;
       seen.add(t.id);
-      const styles = (m.styles && m.styles.length ? m.styles : goodStyles(t)).filter((st) => STYLES.includes(st));
+      const styles = (m.styles && m.styles.length ? m.styles : goodStyles(t)).filter((st) => stylesOf(t).includes(st));
       const ops = (styles.length ? styles : [STYLES.reduce((b, st) => (GRADES.indexOf(t.apt[STYLE_IX[st]]) < GRADES.indexOf(t.apt[STYLE_IX[b]]) ? st : b), "Senkou")])
         .map((st) => Object.assign({ style: st }, worth(t, cup, st, o.UV))).sort((a, b) => b.v - a.v);
       members.push({ t, fixed: !!m.fixed, ops });
@@ -71,7 +77,7 @@
       go(list, i + 1, picks, need);
       const m = list[i];
       if (picks.some((p) => D.trainee(p.tid).cid === m.t.cid)) return;
-      m.ops.forEach((op) => { picks.push({ tid: m.t.id, style: op.style, v: op.v, how: op.how, fixed: m.fixed }); go(list, i + 1, picks, need - 1); picks.pop(); });
+      m.ops.forEach((op) => { picks.push({ tid: m.t.id, style: op.style, v: op.v, how: op.how, asFront: !!op.asFront, fixed: m.fixed }); go(list, i + 1, picks, need - 1); picks.pop(); });
     };
     // As many open slots as there are other characters to fill them (outfits of one count once).
     const fill = Math.min(k - must.length, new Set(open.filter((m) => !fixedCids.has(m.t.cid)).map((m) => m.t.cid)).size);
@@ -101,7 +107,7 @@
     return { rows, count };
   }
 
-  const api = { STYLES, SAME_STYLE, goodStyles, worth, best, everyCup };
+  const api = { STYLES, SAME_STYLE, stylesOf, goodStyles, worth, best, everyCup };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTeamMaker = api;
 })(typeof window !== "undefined" ? window : globalThis);

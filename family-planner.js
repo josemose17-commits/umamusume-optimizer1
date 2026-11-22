@@ -5,7 +5,7 @@
   "use strict";
   const SLOT_LABELS = { p1: "Parent 1", p2: "Parent 2", g11: "Parent 1's parent", g12: "Parent 1's parent", g21: "Parent 2's parent", g22: "Parent 2's parent" };
   const ORDER = ["p1", "g11", "g12", "p2", "g21", "g22"];
-  const STYLE_LABEL = { Nige: "Front", Senkou: "Pace", Sasi: "Late", Oikomi: "End" };
+  const STYLE_LABEL = { Nige: "Front", Senkou: "Pace", Sasi: "Late", Oikomi: "End", Oonige: "Runaway" };
 
   function create(ctx) {
     const { D, A, F, esc } = ctx;

@@ -37,7 +37,7 @@
   // family.js's aptitude order (Turf, Dirt, Sprint, Mile, Medium, Long, Front, Pace, Late, End).
   const BLUE_IDS = [10, 20, 30, 40, 50];
   const PINK_IDS = [110, 120, 310, 320, 330, 340, 210, 220, 230, 240];
-  const STYLE_INDEX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 };
+  const STYLE_INDEX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9, Oonige: 6 }; // Runaway: her Front Runner grade
   const MOE_STYLES = { 6: "Front Runner", 7: "Pace Chaser", 8: "Late Surger", 9: "End Closer" };
   const b64 = (s) => (typeof btoa === "function" ? btoa(s) : Buffer.from(s, "binary").toString("base64"));
 
