@@ -3194,8 +3194,7 @@
   const runawayFor = (c) => !!(RW && c && (RW.is(c.style) || RW.can(D.trainee(deckTrainee("cm")))));
   function runawayNote(p, c) {
     const t = D.trainee(deckTrainee("cm")), where = t && RW.CHARS[t.cid];
-    const charted = !!(svCache[p.id] && typeof svCache[p.id] === "object" && svCache[p.id][RW.STYLE]);
-    return `<b>Runaway</b>: a Front Runner sub-style the Runaway skill unlocks${where === "JP" ? " (JP has it for her; on Global once she gets it)" : ""}. She runs on her Front Runner grade, counts as a Front Runner for skill conditions and style debuffs, sets herself well ahead of the Front Runners and burns far more stamina. The stamina check and the skill comparison race her as a Runaway; ${charted ? "the skill chart is Runaway's too" : "the skill chart, stat curves and course values are <b>Front Runner's</b> until the Runaway rebuild"}. Learn the Runaway skill in her career, or she runs as a Front Runner.`;
+    return `<b>Runaway</b>: a Front Runner sub-style the Runaway skill unlocks${where === "JP" ? " (JP has it for her; on Global once she gets it)" : ""}. She runs on her Front Runner grade, counts as a Front Runner for skill conditions and style debuffs, sets herself well ahead of the Front Runners and burns far more stamina. The stamina check races her as a Runaway (keeping her big lead costs HP). Skill values, the skill comparison, stat curves and course values are <b>Front Runner's</b>: the one-runner simulator holds a lone Runaway to her lead, so most skills show almost no gain there (with that switched off they come out a little above Front Runner's), and only a full-field race can value her properly. Learn the Runaway skill in her career, or she runs as a Front Runner.`;
   }
   function cmHeader(p, c, team) {
     const [stCls, stText] = presetStatus(p);
@@ -4460,7 +4459,7 @@
           if(charged.unmetMust.length)throw new Error("An equipped purchase lacks cost data.");
           baselineCost=charged.spent;sp-=baselineCost;if(sp<0)throw new Error("Equipped purchases exceed the projected SP budget.");
         }
-        const input={outfitId:String(t.id),starCount:t.r,uniqueLv:+(q.uniqueLv || 1),mood:Math.max(-2,Math.min(2,+(q.mood||0))),strategy:c.style,speed:stats[0],stamina:stats[1],power:stats[2],guts:stats[3],wisdom:stats[4],distanceAptitude:apt[0],surfaceAptitude:apt[1],strategyAptitude:apt[2],aptitudes:t.apt.slice(2,6).concat(t.apt.slice(0,2),t.apt.slice(6,10))};
+        const input={outfitId:String(t.id),starCount:t.r,uniqueLv:+(q.uniqueLv || 1),mood:Math.max(-2,Math.min(2,+(q.mood||0))),strategy:baseStyle(c.style),speed:stats[0],stamina:stats[1],power:stats[2],guts:stats[3],wisdom:stats[4],distanceAptitude:apt[0],surfaceAptitude:apt[1],strategyAptitude:apt[2],aptitudes:t.apt.slice(2,6).concat(t.apt.slice(0,2),t.apt.slice(6,10))};
         const compare = async(before,after,n,seed)=>{
           if(!same())throw new Error("Comparison cancelled.");
           const key=JSON.stringify([p.id,input,before,after,n,seed]);
