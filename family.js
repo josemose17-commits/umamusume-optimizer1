@@ -27,7 +27,7 @@
   const STAT_LABELS = ["Speed", "Stamina", "Power", "Guts", "Wit"];
   const APT_LABELS = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const DIST_INDEX = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 };
-  const STYLE_INDEX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 };
+  const STYLE_INDEX = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9, Oonige: 6 }; // Runaway: her Front Runner grade
   const SLOTS = ["p1", "p2", "g11", "g12", "g21", "g22"];
   const PARENT_OF = { g11: "p1", g12: "p1", g21: "p2", g22: "p2" };
   // In length units: 1 L counts like 60 stat points (as in the deck optimizer), and an

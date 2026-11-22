@@ -9,7 +9,7 @@
 (function (root) {
   "use strict";
   const STYLES = [["Nige", "Front"], ["Senkou", "Pace"], ["Sasi", "Late"], ["Oikomi", "End"]];
-  const STYLE_LABEL = Object.fromEntries(STYLES);
+  const STYLE_LABEL = Object.assign(Object.fromEntries(STYLES), { Oonige: "Runaway" });
   const MAX_ACES = 3;
   // The ace's family must reach this affinity (both parents and their parents, as the game
   // shows it when you pick her parents). Families under it are not suggested.
@@ -20,8 +20,8 @@
   const RANK = "GFEDCBAS";
   const fmt = (v) => v.toFixed(2);
   // family.js's aptitude order: Front, Pace, Late, End are 6–9.
-  const STYLE_APT = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9 };
-  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer" };
+  const STYLE_APT = { Nige: 6, Senkou: 7, Sasi: 8, Oikomi: 9, Oonige: 6 }; // Runaway: her Front Runner grade
+  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer", Oonige: "Runaway" };
   const fmtN = (v) => Math.round(v).toLocaleString("en-US");
   const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
@@ -453,17 +453,17 @@
       const rows = m.pool.map((x, i) => {
         const t = trainee(x.tid), def = TM.goodStyles(t), on = x.styles && x.styles.length ? x.styles : def;
         return `<tr><td>${esc(tName(t))}${mineIds.has(t.id) ? "" : ' <span class="mini">(not in My umas)</span>'}</td>
-          <td><div class="row-wrap">${STYLES.map(([st, label]) => `<label class="chip-toggle" title="${label}: ${t.apt[6 + STYLES.findIndex((y) => y[0] === st)]}"><input type="checkbox" data-tm-style="${i},${st}"${on.includes(st) ? " checked" : ""}> ${label} <span class="mini">${t.apt[6 + STYLES.findIndex((y) => y[0] === st)]}</span></label>`).join("")}</div></td>
+          <td><div class="row-wrap">${TM.stylesOf(t).map((st) => `<label class="chip-toggle" title="${STYLE_LABEL[st]}: ${t.apt[STYLE_APT[st]]}${st === "Oonige" ? " (her Front Runner grade; she needs the Runaway skill)" : ""}"><input type="checkbox" data-tm-style="${i},${st}"${on.includes(st) ? " checked" : ""}> ${STYLE_LABEL[st]} <span class="mini">${t.apt[STYLE_APT[st]]}</span></label>`).join("")}</div></td>
           <td><label class="chip-toggle"><input type="checkbox" data-tm-fixed="${i}"${x.fixed ? " checked" : ""}> Fixed</label></td>
           <td><button type="button" class="linkish" data-tm-del="${i}" aria-label="Remove ${esc(tName(t))}">✕</button></td></tr>`;
       }).join("");
       const r = m.pool.length ? TM.best(p, m.pool, makerOpts()) : null;
       const pick = (x) => `${esc(tName(trainee(x.tid)))} · ${STYLE_LABEL[x.style]}`;
-      const result = r && r.team.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Pick</th><th class="num">L</th><th>Value from</th></tr></thead><tbody>${r.team.map((x) => `<tr><td><b>${pick(x)}</b>${x.fixed ? ' <span class="mini">fixed</span>' : ""}</td><td class="num">${fmtL(x.v)}</td><td class="mini">${HOW[x.how]}</td></tr>`).join("")}</tbody></table></div>
+      const result = r && r.team.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Pick</th><th class="num">L</th><th>Value from</th></tr></thead><tbody>${r.team.map((x) => `<tr><td><b>${pick(x)}</b>${x.fixed ? ' <span class="mini">fixed</span>' : ""}</td><td class="num">${fmtL(x.v)}</td><td class="mini">${HOW[x.how]}${x.asFront ? " (Front Runner's: no Runaway values yet)" : ""}</td></tr>`).join("")}</tbody></table></div>
           <p class="mini">Team total <b>${fmtL(r.total)} L</b>${r.repeats ? ` · <span class="warn">${r.repeats === 1 ? "two run one style" : "repeated styles"}: no other pick fits, and they'll fight for one spot</span>` : " · every pick in its own style"}.${r.alts.length ? ` Next best for each slot: ${r.alts.map((a) => `${pick(a)} for ${esc(tName(trainee(a.out)))} (${fmtL(-a.loss)} L)`).join("; ")}.` : ""}</p>
           <div class="row-wrap"><button type="button" class="btn small" id="tmUse">Use this team</button>${r.team.some((x) => !mineIds.has(+x.tid)) ? '<span class="mini warn">Not all are in My umas yet.</span>' : ""}</div>` : "";
       return `<details class="pred-help cmp-maker" data-tm-open="maker"${open("maker")}><summary><b>Team maker</b> · the best ${MAX_ACES} from umas you list${m.pool.length ? ` (${m.pool.length} in the pool)` : ""}</summary>
-        <p class="mini">List umas, tick the styles each may run (her A/S styles to start) and pin any as <b>Fixed</b>. For ${esc(p.name)} it keeps every fixed uma and fills the rest with the most lengths in all, no two in one style unless nothing else fits, and never two outfits of one character. Worth is what she brings herself: her own unique raced on this cup in that style plus her surface, distance and style aptitudes against A (as the Pull planner's teams use it). Her deck, stats and skills aren't in it: those come from her deck below.</p>
+        <p class="mini">List umas, tick the styles each may run (her A/S styles to start) and pin any as <b>Fixed</b>. For ${esc(p.name)} it keeps every fixed uma and fills the rest with the most lengths in all, no two in one style unless nothing else fits, and never two outfits of one character. Runaway (for the umas who can learn it) counts as its own style: she runs ahead of the Front Runners instead of fighting them for one spot. Worth is what she brings herself: her own unique raced on this cup in that style plus her surface, distance and style aptitudes against A (as the Pull planner's teams use it). Her deck, stats and skills aren't in it: those come from her deck below.</p>
         <div class="row-wrap"><label class="field grow"><span>Add an uma</span><select id="tmAdd"><option value="">Pick an uma…</option>${yours.length ? `<optgroup label="My umas">${yours.map(opt).join("")}</optgroup>` : ""}<optgroup label="Others on Global">${others.map(opt).join("")}</optgroup></select></label>
           ${yours.length ? `<button type="button" class="btn ghost small" id="tmAddMine">Add all My umas (${yours.length})</button>` : ""}${m.pool.length ? '<button type="button" class="btn ghost small" id="tmClear">Clear the pool</button>' : ""}</div>
         ${rows ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Uma</th><th>Styles she may run</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
@@ -1128,7 +1128,7 @@
       if (t.id === "tmAdd") { if (t.value && trainee(t.value)) { const m = maker(c); if (!m.pool.some((x) => +x.tid === +t.value)) m.pool.push({ tid: +t.value, styles: [], fixed: false }); ctx.save(); ctx.rerender(); } return true; }
       if (ds.tmStyle != null) {
         const [i, sty] = ds.tmStyle.split(","), x = maker(c).pool[+i];
-        if (x) { const tr = trainee(x.tid), cur = x.styles && x.styles.length ? x.styles.slice() : TM.goodStyles(tr); const next = t.checked ? [...new Set(cur.concat(sty))] : cur.filter((y) => y !== sty); if (!next.length) { ctx.flash("Leave at least one style ticked."); ctx.rerender(); return true; } x.styles = STYLES.map((y) => y[0]).filter((y) => next.includes(y)); }
+        if (x) { const tr = trainee(x.tid), cur = x.styles && x.styles.length ? x.styles.slice() : TM.goodStyles(tr); const next = t.checked ? [...new Set(cur.concat(sty))] : cur.filter((y) => y !== sty); if (!next.length) { ctx.flash("Leave at least one style ticked."); ctx.rerender(); return true; } x.styles = TM.stylesOf(tr).filter((y) => next.includes(y)); }
         ctx.save(); ctx.rerender(); return true;
       }
       if (ds.tmFixed != null) { const x = maker(c).pool[+ds.tmFixed]; if (x) x.fixed = t.checked; ctx.save(); ctx.rerender(); return true; }

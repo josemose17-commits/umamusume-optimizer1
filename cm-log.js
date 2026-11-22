@@ -12,7 +12,7 @@
     ["slower", "Just slower"],
   ];
   const REASON_LABEL = Object.fromEntries(REASONS);
-  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer" };
+  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer", Oonige: "Runaway" };
   // Below this many races an ace's numbers are too few to judge.
   const MIN_RACES = 5;
   const TIPS = {

@@ -10,7 +10,8 @@
 // recovery's in-race conditions (position, phase, corners) are taken as met.
 (function (root) {
   "use strict";
-  const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4 };
+  // Runaway (Oonige) counts as a Front Runner for skill conditions (the simulators match 1 and 5).
+  const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4, Oonige: 1 };
   const DIST_NO = { Sprint: 1, Mile: 2, Medium: 3, Long: 4 };
 
   // What's known about the race before it starts, in the game's condition names.
@@ -71,7 +72,7 @@
   // front-half skills never fit End Closers; Late Surgers move through the pack, so both fit.
   // The charts run a Front Runner in 1st place, so skills that need a rival ahead of her (No
   // Stopping Me!, Slipstream, passing skills) never fit her either.
-  const BACK_NO = { Nige: 1, Senkou: 1 }, FRONT_NO = { Oikomi: 1 }, AHEAD_NO = { Nige: 1 };
+  const BACK_NO = { Nige: 1, Senkou: 1, Oonige: 1 }, FRONT_NO = { Oikomi: 1 }, AHEAD_NO = { Nige: 1, Oonige: 1 };
   // With pos.contest (0..1, a share of races), Front Runners are taken to fight for the lead:
   // rival-ahead skills fit her, counted at that share (aheadScale).
   const sets = (pos) => pos.sets || (pos.sets = { back: new Set(pos.back.map(String)), front: new Set(pos.front.map(String)), ahead: new Set((pos.ahead || []).map(String)) });

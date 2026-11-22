@@ -2229,8 +2229,14 @@
   const OPT = window.UmaOptimizer;
   const ASSET_V = ((document.currentScript && document.currentScript.src.match(/v=([\w-]+)/)) || [])[1] || "1";
   const STYLES = [["Nige", "Front"], ["Senkou", "Pace"], ["Sasi", "Late"], ["Oikomi", "End"]];
-  const STYLE_LABEL = Object.fromEntries(STYLES);
-  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer" };
+  const STYLE_LABEL = Object.assign(Object.fromEntries(STYLES), { Oonige: "Runaway" });
+  const STYLE_NAME = { Nige: "Front Runner", Senkou: "Pace Chaser", Sasi: "Late Surger", Oikomi: "End Closer", Oonige: "Runaway" };
+  // Runaway (runaway.js): a Front Runner for skill conditions and positions (baseStyle); per-style
+  // data without Runaway rows is read as Front Runner's (dataStyle, has: the set has her style).
+  const RW = window.UmaRunaway || null;
+  const baseStyle = (st) => (RW && RW.is(st) ? RW.BASE : st);
+  const dataStyle = (st, has) => (RW ? RW.data(st, has) : st);
+  const styleApt = (st) => (RW ? RW.aptIndex(st) : 6 + STYLES.findIndex(([k]) => k === st));
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const PASTE_KEY = "uma-skillpaste-v1";
   let pasted = {};
@@ -2411,6 +2417,7 @@
     const mine = pasted[pid] && pasted[pid][style];
     if (mine) return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).sort((a, b) => b.L - a.L);
     const data = svCache[pid];
+    style = dataStyle(style, !!(data && typeof data === "object" && data[style]));
     if (!data || typeof data === "string" || !data[style]) return [];
     return (field && fieldRows(pid, style, data[style])) || data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
   }
@@ -2423,7 +2430,7 @@
   // report lengths at the finish, so field values are used as measured next to the solo stat
   // curves (the field run's +50-stat check is kept in the data: they disagree on power's line on
   // dirt, see docs/race-mechanics-notes.md). null without.
-  const fieldOf = (pid, style) => { const FS = window.UmaFieldSkills, c = FS && FS.cups && FS.cups[pid], s = c && c.styles && c.styles[style]; return s && !s.partial && s.skills ? s : null; };
+  const fieldOf = (pid, style) => { const FS = window.UmaFieldSkills, c = FS && FS.cups && FS.cups[pid], s = c && c.styles && (c.styles[style] || c.styles[dataStyle(style)]); return s && !s.partial && s.skills ? s : null; };
   const fieldCache = new Map();
   function fieldRows(pid, style, solo) {
     const s = fieldOf(pid, style);
@@ -2465,7 +2472,7 @@
     const ok = ["Nige", "Senkou", "Sasi", "Oikomi"].map((st) => PR.fits(conds, PR.raceFacts(p, st), true));
     return (countCache[key] = ok);
   }
-  const countFits = (pid, id, style) => { const ok = fieldCountOk(pid, String(id)); return ok === true || ok[["Nige", "Senkou", "Sasi", "Oikomi"].indexOf(style)]; };
+  const countFits = (pid, id, style) => { const ok = fieldCountOk(pid, String(id)); return ok === true || ok[["Nige", "Senkou", "Sasi", "Oikomi"].indexOf(baseStyle(style))]; };
   function skillRows(pid, style, field = false) {
     const pos = positionsFor(presetById(pid));
     const PR = window.UmaParentRelevance;
@@ -2486,7 +2493,7 @@
   // sampled timing. A Front Runner who leads alone gets 0 (dropped), one fighting for the lead
   // the cup's share; every other style and skill is simulated as is.
   function raceScale(p, style, list) {
-    if (style !== "Nige") return {};
+    if (baseStyle(style) !== "Nige") return {};
     const PR = window.UmaParentRelevance, pos = positionsFor(p), out = {}, SB = window.UmaSkillBudget.DATA.skills;
     // Every tier of each listed skill (an upgrade or its gold can be bought from it).
     const fams = new Set(list.map((id) => SB[id] && SB[id][0]).filter(Boolean));
@@ -2517,7 +2524,7 @@
   // check's need (with the debuff skills you picked) that's what the stamina curve gives for it,
   // at how often the heal fires (full-field share, else 85%); at or past the need, about nothing,
   // so the heal keeps its own value. { id: { L, stamina, short, fire } } or null.
-  const HP_FACTOR = { Nige: 0.95, Senkou: 0.89, Sasi: 1, Oikomi: 0.995 };
+  const HP_FACTOR = { Nige: 0.95, Senkou: 0.89, Sasi: 1, Oikomi: 0.995, Oonige: 0.86 };
   const healCache = new Map();
   function healValues(pid, style) {
     const c = state.cm;
@@ -2553,7 +2560,7 @@
   // Chaser): data/skill-styles.js, every version of the skill needing that running style.
   function g8Fits(pid, style) {
     const only = window.UmaSkillStyles || {};
-    return (id) => !only[String(id)] || only[String(id)] === style;
+    return (id) => !only[String(id)] || only[String(id)] === baseStyle(style);
   }
   const g8Picks = (pid, style) => G8.picks(g8Entry(pid), g8Fits(pid, style));
   // Names game8 may use: the cup's valued skills, then every other skill in the game data (lane
@@ -2938,7 +2945,7 @@
       guts: stat("guts", p.stats.guts), wisdom: stat("wit", p.stats.wisdom),
       distanceAptitude: apt.distanceAptitude || grades[dist + 2] || "A",
       surfaceAptitude: apt.surfaceAptitude || grades[p.course.surface === "Dirt" ? 1 : 0] || "A",
-      strategyAptitude: apt.strategyAptitude || grades[6 + STYLES.findIndex(([style]) => style === c.style)] || "A" };
+      strategyAptitude: apt.strategyAptitude || grades[styleApt(c.style)] || "A" };
   }
   // Your stamina check settings: the debuff skills she faces (2 by default: the cup's distance
   // drain twice; 4 adds the two aimed at her style; or none) and the share of races with a full
@@ -2969,7 +2976,8 @@
   }
 
   function raceValues(p, style, stamina) {
-    const values = window.UmaStatCurves ? OPT.raceValuesFor(window.UmaStatCurves, p.id, style) : null;
+    const C = window.UmaStatCurves, cs = C && C.cups && C.cups[p.id] && C.cups[p.id].styles;
+    const values = C ? OPT.raceValuesFor(C, p.id, dataStyle(style, !!(cs && cs[style]))) : null;
     return values && { ...values, staminaTarget: staminaTrainingTarget(stamina), staminaMargin: 0 };
   }
   function staminaTrainingTarget(stamina) { return stamina?.need ?? stamina?.high; }
@@ -2985,7 +2993,7 @@
   // L, per, best, bestStat, raised, capped }] }
   const THRESHOLD_REACH = 200;
   function thresholdPlan(p, style, target) {
-    const C = window.UmaStatCurves, cup = C && C.cups && C.cups[p.id], v = cup && cup.styles && cup.styles[style];
+    const C = window.UmaStatCurves, cup = C && C.cups && C.cups[p.id], v = cup && cup.styles && (cup.styles[style] || cup.styles[dataStyle(style)]);
     const listed = (cup && cup.courseStats) || [];
     if (!v || v.status !== "ok" || !(v.steps || []).length) return { target, listed, notes: [] };
     const out = Object.assign({}, target), notes = [], caps = E.capsFor(state, scenario());
@@ -3181,6 +3189,14 @@
   function renderCM() { if (deckTab()) renderTab(); }
 
   // CM & decks' header: the cup and your team for it (cm-tab.js), the course, her style.
+  // Runaway is offered when her character can learn the Runaway skill (runaway.js), or she's
+  // already set to it.
+  const runawayFor = (c) => !!(RW && c && (RW.is(c.style) || RW.can(D.trainee(deckTrainee("cm")))));
+  function runawayNote(p, c) {
+    const t = D.trainee(deckTrainee("cm")), where = t && RW.CHARS[t.cid];
+    const charted = !!(svCache[p.id] && typeof svCache[p.id] === "object" && svCache[p.id][RW.STYLE]);
+    return `<b>Runaway</b>: a Front Runner sub-style the Runaway skill unlocks${where === "JP" ? " (JP has it for her; on Global once she gets it)" : ""}. She runs on her Front Runner grade, counts as a Front Runner for skill conditions and style debuffs, sets herself well ahead of the Front Runners and burns far more stamina. The stamina check and the skill comparison race her as a Runaway; ${charted ? "the skill chart is Runaway's too" : "the skill chart, stat curves and course values are <b>Front Runner's</b> until the Runaway rebuild"}. Learn the Runaway skill in her career, or she runs as a Front Runner.`;
+  }
   function cmHeader(p, c, team) {
     const [stCls, stText] = presetStatus(p);
     const s = p.stats;
@@ -3195,7 +3211,8 @@
         <div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div>
       </div>
       ${c ? `<div class="row-wrap">
-        <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
+        <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.concat(runawayFor(c) ? [[RW.STYLE, RW.LABEL]] : []).map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
+        ${RW && RW.is(c.style) ? `<p class="mini">${runawayNote(p, c)}</p>` : ""}
         ${c.style === "Nige" ? `<label class="field"><span>Front Runners in this cup</span><select data-cm-contest="${esc(p.id)}"><option value="0"${contestShare(p.id) ? "" : " selected"}>She leads alone</option>${CONTEST_SHARES.map((v) => `<option value="${v}"${contestShare(p.id) === v ? " selected" : ""}>Fight for the lead: someone ahead ${Math.round(v * 100)}% of the race</option>`).join("")}</select></label>` : ""}
         <button type="button" class="btn ghost small" data-cm-build="${p.build}" ${state.build === p.build ? "disabled" : ""}>${state.build === p.build ? "Turn coach build: " + esc(E.BUILDS[p.build].label) : "Set the turn coach to " + esc(E.BUILDS[p.build].label)}</button>
       </div>` : ""}
@@ -4160,7 +4177,7 @@
     const mine = pasted[p.id] && pasted[p.id][c.style];
     let rows = skillRows(p.id, c.style, true);
     const fieldMode = !!rows.fieldBased, svd = svCache[p.id];
-    const soloL = fieldMode && svd && typeof svd === "object" && svd[c.style] ? Object.fromEntries(svd[c.style].map(([id, med]) => [id, med / 100])) : {};
+    const soloL = fieldMode && svd && typeof svd === "object" && svd[dataStyle(c.style, !!svd[c.style])] ? Object.fromEntries(svd[dataStyle(c.style, !!svd[c.style])].map(([id, med]) => [id, med / 100])) : {};
     const src = skillSources(c);
     const deckIds = new Set((c.cards || []).map((sl) => sl.id));
     const trn = deckTrainee(host) ? D.trainee(deckTrainee(host)) : null;
@@ -4216,7 +4233,7 @@
   // Groundwork right away. The simulator can't put a number on either, so it's a tag.
   const GATE_SKILLS = new Set(["200431", "200432"]); // Concentration, Focus: the only start-delay skills
   function gateTag(id, style) {
-    if (style !== "Nige") return "";
+    if (baseStyle(style) !== "Nige") return "";
     const k = String(id), kind = window.UmaSkillKinds && window.UmaSkillKinds.skills[k];
     if (GATE_SKILLS.has(k)) return ' <span class="pill" title="Its value here is only the distance a quicker start saves. For a Front Runner a quick start also helps her take the lead, and it fires at the gate, so it\'s one of the 3 skills that set off Groundwork right away. The simulator can\'t put a number on either.">helps her lead</span>';
     if (kind && kind[0] === "green") return ' <span class="pill" title="Its value here is only its own stat boost. Greens fire at the gate, so with Concentration, Early Lead or other greens they make the 3 skills that set off Groundwork right away, which the values assume. The simulator can\'t put a number on that.">sets off Groundwork</span>';
@@ -4237,7 +4254,7 @@
     const style = STYLE_NAME[c.style] || c.style;
     const left = parts.length ? `<p class="mini cm-leftout">Left out for ${/^[AEIOU]/.test(style) ? "an" : "a"} ${esc(style)}: ${parts.join("; ")}. The Umalator runs one uma alone, so it would count them.</p>` : ""
     const contest = c.style === "Nige" && contestShare(p.id) ? `<p class="mini">She fights for the lead here: skills that need a rival ahead of her are counted at ${Math.round(contestShare(p.id) * 100)}% of their value (your assumption, not a measured rate), here and in her deck, skill purchases and Parents.</p>` : "";
-    const gate = c.style === "Nige" ? '<p class="mini cm-gate">Tagged <b>helps her lead</b> and <b>sets off Groundwork</b>: Concentration, Focus and greens are worth more to a Front Runner than their L. They fire at the gate, where they help her take the lead and, three together, set off Groundwork right away; the simulator can\'t put a number on either.</p>' : "";
+    const gate = baseStyle(c.style) === "Nige" ? '<p class="mini cm-gate">Tagged <b>helps her lead</b> and <b>sets off Groundwork</b>: Concentration, Focus and greens are worth more to a Front Runner than their L. They fire at the gate, where they help her take the lead and, three together, set off Groundwork right away; the simulator can\'t put a number on either.</p>' : "";
     return left + contest + gate;
   }
 
@@ -4399,8 +4416,8 @@
       const unsupported = RS.supported(p, Object.assign({}, simVariant(p), { inBrowser: !!eng.sim }), catalog);
       if(!same())return;initialKey=optKey(host);initialSourceKey=skillPlanKey(c);
       worker = unsupported ? null : RS.runner(eng.sim); j.raceWorker = worker;
-      const t = D.trainee(deckTrainee(host)), idx = { Sprint:2,Mile:3,Medium:4,Long:5 }[p.course.dist], si = STYLES.findIndex(x=>x[0]===c.style);
-      const apt = [q.apt.distanceAptitude || t.apt[idx],q.apt.surfaceAptitude || t.apt[p.course.surface==="Dirt"?1:0],q.apt.strategyAptitude || t.apt[6+si]];
+      const t = D.trainee(deckTrainee(host)), idx = { Sprint:2,Mile:3,Medium:4,Long:5 }[p.course.dist], si = styleApt(c.style);
+      const apt = [q.apt.distanceAptitude || t.apt[idx],q.apt.surfaceAptitude || t.apt[p.course.surface==="Dirt"?1:0],q.apt.strategyAptitude || t.apt[si]];
       const ownUnique=(t.us||[]).map(String);
       let learned=ownUnique.slice();
       const baseValues = skillMap(p.id,c.style).map;
@@ -4981,8 +4998,8 @@
   }
   // Her grades for this cup: entered, else the trainee's, else A.
   function soApt(b, p) {
-    const t = soTrainee(b), si = STYLES.findIndex((x) => x[0] === b.style), di = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.course.dist];
-    return [b.apt.distanceAptitude || (t ? t.apt[di] : "A"), b.apt.surfaceAptitude || (t ? t.apt[p.course.surface === "Dirt" ? 1 : 0] : "A"), b.apt.strategyAptitude || (t ? t.apt[6 + si] : "A")];
+    const t = soTrainee(b), si = styleApt(b.style), di = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.course.dist];
+    return [b.apt.distanceAptitude || (t ? t.apt[di] : "A"), b.apt.surfaceAptitude || (t ? t.apt[p.course.surface === "Dirt" ? 1 : 0] : "A"), b.apt.strategyAptitude || (t ? t.apt[si] : "A")];
   }
   function soAdd(b, id, hint, have) {
     const ids = SO.withLower(id, window.UmaSkillBudget.create());
