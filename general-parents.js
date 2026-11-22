@@ -219,7 +219,7 @@
     const sharesOf = () => shares || (shares = goalShares(ctx.A, ctx.cids()));
     function st() {
       const g = ctx.state();
-      if (!STYLES.includes(g.style)) g.style = "Senkou";
+      if (!STYLES.includes(g.style)) { const team = ctx.teamStyles ? ctx.teamStyles() : []; g.style = team.find((st) => STYLES.includes(st)) || "Senkou"; }
       if (g.cid == null) g.cid = null;
       return g;
     }
@@ -332,11 +332,12 @@
     }
 
     function html() {
-      const g = st();
+      const g = st(), team = ctx.teamStyles ? ctx.teamStyles() : [];
       const t = g.cid ? version(g.cid, g.style) : null;
       return `<details class="panel" id="cm-general" data-cmp-open="gp-panel"><summary><b>General grandparents</b> · by running style, for any cup</summary>
         <p class="mini">A grandparent you can reuse under many aces: <a href="${esc(DATA.url)}" target="_blank" rel="noopener">uma.guide</a>'s general parent skills for the style${t ? `, checked against ${esc(ctx.charName(g.cid))}` : ""}. The cup steps above still pick the family for one ace; this is for building your loop.</p>
-        <div class="row-wrap" role="group" aria-label="Running style">${STYLES.map((s) => `<button type="button" class="chip${s === g.style ? " active" : ""}" data-gp-style="${s}" aria-pressed="${s === g.style}">${esc(STYLE_LABEL[s])}</button>`).join("")}</div>
+        <div class="row-wrap" role="group" aria-label="Running style">${STYLES.map((s) => `<button type="button" class="chip${s === g.style ? " active" : ""}" data-gp-style="${s}" aria-pressed="${s === g.style}">${esc(STYLE_LABEL[s])}${team.includes(s) ? " ★" : ""}</button>`).join("")}</div>
+        ${team.length ? `<p class="mini">★ = your Medium &amp; Long team's styles (the team you plan parents for).</p>` : ""}
         ${RW && RW.is(g.style) ? `<p class="mini"><b>Runaway</b> has no list on uma.guide: these are the Front Runner lists, since Front Runner skills work for her (she counts as a Front Runner for skill conditions). Only the characters who can learn the Runaway skill run it (${Object.keys(RW.CHARS).map((c) => esc(ctx.charName(c))).join(", ")}; Game8). Whether the Runaway skill itself passes down as a white spark isn't known, so it isn't a target here.</p>` : ""}
         ${listHTML(g.style, t)}
         <p class="mini">Also worth having for every style (uma.guide's special mentions): ${DATA.special.map(esc).join(", ")}.</p>

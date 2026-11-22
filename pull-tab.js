@@ -74,6 +74,19 @@
         p.plan = JSON.parse(JSON.stringify(DEFAULT_PLAN));
         p.teamsV = 3;
       }
+      // Once (v4): Medium & Long is your one full team; Sprint & Mile and Dirt race one meta uma
+      // each, repeated every cup, and parents are planned for Medium & Long only.
+      if (p.teamsV < 4) {
+        p.kinds = Object.assign({}, PV.KINDS);
+        // A meta track races its first named uma: one you already have goes first.
+        const mine = ctx.myUmas();
+        Object.keys(p.kinds).filter((g) => p.kinds[g] === "meta" && p.teams[g]).forEach((g) => {
+          const list = p.teams[g], i = list.findIndex((m) => m && m.id && mine.has(+m.id));
+          if (i > 0) { const [m] = list.splice(i, 1); list.unshift(Object.assign({}, m, { rotate: false })); }
+        });
+        p.teamsV = 4;
+      }
+      if (!p.kinds) p.kinds = Object.assign({}, PV.KINDS);
       if (!p.plan) p.plan = JSON.parse(JSON.stringify(DEFAULT_PLAN));
       if (!p.selPicks) p.selPicks = Object.assign({}, DEFAULT_PICKS);
       return p;
@@ -98,7 +111,8 @@
       return Object.assign({ mine }, PV.planParts(mine, { today: ctx.today, done: p.done, selPicks: p.selPicks, selUma: !!p.selUma, events: B.events || [], caratsNow: p.carats, pullCarats: B.meta.pullCarats }));
     }
     // What the decks rest on (a re-plan with the same keeps them), and everything the route does.
-    const deckKey = (p) => JSON.stringify([ctx.today, until(p), p.teams, ctx.ownedCode(), ctx.settingsKey(), [...ctx.myUmas()].sort(), p.usePlan && p.plan, p.selUma && p.selPicks]);
+    const teamsOf = (p) => PV.effectiveTeams(p.teams, p.kinds);
+    const deckKey = (p) => JSON.stringify([ctx.today, until(p), teamsOf(p), PV.parentGroupsOf(p.kinds), ctx.ownedCode(), ctx.settingsKey(), [...ctx.myUmas()].sort(), p.usePlan && p.plan, p.selUma && p.selPicks]);
     const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.ssrPicks, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma, p.selPicks, p.done]);
     const cardName = (id) => { const c = D.card(id); return c ? c.n + " (" + RARITY[c.r] + " " + c.ty + ")" : "#" + id; };
     const cardShort = (id) => { const c = D.card(id); return c ? c.n + " " + c.ty : "#" + id; };
@@ -114,7 +128,7 @@
     async function build(p, o) {
       const end = until(p), label = o.label || "";
       const v = PV.create({
-        D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(p.teams)), owned: ctx.owned(), umas: ctx.myUmas(), umaValues: root.UmaUmaValues || null, scenarioDecks: root.UmaScenarioDecks || null,
+        D, T: ctx.T, A: ctx.A, B, P, today: ctx.today, until: end, teams: JSON.parse(JSON.stringify(teamsOf(p))), parentGroups: PV.parentGroupsOf(p.kinds), owned: ctx.owned(), umas: ctx.myUmas(), umaValues: root.UmaUmaValues || null, scenarioDecks: root.UmaScenarioDecks || null,
         minCups: +p.minCups || 1, minPct: (+p.minPct || 3) / 100, fade: (+p.fade || 0) / 100, locked: o.locked, freePulls: o.freePulls,
         yours: o.yours, lockedPicks: o.lockedPicks, done: o.done,
         selectors: { free: !!p.selFree, paid: !!p.selPaid, uma: !!p.selUma }, handPicks: num(p.ssrPicks),
@@ -284,6 +298,30 @@
         </details>
       </section>`;
     }
+    // Meta picks for a track: each uma's worth on every cup of the track ahead (team-maker.js
+    // worth: her own unique raced there in that style plus aptitudes), in her best A/S style per
+    // cup, averaged; her worst cup too. → [{ t, avg, worst, style }] best first, with .cups.
+    const styleName = (k) => (STYLES.find(([s]) => s === k) || [0, k])[1];
+    const metaMemo = new Map();
+    function metaSuggest(g) {
+      const UV = root.UmaUmaValues, TM = root.UmaTeamMaker;
+      if (!UV || !TM) return [];
+      const key = g + "|" + ctx.today;
+      if (metaMemo.has(key)) return metaMemo.get(key);
+      const cups = P.list.filter((q) => PV.groupOf(q) === g && q.global.start > ctx.today && UV.cups[q.id] && UV.cups[q.id].status === "ok");
+      const ids = new Set();
+      cups.forEach((q) => Object.keys(UV.cups[q.id].umas).forEach((id) => ids.add(+id)));
+      const rows = [...ids].map((id) => D.trainee(id)).filter((t) => t && TM.goodStyles(t).length).map((t) => {
+        const per = cups.map((q) => TM.goodStyles(t).map((st) => ({ st, v: TM.worth(t, q, st, UV).v })).sort((a, b) => b.v - a.v)[0]);
+        const n = {};
+        per.forEach((x) => { n[x.st] = (n[x.st] || 0) + 1; });
+        const style = Object.keys(n).sort((a, b) => n[b] - n[a])[0];
+        return { t, avg: per.reduce((a, x) => a + x.v, 0) / Math.max(1, per.length), worst: Math.min(...per.map((x) => x.v)), style };
+      }).sort((a, b) => b.avg - a.avg);
+      rows.cups = cups.length;
+      metaMemo.set(key, rows);
+      return rows;
+    }
     function teamsHTML(p) {
       const { yours } = planInputs(p);
       // When she's yours, and why: My umas, your plan (her banner, your selector pick), or out on Global.
@@ -311,12 +349,27 @@
           ${flex}<span class="mini">${esc(status)}</span>
         </div>`;
       };
-      const rotating = Object.keys(PV.GROUPS).some((g) => (p.teams[g] || []).some((m) => m && m.rotate));
+      // A meta track: one uma, repeated every cup (no flex), with the umas worth the most over that
+      // track's cups ahead to pick from.
+      const kindSel = (g) => `<label class="field"><span>This track</span><select data-pull-kind="${g}"><option value="team"${(p.kinds || {})[g] !== "meta" ? " selected" : ""}>A team of 3 (parents planned)</option><option value="meta"${(p.kinds || {})[g] === "meta" ? " selected" : ""}>One meta uma, every cup (no parents)</option></select></label>`;
+      const metaRow = (g) => {
+        const list = p.teams[g] || [], i = Math.max(0, list.findIndex((m) => m && m.id)), m = list[i] || { id: null, style: "Senkou" }, t = m.id ? D.trainee(m.id) : null;
+        const s = t ? since(t) : null, from = !s ? null : s.date ? "from ~" + fmtDate(s.date) + " (" + s.why + ")" : "now (" + s.why + ")";
+        const sug = metaSuggest(g), mine = ctx.myUmas();
+        return `<div class="row-wrap pull-team-row">
+          <label class="field grow"><span>Meta uma</span><input list="pullTrainees" data-pull-team="${g}" data-i="${i}" value="${esc(t ? tLabel(t) : "")}" placeholder="Name [version]" autocomplete="off"></label>
+          <label class="field"><span>Style</span><select data-pull-style="${g}" data-i="${i}">${STYLES.map(([k, l]) => `<option value="${k}" ${m.style === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+          <span class="mini">${t ? esc(from ? "She races every " + PV.GROUPS[g].label + " cup, yours " + from + "." : "She races every " + PV.GROUPS[g].label + " cup once she's yours (tick her in My umas).") : "Pick the uma you'll repeat every cup."}</span></div>
+          ${sug.length ? `<details class="pred-help"><summary class="mini">Meta picks for ${esc(PV.GROUPS[g].label)}: ${sug.slice(0, 3).map((x) => esc(x.t.n)).join(", ")}</summary>
+            <p class="mini">Umas by what they bring themselves over the ${sug.cups} ${esc(PV.GROUPS[g].label)} cups ahead with values (her own unique raced on each cup plus her aptitudes, in her best style there; as the team maker counts it), so one that's good on most of them lasts. ★ = in My umas. Her deck, stats and skills aren't in it.</p>
+            <div class="table-wrap"><table class="plan"><thead><tr><th>Uma</th><th class="num">L a cup</th><th class="num">Worst cup</th><th>Style</th><th></th></tr></thead><tbody>${sug.slice(0, 10).map((x) => `<tr><td>${esc(tLabel(x.t))}${mine.has(x.t.id) ? " ★" : ""}${x.t.en ? "" : ' <span class="mini">(JP only so far)</span>'}</td><td class="num">${x.avg.toFixed(2)}</td><td class="num">${x.worst.toFixed(2)}</td><td>${esc(styleName(x.style))}</td><td><button type="button" class="linkish" data-pull-meta="${g},${x.t.id},${x.style}">Use</button></td></tr>`).join("")}</tbody></table></div></details>` : ""}`;
+      };
+      const rotating = Object.keys(PV.GROUPS).some((g) => (p.kinds || {})[g] !== "meta" && (p.teams[g] || []).some((m) => m && m.rotate));
       return `<section class="panel">
         <h3>Your future teams</h3>
         <p class="mini">One team per kind of track: every cup ahead uses the team for its track. Your team umas count as yours (no carats go to them unless your plan pulls for them), from when you'll have them. A fixed uma races every cup of her track from then; a flex slot takes, each cup, the uma of yours with A or better on its surface, distance and her best running style, a different one from the cup before when another fits.</p>
         ${rotating && !ctx.myUmas().size ? `<p class="mini warn">Tick the umas you own in the Trainees tab (My umas) so the rotating slot has umas to pick from; until then it sits out.</p>` : ""}
-        ${Object.keys(PV.GROUPS).map((g) => `<div class="pull-team"><h4>${esc(PV.GROUPS[g].label)}</h4>${[0, 1, 2].map((i) => row(g, i)).join("")}</div>`).join("")}
+        ${Object.keys(PV.GROUPS).map((g) => `<div class="pull-team"><h4>${esc(PV.GROUPS[g].label)}</h4>${kindSel(g)}${(p.kinds || {})[g] === "meta" ? metaRow(g) : [0, 1, 2].map((i) => row(g, i)).join("")}</div>`).join("")}
         <datalist id="pullTrainees">${D.DATA.trainees.slice().sort((a, b) => tLabel(a).localeCompare(tLabel(b))).map((t) => `<option value="${esc(tLabel(t))}"></option>`).join("")}</datalist>
       </section>`;
     }
@@ -646,7 +699,7 @@
         <p><b>What counts.</b> A banner card counts in a deck when it beats the card it would replace (the "Which cards would improve it?" test, with the other five fixed) by 3% or more at the limit break your copies reach: smaller differences are within the deck scoring's error. A card you'd otherwise borrow counts as yours, with the next-best friend's card. Its gains are added up over every cup after its banner (far-off ones faded), so the route pulls where the total per carat is highest. <b>Stricter rules</b> can raise the margin or ask for several cups.</p>
         <p><b>200 or 400 pulls.</b> ${B ? B.meta.spark : 200} pulls give one spark (a featured card of your choice), so 200 pulls on an SSR's banner likely end at LB1 (the spark and one pulled copy), and 400 at LB4. A pull counts only when its likely result already clears your rules; its value is then the expected points over every result the pulls can give (with the sparks where they help most once you see the pulls), the other featured cards' copies included.</p>
         <p><b>Selectors.</b> At each anniversary (JP's campaigns, on Global's calendar: its 1.5 Anniversary was in July 2026), a free support selector and the $20.99 ones (support and Uma, each with 1,500 carats). The pool: the gacha SSRs (or 3★ umas) JP had about ${PV.POOL_LAG || 45} days before that anniversary. A pick is one copy, valued like a pulled one; it's taken before any carats are spent.</p>
-        <p><b>Parents and supports on one scale.</b> A trainee counts as Parent 1 for your fixed team umas (yours to train; Parent 2 is a friend's rental): her sparks fire at their base chance × (1 + her affinity with the ace / 100) at the ace's two inspirations, carrying the ace's top 3 race whites and her inherited unique at 2★, and a 2★ pink spark where the ace lacks an A on the race (like El Condor Pasa's dirt B) and she has it. Blue sparks are left out: any parent can carry them. It's all in the same points as a deck card, so a trainee banner and a support banner compete for the same carats; "Every banner on one scale" shows them side by side. Same rules: clearly better than your best Parent 1 (your teams included), in enough cups. Future characters' affinity comes from JP's table.</p>
+        <p><b>Parents and supports on one scale.</b> A trainee counts as Parent 1 for your fixed team umas on the tracks you plan parents for (a team of 3; not a meta-uma track) (yours to train; Parent 2 is a friend's rental): her sparks fire at their base chance × (1 + her affinity with the ace / 100) at the ace's two inspirations, carrying the ace's top 3 race whites and her inherited unique at 2★, and a 2★ pink spark where the ace lacks an A on the race (like El Condor Pasa's dirt B) and she has it. Blue sparks are left out: any parent can carry them. It's all in the same points as a deck card, so a trainee banner and a support banner compete for the same carats; "Every banner on one scale" shows them side by side. Same rules: clearly better than your best Parent 1 (your teams included), in enough cups. Future characters' affinity comes from JP's table.</p>
         <p><b>The route.</b> Step by step, the move with the most points per carat that still leaves enough carats at every banner (free selector picks first, then the pulls), counting your income up to each banner's date, the packs' carats and tickets first. After each step the decks take the step's likely cards, so the next card has to beat those. Then a second pass: back to your decks now, the same pulls in date order, and the selector picks chosen again on top of them, so no pick goes to a card a pull already brings to LB4. It's a careful step-by-step plan, not a search of every possible route.</p>
         <p><b>Dates.</b> Banners Global has announced keep their own dates and rates. Later banners, with their free pulls, follow umacaratcalculator.com's timeline (Henry's resource spreadsheet, updated by hand as Global announces them). The anniversaries and the cups are GameTora's forecast from Global's pace against JP, so they can shift; plan again as banners are announced.</p>
       </div></details>`;
@@ -665,6 +718,14 @@
     // ---------- events ----------
     function click(e) {
       if (e.target.closest("#pullRun")) { run(); return true; }
+      const meta = e.target.closest("[data-pull-meta]");
+      if (meta) {
+        const [g, id, style] = meta.dataset.pullMeta.split(","), p = S(), list = p.teams[g] || (p.teams[g] = []);
+        const i = Math.max(0, list.findIndex((m) => m && m.id));
+        list[i] = { id: +id, style };
+        ctx.save(); ctx.flash(`${umaName(+id)} is your ${PV.GROUPS[g].label} meta uma.`); ctx.rerender();
+        return true;
+      }
       if (e.target.closest("#pullCheck")) { check(); return true; }
       const save = e.target.closest("[data-pull-save]");
       if (save) {
@@ -741,6 +802,13 @@
         if (!t.value.trim()) delete p.selPicks[t.dataset.pullPick];
         else if (id) p.selPicks[t.dataset.pullPick] = id;
         else { ctx.flash("Pick a trainee from the list (name and version)."); return true; }
+        ctx.save();
+        ctx.rerender();
+        return true;
+      }
+      if (t.dataset.pullKind) {
+        if (!p.kinds) p.kinds = Object.assign({}, PV.KINDS);
+        p.kinds[t.dataset.pullKind] = t.value === "meta" ? "meta" : "team";
         ctx.save();
         ctx.rerender();
         return true;

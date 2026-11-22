@@ -25,7 +25,8 @@
 
   // Cleanout: keep the best blue+pink pair for each pink, the best of each character (her green),
   // any veteran who's the only one with a white (2★+) worth keeping, and with o.general the best
-  // general grandparent of each style; the rest are safe to transfer. → Map(veteran id → { keep, why: [reasons] }).
+  // general grandparent of each style (o.generalStyles: your parent team's styles; else all four);
+  // the rest are safe to transfer. → Map(veteran id → { keep, why: [reasons] }).
   function cleanout(vets, o = {}) {
     const fam = o.family || ((id) => id), out = new Map(), keep = (v, why) => { const e = out.get(v.id); e.keep = true; e.why.push(why); };
     const whites = (v) => ((v.self && v.self.white) || []).filter(([, st]) => st >= 2).map(([id]) => fam(String(id)));
@@ -40,7 +41,7 @@
     best((v) => (v.self && v.self.green >= 1 ? v.cid : null), () => "your best of her (green)", (v) => v.self.green * 10 + value(v));
     // o.general(v, style) → her fit as a general grandparent (general-parents.js vetFit): keep each
     // style's best.
-    if (o.general) ["Nige", "Senkou", "Sasi", "Oikomi"].forEach((st) => best((v) => (o.general(v, st) > 0 ? st : null), () => "best general " + (o.styleName ? o.styleName(st) : st) + " grandparent", (v) => o.general(v, st)));
+    if (o.general) (o.generalStyles && o.generalStyles.length ? o.generalStyles : ["Nige", "Senkou", "Sasi", "Oikomi"]).forEach((st) => best((v) => (o.general(v, st) > 0 ? st : null), () => "best general " + (o.styleName ? o.styleName(st) : st) + " grandparent", (v) => o.general(v, st)));
     const carriers = new Map();
     (vets || []).forEach((v) => whites(v).forEach((f) => carriers.set(f, (carriers.get(f) || []).concat([v]))));
     carriers.forEach((list, f) => { if (list.length === 1) keep(list[0], "the only one with " + (o.whiteName ? o.whiteName(f) : f)); });

@@ -493,7 +493,12 @@
       const r = a ? found.get(keyOf(c, a)) : null;
       const prog = job ? `<div class="row-wrap" role="status"><span class="progress"><i style="width:${Math.round(job.f * 100)}%"></i></span><span class="mini">${esc(job.stage)}</span></div>` : "";
       const panel = (key, title, html) => `<section class="panel cmp-step" id="cm-${key}"><h3>${title}</h3>${html}</section>`;
-      const steps = a ? [
+      // Parents are planned for your full team's track (Medium & Long); a meta-uma track gets a
+      // note unless you ask to plan this cup anyway.
+      if (!c.parentsAnyway) c.parentsAnyway = {};
+      const planned = !ctx.parentsPlanned || ctx.parentsPlanned(p) || c.parentsAnyway[p.id];
+      const skipped = !planned ? `<section class="panel cmp-step"><p class="mini">Parents are planned for your Medium &amp; Long team only: ${esc(ctx.trackLabel ? ctx.trackLabel(p) : "this track")} races one meta uma (Pull planner, Your future teams). <button type="button" class="linkish" data-cmp-anyway="${esc(p.id)}">Plan this cup's parents anyway</button></p></section>` : "";
+      const steps = a && planned ? [
         panel("gaps", "1 · Her gaps", gapsHTML(c, a, d, r)),
         panel("p1", "2 · Make Parent 1", p1HTML(c, a, d, r) + prog),
         panel("training", "3 · Train her", trainHTML(c, a, d, r)),
@@ -506,7 +511,7 @@
           <p class="mini">${r && r.x.skillPlan ? `White targets follow the ace's source-checked purchases · ${r.x.skillPlan.model}${r.jointPasses ? ` · ${r.jointPasses} planning passes` : ""}. ${r.jointConverged===false ? "Targets shifted in the final check; find them again to compare another pass." : ""}` : "Find parents checks the ace's skill sources, then plans the white hints her purchases need."}</p>
           <div class="row-wrap cmp-chips" aria-label="Your team">${aces(c).filter((x) => trainee(x.tid)).map((x) => `<button type="button" class="chip${a && x.tid === a.tid ? " active" : ""}" data-cmp-sel="${x.tid}" aria-pressed="${!!a && x.tid === a.tid}">${esc(tName(trainee(x.tid)))}</button>`).join("")}<button type="button" class="linkish" data-goto-tab="cm">${a ? "Team and decks in CM & decks" : "Pick your team in CM & decks"} →</button></div>
         </section>
-        ${steps}
+        ${steps}${skipped}
         ${ctx.generalHTML ? ctx.generalHTML() : ""}
         <details class="panel" id="cm-family" data-cmp-open="family-tools"${opened["family-tools"] ? " open" : ""}><summary><b>Family table</b> · enter and compare a family by hand</summary>${ctx.familyHTML()}</details>
         ${importHTML()}
@@ -975,10 +980,10 @@
             : `<p class="mini">None yet: no veteran has both. Your next loop run that rolls one is the exit point.</p>`);
       }
       const GP = root.UmaGeneralParents;
-      const marks = VP.cleanout(vets, { family, aptName: apt, whiteName: (f) => ctx.skillName(f), general: GP ? (v, style) => GP.vetFit(v, style, family).score : null, styleName: (st) => GP ? GP.STYLE_LABEL[st] : st });
+      const marks = VP.cleanout(vets, { family, aptName: apt, whiteName: (f) => ctx.skillName(f), general: GP ? (v, style) => GP.vetFit(v, style, family).score : null, generalStyles: ctx.parentStyles ? ctx.parentStyles() : null, styleName: (st) => GP ? GP.STYLE_LABEL[st] : st });
       const keep = vets.filter((v) => marks.get(v.id).keep), go = vets.filter((v) => !marks.get(v.id).keep);
       return exits + `<details data-cmp-open="cleanout"><summary class="mini">Veteran cleanout: ${keep.length} to keep, ${go.length} safe to transfer</summary>
-        <p class="mini">Keeps the best blue + pink for each pink, your best of each character (her green), the only veteran with a 2★+ white, and your best general grandparent of each style (General grandparents). The rest are safe to transfer; the app removes nothing.</p>
+        <p class="mini">Keeps the best blue + pink for each pink, your best of each character (her green), the only veteran with a 2★+ white, and your best general grandparent for each of your Medium &amp; Long team's styles (General grandparents). The rest are safe to transfer; the app removes nothing.</p>
         <div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Sparks</th><th>Mark</th></tr></thead><tbody>${keep.concat(go).map((v) => { const m = marks.get(v.id); return `<tr${m.keep ? "" : ' class="cmp-cut"'}><td>${esc(vetName(v))}</td><td class="mini">${sparks(v.self)}</td><td>${m.keep ? "Keep <span class=\"mini\">· " + esc(m.why.join("; ")) + "</span>" : "Safe to transfer"}</td></tr>`; }).join("")}</tbody></table></div></details>`;
     }
     // Two grandparent rules side by side (shown only): which one is right changes how much her
@@ -1056,6 +1061,8 @@
         afterImport();
         return true;
       }
+      const anyway = t.closest("[data-cmp-anyway]");
+      if (anyway) { if (!c.parentsAnyway) c.parentsAnyway = {}; c.parentsAnyway[anyway.dataset.cmpAnyway] = true; ctx.save(); ctx.rerender(); return true; }
       const tmSum = t.closest("[data-tm-open] > summary");
       if (tmSum) { const d = tmSum.parentElement, k = d.dataset.tmOpen; maker(c).open[k] = !d.open; ctx.save(); if (k === "every" && !d.open) { e.preventDefault(); ctx.rerender(); return true; } return false; }
       if (t.closest("#tmAddMine")) { const m = maker(c), have = new Set(m.pool.map((x) => +x.tid)); [...ctx.myUmas()].filter((id) => trainee(id) && !have.has(+id)).forEach((id) => m.pool.push({ tid: +id, styles: [], fixed: false })); ctx.save(); ctx.rerender(); return true; }

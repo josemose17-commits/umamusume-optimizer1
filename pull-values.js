@@ -80,7 +80,8 @@
   //      [{ id, style, rotate }] (rotate: a flex slot, a fresh uma of yours each cup; its id, if
   //      any, is an uma you'll have) }, owned: { cardId: lb }, umas: Set of trainee ids you own,
   //      yours: Map(trainee id → date) (umas your plan gets, from then), lockedPicks: Map(selector
-  //      id → trainee or card id) (selector picks you've decided), minCups (1), minPct (0.03: every real gain, added up), parents (true), fade (share
+  //      id → trainee or card id) (selector picks you've decided), parentGroups ([group]: the
+  //      tracks whose teams get parents; all when unset), minCups (1), minPct (0.03: every real gain, added up), parents (true), fade (share
   //      of value lost a year ahead, 0), selectors: { free, paid, uma } (all true),
   //      locked: Map(banner id → { level, free, target }) (banners you'll pull no matter what, at
   //      that level, with that banner's free pulls and the card you'd spark when nothing else
@@ -758,8 +759,11 @@
     // 2★, and a 2★ pink spark where the ace lacks an A on the race (surface, distance, style) and
     // she has it (one pink spark a parent), all at her affinity with the ace. Blue sparks are left
     // out: any parent can carry them, so they don't make one trainee worth more than another.
+    // o.parentGroups: the tracks you plan parents for (all when unset); a team of another track
+    // gets no Parent 1 value.
+    const parentGroups = o.parentGroups ? new Set(o.parentGroups) : null;
     function parentValue(pair, t) {
-      if (!t || t.cid === pair.trainee.cid || pair.rotating) return 0;
+      if (!t || t.cid === pair.trainee.cid || pair.rotating || (parentGroups && !parentGroups.has(pair.group))) return 0;
       const mk = pair.key + "|" + t.id;
       if (pvMemo.has(mk)) return pvMemo.get(mk);
       const aff = parentAffinity(pair.trainee.cid, t.cid);
@@ -1357,7 +1361,22 @@
     return { locked, freePulls, yours, lockedPicks, budget, done: new Set(Object.keys(done).concat(rows.filter((x) => rowDone(x, today, done)).map(rowKey))) };
   }
 
-  const api = { create, teamPick, flexPick, styleFor, teamLogic, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
+  // Team kinds per track ({ sm|ml|dirt: "team" | "meta" }): a "meta" track races one uma you
+  // repeat every cup (the first named one, or with has(id) the first named one you have; never a
+  // flex) instead of a team of 3, and gets no parents. → the teams as the planner uses them.
+  const KINDS = { sm: "meta", ml: "team", dirt: "meta" };
+  function effectiveTeams(teams, kinds, has) {
+    const out = {};
+    Object.keys(teams || {}).forEach((g) => {
+      const list = teams[g] || [], kind = (kinds || {})[g] || "team";
+      if (kind !== "meta") { out[g] = list; return; }
+      const m = (has && list.find((x) => x && x.id && has(+x.id))) || list.find((x) => x && x.id) || null;
+      out[g] = m ? [{ id: m.id, style: m.style }] : [];
+    });
+    return out;
+  }
+  const parentGroupsOf = (kinds) => Object.keys(GROUPS).filter((g) => ((kinds || {})[g] || "team") !== "meta");
+  const api = { create, teamPick, flexPick, styleFor, teamLogic, KINDS, effectiveTeams, parentGroupsOf, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaPullValues = api;
 })(typeof window !== "undefined" ? window : globalThis);
