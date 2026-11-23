@@ -974,12 +974,10 @@ body:not([data-page="coach"]) .dock { display: none !important; }
 .step-n { display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 50%; border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: .78rem; }
 .step[aria-current="step"] { background: var(--accent-soft); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .step[aria-current="step"] .step-n { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.step.locked { opacity: .55; cursor: not-allowed; }
-.step.locked .step-n::after { content: ""; }
-.step-why { display: block; font-size: .7rem; font-weight: 500; color: var(--faint); }
-.step.locked .step-l::after { content: " 🔒"; font-size: .75em; }
-.step.locked { flex-direction: row; }
-.step.locked .step-l { display: grid; }
+.step.locked { opacity: .5; cursor: not-allowed; }
+.step.locked:hover { background: none; color: var(--muted); }
+.step-lock { display: inline-grid; place-items: center; margin-left: auto; color: var(--faint); }
+.step-lock svg { width: 14px; height: 14px; }
 .cmp-step > h3 { margin-top: 0; font-size: 1.1rem; }
 
 /* Long tables scroll inside their box, headers stay */
@@ -1007,19 +1005,19 @@ td .linkish:not([data-cmp-sel]), .opt-rank { font-family: var(--font-mono); }
 .cmp-import textarea { width: 100%; min-height: 96px; font-family: var(--font-mono); font-size: .8rem; }
 .cmp-import-line { margin-top: 2px; }
 
-/* Notes: a long explanation folded to its first sentence */
-details.notes { border: 1px solid var(--line); border-radius: var(--r-sm); background: color-mix(in srgb, var(--surface-2) 45%, transparent); min-width: 0; }
-details.notes > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px; font-size: .82rem; color: var(--muted); border-radius: var(--r-sm); }
-details.notes > summary::-webkit-details-marker { display: none; }
-details.notes > summary:hover { color: var(--fg); background: var(--surface-2); }
-details.notes > summary svg { flex: none; width: 16px; height: 16px; color: var(--accent); }
-details.notes > summary::after { content: "Show"; flex: none; margin-left: auto; padding-left: 8px; font-size: .74rem; font-weight: 600; color: var(--accent); }
-details.notes[open] > summary::after { content: "Hide"; }
-.notes-tag { flex: none; font-weight: 650; color: var(--fg); }
-.notes-peek { flex: 1 1 0; width: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-details.notes[open] .notes-peek { visibility: hidden; }
-details.notes > p { margin: 0; padding: 2px 12px 10px 34px; }
-details.notes > p + p { padding-top: 0; }
+/* (?) help: an explanation behind an icon by its heading, shown in a popover */
+.help-btn { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: 6px; padding: 0; border: 0; border-radius: 50%;
+  background: none; color: var(--faint); cursor: help; vertical-align: -4px; flex: none; }
+.help-btn svg { width: 17px; height: 17px; }
+.help-btn:hover, .help-btn:focus-visible, .help-btn[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); outline: none; }
+.help-corner { position: relative; }
+.help-btn.corner { position: absolute; top: 10px; right: 10px; margin: 0; z-index: 2; }
+.help-pop { position: fixed; z-index: 90; display: grid; gap: 8px; width: max-content; max-height: calc(100vh - 24px); overflow: auto; padding: 12px 14px;
+  background: var(--surface-3); border: 1px solid var(--line-strong); border-radius: var(--r); box-shadow: var(--shadow);
+  color: var(--fg); font-size: .84rem; font-weight: 400; line-height: 1.5; letter-spacing: 0; text-transform: none; text-align: left; }
+.help-pop[hidden] { display: none; }
+.help-pop > p { margin: 0; max-width: none; color: var(--fg) !important; opacity: .9; }
+.help-pop.tip { padding: 6px 10px; font-size: .8rem; font-weight: 550; }
 
 /* ===================== CM & decks pass 2: cup & team bar, deck cards, pinned Find ===================== */
 .cm-bar { gap: 10px; padding: 14px var(--pad); grid-template-columns: minmax(0, 1fr); }

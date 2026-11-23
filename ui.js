@@ -21,6 +21,7 @@
     menu: svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),
     sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
     moon: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+    lock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
     help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6M12 17h.01"/>'),
     gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   };
@@ -78,62 +79,191 @@
     root.document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
   }
 
-  // Long explanations fold into a Notes drawer that shows their first sentence, so a page leads
-  // with its controls and results. Only plain explanatory paragraphs fold: no action buttons or
-  // fields, nothing the app updates by id, no warning or bold status line, nothing already in a
-  // drawer. Neighbouring ones share a drawer. A drawer you open stays open across redraws.
-  const FOLD_MIN = 200;
+  // Long explanations move behind a (?) next to their section's heading (or in the card's
+  // corner when it has none), so a page leads with its controls and numbers. Hover or focus
+  // shows it, a click or tap keeps it open; Escape or a click elsewhere closes it. Only plain
+  // explanatory paragraphs move: p.mini of 120+ characters (or any p.explain), with no action
+  // buttons or fields, nothing the app updates by id, no warning or bold status line.
+  // Neighbouring ones, and every one under the same heading, share one (?).
+  const FOLD_MIN = 120;
   const isLong = (text) => String(text || "").trim().length >= FOLD_MIN;
-  function peekOf(text) {
-    const t = String(text || "").replace(/\s+/g, " ").trim();
-    const m = t.match(/^(.{12,150}?[.!?:])(?=\s|$)/);
-    return m ? m[1].replace(/:$/, "") : t.length > 120 ? t.slice(0, 117).replace(/\s+\S*$/, "") + "…" : t;
-  }
-  const NOT_IN = "details:not(.panel), table, summary, li, .notes, .dock, .settings, .topbar, .stepper";
+  const NOT_IN = "details:not(.panel):not(.deck-adv), table, summary, li, .help-pop, .dock, .settings, .topbar, .stepper";
   function foldable(p) {
-    if (!p || p.tagName !== "P" || p.classList.length !== 1 || !p.classList.contains("mini")) return false;
+    if (!p || p.tagName !== "P") return false;
+    const explain = p.classList.contains("explain");
+    if (!explain && !(p.classList.length === 1 && p.classList.contains("mini"))) return false;
     if (p.id || p.querySelector("[id], input, select, textarea, label, button:not(.linkish)")) return false;
-    if (!isLong(p.textContent) || p.closest(NOT_IN)) return false;
+    if ((!explain && !isLong(p.textContent)) || p.closest(NOT_IN)) return false;
+    if (explain) return true;
     let first = p.firstChild;
     while (first && first.nodeType === 3 && !first.textContent.trim()) first = first.nextSibling;
     return !(first && first.nodeType === 1 && /^(B|STRONG)$/.test(first.tagName));
   }
-  const openNotes = new Set();
-  const noteKey = (d) => ((root.document.body.dataset.page || "") + "|" + d.textContent.replace(/\s+/g, " ").trim().slice(0, 90));
+  const BOX = ".panel, details, section";
+  const boxOf = (el, scope) => (el && el.parentElement && el.parentElement.closest(BOX)) || scope;
+  // The heading a paragraph explains: the last heading before it in its own card.
+  function headingFor(p, scope) {
+    const box = boxOf(p, scope);
+    // A card can name the spot itself (data-help-anchor), e.g. a bar with no heading.
+    const spot = [...box.querySelectorAll("[data-help-anchor]")].find((x) => boxOf(x, scope) === box);
+    if (spot) return { box, heading: spot };
+    let best = null;
+    box.querySelectorAll("h2, h3, h4, summary").forEach((h) => {
+      if (h.closest(".help-pop")) return;
+      const own = h.tagName === "SUMMARY" ? h.parentElement === box : boxOf(h, scope) === box || (h.closest("summary") && h.closest("summary").parentElement === box);
+      if (own && (h.compareDocumentPosition(p) & 4)) best = h;
+    });
+    return { box, heading: best };
+  }
+  let helpSeq = 0;
+  // The (?) and its popover for a heading (or a card's corner), made once and shared.
+  function helpFor(heading, box) {
+    const d = root.document;
+    let btn = heading ? heading.querySelector(":scope > .help-btn") : box.querySelector(":scope > .help-btn.corner");
+    if (btn) return d.getElementById(btn.getAttribute("aria-controls"));
+    const id = "help-" + (++helpSeq);
+    btn = d.createElement("button");
+    btn.type = "button";
+    btn.className = "help-btn" + (heading ? "" : " corner");
+    btn.setAttribute("aria-label", "About this");
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-controls", id);
+    btn.innerHTML = ICON.help;
+    const pop = d.createElement("div");
+    pop.className = "help-pop";
+    pop.id = id;
+    pop.hidden = true;
+    pop.setAttribute("role", "note");
+    if (heading) {
+      heading.appendChild(btn);
+      // Outside a <summary> (and its closed <details>), so it can show and its links work.
+      const sum = heading.closest("summary");
+      const after = sum ? sum.parentElement : heading;
+      after.parentNode.insertBefore(pop, after.nextSibling);
+    } else {
+      box.classList.add("help-corner");
+      box.insertBefore(pop, box.firstChild);
+      box.insertBefore(btn, box.firstChild);
+    }
+    return pop;
+  }
   function tidy(scope) {
     if (!scope || !scope.querySelectorAll) return 0;
     let n = 0;
     const done = new Set();
-    scope.querySelectorAll("p.mini").forEach((p) => {
+    scope.querySelectorAll("p.mini, p.explain").forEach((p) => {
       if (done.has(p) || !foldable(p)) return;
       const group = [p];
       for (let x = p.nextElementSibling; x && foldable(x); x = x.nextElementSibling) group.push(x);
       group.forEach((x) => done.add(x));
-      const d = root.document.createElement("details");
-      d.className = "notes";
-      d.innerHTML = `<summary>${ICON.help}<span class="notes-tag">Notes</span><span class="notes-peek">${esc(peekOf(p.textContent))}</span></summary>`;
-      p.parentNode.insertBefore(d, p);
-      group.forEach((x) => d.appendChild(x));
-      if (openNotes.has(noteKey(d))) d.open = true;
+      const { box, heading } = headingFor(p, scope);
+      const pop = helpFor(heading, box);
+      group.forEach((x) => pop.appendChild(x));
       n++;
     });
     return n;
   }
-  // Folds what a page draws, as it draws it (before the browser paints).
+
+  // ---- The popover and tooltip: placed under (or over) what opened it, inside the screen ----
+  function place(anchor, pop) {
+    const d = root.document.documentElement, r = anchor.getBoundingClientRect();
+    const vw = d.clientWidth, vh = root.innerHeight;
+    pop.hidden = false;
+    const w = Math.min(pop.classList.contains("tip") ? 260 : 440, vw - 24);
+    pop.style.maxWidth = w + "px";
+    const pw = Math.min(w, pop.offsetWidth), ph = pop.offsetHeight;
+    pop.style.left = Math.round(Math.min(Math.max(12, r.left + r.width / 2 - pw / 2), vw - pw - 12)) + "px";
+    let top = r.bottom + 8;
+    if (top + ph > vh - 12 && r.top - 8 - ph >= 12) top = r.top - 8 - ph;
+    pop.style.top = Math.round(Math.max(12, top)) + "px";
+  }
+  let open = null, pinned = false, timer = 0, tipEl = null, tipFor = null;
+  const popOf = (btn) => root.document.getElementById(btn.getAttribute("aria-controls"));
+  function openHelp(btn, pin) {
+    const pop = popOf(btn);
+    if (!pop) return;
+    if (open && open.btn !== btn) closeHelp();
+    clearTimeout(timer);
+    place(btn, pop);
+    btn.setAttribute("aria-expanded", "true");
+    open = { btn, pop };
+    pinned = !!pin;
+  }
+  function closeHelp() {
+    clearTimeout(timer);
+    if (!open) return;
+    open.pop.hidden = true;
+    open.btn.setAttribute("aria-expanded", "false");
+    open = null; pinned = false;
+  }
+  function showTip(el) {
+    const d = root.document;
+    if (!tipEl) { tipEl = d.createElement("div"); tipEl.className = "help-pop tip"; tipEl.setAttribute("role", "tooltip"); tipEl.hidden = true; d.body.appendChild(tipEl); }
+    tipEl.textContent = el.dataset.tip;
+    tipFor = el;
+    place(el, tipEl);
+  }
+  const hideTip = () => { if (tipEl) tipEl.hidden = true; tipFor = null; };
+  const finePointer = () => !root.matchMedia || root.matchMedia("(hover: hover)").matches;
+  function initHelp() {
+    const d = root.document;
+    // Capture: a (?) click never reaches the page's own handlers (or toggles a <summary>).
+    d.addEventListener("click", (e) => {
+      const btn = e.target.closest && e.target.closest(".help-btn");
+      if (btn) {
+        e.preventDefault(); e.stopPropagation();
+        if (open && open.btn === btn && pinned) closeHelp(); else openHelp(btn, true);
+        return;
+      }
+      const tip = e.target.closest && e.target.closest('[data-tip][aria-disabled="true"]');
+      if (tip) { e.preventDefault(); e.stopPropagation(); showTip(tip); clearTimeout(timer); timer = setTimeout(hideTip, 2500); return; }
+      if (open && !open.pop.contains(e.target)) closeHelp();
+    }, true);
+    d.addEventListener("mouseover", (e) => {
+      if (!finePointer() || !e.target.closest) return;
+      const btn = e.target.closest(".help-btn");
+      if (btn && !pinned) { clearTimeout(timer); timer = setTimeout(() => openHelp(btn, false), 120); return; }
+      if (open && (open.pop.contains(e.target) || open.btn.contains(e.target))) { clearTimeout(timer); return; }
+      const tip = e.target.closest("[data-tip]");
+      if (tip && tip !== tipFor) showTip(tip);
+    });
+    d.addEventListener("mouseout", (e) => {
+      // Touch screens have no hover: a tapped tip times out instead.
+      if (!finePointer() || !e.target.closest) return;
+      const to = e.relatedTarget;
+      if (open && !pinned && (open.btn.contains(e.target) || open.pop.contains(e.target)) && !(to && (open.btn.contains(to) || open.pop.contains(to)))) { clearTimeout(timer); timer = setTimeout(closeHelp, 180); }
+      const tip = e.target.closest("[data-tip]");
+      if (tip && !(to && tip.contains(to))) hideTip();
+    });
+    d.addEventListener("focusin", (e) => {
+      const btn = e.target.closest && e.target.closest(".help-btn");
+      if (btn && !(open && open.btn === btn)) openHelp(btn, false);
+      const tip = e.target.closest && e.target.closest("[data-tip]");
+      if (tip) showTip(tip);
+    });
+    d.addEventListener("focusout", (e) => {
+      const to = e.relatedTarget;
+      if (open && !pinned && open.btn === e.target && !(to && open.pop.contains(to))) closeHelp();
+      if (tipFor === e.target) hideTip();
+    });
+    d.addEventListener("keydown", (e) => { if (e.key === "Escape") { if (open) open.btn.focus(); closeHelp(); hideTip(); } });
+    const follow = () => {
+      if (open) { if (!open.btn.isConnected || !open.btn.getClientRects().length) closeHelp(); else place(open.btn, open.pop); }
+      if (tipFor) { if (!tipFor.isConnected || !tipFor.getClientRects().length) hideTip(); else place(tipFor, tipEl); }
+    };
+    root.addEventListener("scroll", follow, { passive: true, capture: true });
+    root.addEventListener("resize", follow);
+  }
+  // Moves what a page draws behind its (?)s, as it draws it (before the browser paints).
   function watchNotes(el) {
     if (!el || !root.MutationObserver) return;
-    const obs = new root.MutationObserver(() => { tidy(el); obs.takeRecords(); });
+    const obs = new root.MutationObserver(() => { tidy(el); obs.takeRecords(); if (open && !open.btn.isConnected) { open = null; pinned = false; } });
     obs.observe(el, { childList: true, subtree: true });
     tidy(el);
-    root.document.addEventListener("toggle", (e) => {
-      const d = e.target;
-      if (!d || !d.classList || !d.classList.contains("notes") || !d.isConnected) return;
-      const k = noteKey(d);
-      if (d.open) openNotes.add(k); else openNotes.delete(k);
-    }, true);
+    initHelp();
   }
 
-  const api = { NAV, ICON, navHTML, label, init, setActive, closeDrawer, toggleNav, toggleTheme, FOLD_MIN, isLong, peekOf, foldable, tidy, watchNotes };
+  const api = { NAV, ICON, navHTML, label, init, setActive, closeDrawer, toggleNav, toggleTheme, FOLD_MIN, isLong, foldable, tidy, watchNotes, closeHelp };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaUI = api;
 })(typeof window !== "undefined" ? window : globalThis);

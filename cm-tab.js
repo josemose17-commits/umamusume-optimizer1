@@ -513,15 +513,15 @@
         ["training", "Train her", () => trainHTML(c, a, d, r), "Find Parent 1 first"], ["p2", "Parent 2", () => p2HTML(c, a, d, r), "Find Parent 1 first"],
         ["check", "Her family", () => checkHTML(r), "Find Parent 1 first"], ["vets", "Your veterans", () => vetsHTML(r)]];
       const locked = (s) => !!(s[3] && !(r && r.p1));
+      const LOCK = (root.UmaUI && root.UmaUI.ICON.lock) || "&#128274;";
       const saved = ctx.parentsStep && ctx.parentsStep(), on = STEPS.find((s) => s[0] === saved && !locked(s)) ? saved : "gaps";
-      const steps = a && planned ? `<nav class="stepper" aria-label="Parent steps">${STEPS.map((s, i) => `<button type="button" class="step${locked(s) ? " locked" : ""}" data-step-go="${s[0]}" aria-current="${s[0] === on ? "step" : "false"}"${locked(s) ? ` disabled title="${s[3]}"` : ""}><span class="step-n">${i + 1}</span><span class="step-l">${s[1]}</span>${locked(s) ? `<span class="step-why">${s[3]}</span>` : ""}</button>`).join("")}</nav>`
+      const steps = a && planned ? `<nav class="stepper" aria-label="Parent steps">${STEPS.map((s, i) => `<button type="button" class="step${locked(s) ? " locked" : ""}" data-step-go="${s[0]}" aria-current="${s[0] === on ? "step" : "false"}"${locked(s) ? ` aria-disabled="true" data-tip="${s[3]}" aria-label="${s[1]}: ${s[3].toLowerCase()}"` : ""}><span class="step-n">${i + 1}</span><span class="step-l">${s[1]}</span>${locked(s) ? `<span class="step-lock">${LOCK}</span>` : ""}</button>`).join("")}</nav>`
         + STEPS.map((s, i) => `<section class="panel cmp-step" id="cm-${s[0]}" data-step-pane="${s[0]}"${s[0] === on ? "" : " hidden"}><h3>${i + 1} · ${s[1]}</h3>${locked(s) ? `<p class="mini">${s[3]}.</p>` : s[2]()}</section>`).join("") : "";
       body.innerHTML = `<div class="cm cmp">
         <section class="panel"><h2>Parents${a ? " for " + esc(tName(trainee(a.tid))) : ""}</h2>
           <p class="mini">${esc(p.name)} · ${a ? STYLE_LABEL[styleOf(a)] : "no ace yet"}. Fill her gaps with blue sparks, make Parent 1 with a borrowed grandparent, borrow Parent 2, reach ${MIN_AFFINITY}+ affinity.</p>
           <p class="mini">${r && r.x.skillPlan ? `White targets follow the ace's source-checked purchases · ${r.x.skillPlan.model}${r.jointPasses ? ` · ${r.jointPasses} planning passes` : ""}. ${r.jointConverged===false ? "Targets shifted in the final check; find them again to compare another pass." : ""}` : "Find parents checks the ace's skill sources, then plans the white hints her purchases need."}</p>
           <div class="row-wrap cmp-chips" aria-label="Your team">${aces(c).filter((x) => trainee(x.tid)).map((x) => `<button type="button" class="chip${a && x.tid === a.tid ? " active" : ""}" data-cmp-sel="${x.tid}" aria-pressed="${!!a && x.tid === a.tid}">${esc(tName(trainee(x.tid)))}</button>`).join("")}<button type="button" class="linkish" data-goto-tab="cm">${a ? "Team and decks in CM & decks" : "Pick your team in CM & decks"} →</button></div>
-          ${importHTML()}
         </section>
         ${steps}${skipped}
         ${ctx.generalHTML ? ctx.generalHTML() : ""}

@@ -792,7 +792,7 @@
       const subBtn = e.target.closest("[data-cm-sub]");
       if (subBtn) { setCmSub(subBtn.dataset.cmSub); return; }
       const stepBtn = e.target.closest("[data-step-go]");
-      if (stepBtn) { showStep(stepBtn.dataset.stepGo); return; }
+      if (stepBtn) { if (stepBtn.getAttribute("aria-disabled") !== "true") showStep(stepBtn.dataset.stepGo); return; }
       if (state.tab === "parents" && gp() && gp().click(e)) return;
       if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
@@ -3322,7 +3322,7 @@
       <div class="cm-bar-row cm-bar-cup">
         ${t.cup}
         <span class="chip">${p.kind === "loh" ? "League of Heroes " + p.no : "Champions Meeting #" + p.no}</span>
-        <span class="chip cm-${stCls}">${stText}</span>
+        <span class="chip cm-${stCls}">${stText}</span><span class="cm-bar-help" data-help-anchor></span>
       </div>
       <div class="cm-facts">
         <span class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + esc(p.course.layout) + ")" : ""} · ${p.course.dist}${courseBonusText(p)}</span>
@@ -3338,7 +3338,7 @@
       ${c && c.style === "Nige" ? `<label class="field cm-bar-contest"><span>Front Runners in this cup</span><select data-cm-contest="${esc(p.id)}"><option value="0"${contestShare(p.id) ? "" : " selected"}>She leads alone</option>${CONTEST_SHARES.map((v) => `<option value="${v}"${contestShare(p.id) === v ? " selected" : ""}>Fight for the lead: someone ahead ${Math.round(v * 100)}% of the race</option>`).join("")}</select></label>` : ""}
       ${c && RW && RW.is(c.style) ? `<p class="mini">${runawayNote(p, c)}</p>` : ""}
       ${t.extra}
-      <p class="mini cm-sim-note">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
+      <p class="mini explain cm-sim-note">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
     </section>`;
   }
 
