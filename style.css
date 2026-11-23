@@ -1070,3 +1070,18 @@ details.deck-adv > summary .mini b { color: var(--warn); font-weight: 600; }
 .cmp-maker > h3 .mini { font-weight: 400; color: var(--muted); }
 /* Dropdowns in CM & decks, Parents and the card lists keep their arrow, with room for it. */
 .cm select, .db-controls select, .coll-body select { padding-right: 28px; }
+
+/* Deck makeups compared (Find my best deck) */
+.mk-win { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.mk-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.mk { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px;
+  background: var(--surface-2); font-size: .76rem; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mk .tydot { width: 8px; height: 8px; }
+.makeups { display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr); }
+.makeups h4 { margin: 0; }
+.mk-table td { vertical-align: top; }
+.mk-table td.mini { min-width: 220px; }
+.mk-table tr.cur td { background: var(--accent-soft); }
+.mk-rest > summary { font-weight: 600; }
+.run-bar-status { font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mk-table td.num, .mk-table td .btn { white-space: nowrap; }

@@ -961,11 +961,13 @@
   const HELD_OUT_DECKS = 5, HELD_OUT_RUNS = 32;
   const FIT_PER_TYPE = { friend: 2, group: 2 };
   const FIT_TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
-  function targetSearch(opts, sim, start, pool, borrowPool) {
+  // How Find my best deck scores a deck on simulated careers: how close she ends to the targets
+  // (or her lengths on the course), the deck's skills and must-haves, and the share reaching
+  // the rank goal first when there is one. targetSearch and makeupSweep share it, so a makeup is
+  // scored exactly as one search scores a deck. ctxOf(runs, seed) makes careers to score on.
+  function fitScorer(opts, sim) {
     const Tr = root.UmaTiers || (typeof require !== "undefined" ? require("./tiers.js") : null);
-    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
-    const comp = opts.comp || {};
-    const locked = new Set(opts.locked || []);
+    const ctxOf = (runs, seed) => buildCtx(Object.assign({}, sim, seed != null ? { seed } : {}, { runs, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
     // Parent decks: the skills are the point, so a swap may cost at most a share of the start
     // deck's skill score, set by "Stats still count" (A little 4%, Some 10%, Half 20%, Fully
     // 40%); within that, the closest stats win. skillWeight is the racing slider.
@@ -976,8 +978,6 @@
     const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
     const Ra = ss ? root.UmaRating || (typeof require !== "undefined" ? require("./rating.js") : null) : null;
     let floor = -Infinity;
-    const cache = new Map();
-    const testedDecks = new Map();
     const evaluate = (deck, c) => {
       const s = simulate(c, deck.map((x) => ({ card: D.card(x.id), lb: x.lb })));
       const fit = deckFit(c, s);
@@ -995,6 +995,27 @@
       return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating, ssShare, scoring: fit.scoring, raceL: fit.L, fitCareers: fit.careers });
     };
     const better = (a, b) => ss && a.ssShare !== b.ssShare ? a.ssShare > b.ssShare : a.value > b.value + 1e-6;
+    // Parent decks: the floor comes from the deck the search starts from.
+    const startFrom = (deck) => { if (giveUp != null && !ss) floor = (1 - giveUp) * Tr.deckSkills(opts, deck).value; };
+    // A runner-up within twice the paired standard error of the winner (same careers) is a close call.
+    const closeCall = (a, b) => {
+      const n = Math.min(a.fitCareers.length, b.fitCareers.length);
+      const d = Array.from({ length: n }, (_, i) => a.fitCareers[i] - b.fitCareers[i]);
+      const mean = d.reduce((x, y) => x + y, 0) / Math.max(1, n);
+      const se = n > 1 ? Math.sqrt(d.reduce((x, y) => x + (y - mean) * (y - mean), 0) / (n - 1) / n) : Infinity;
+      const gap = a.value - b.value;
+      return !(ss && a.ssShare !== b.ssShare) && gap < 2 * se ? { gap, se } : null;
+    };
+    return { Tr, ctxOf, evaluate, better, startFrom, closeCall, ss };
+  }
+
+  function targetSearch(opts, sim, start, pool, borrowPool) {
+    const sc = fitScorer(opts, sim), Tr = sc.Tr, evaluate = sc.evaluate, better = sc.better, ss = sc.ss;
+    const ctx = sc.ctxOf(FIT_RUNS);
+    const comp = opts.comp || {};
+    const locked = new Set(opts.locked || []);
+    const cache = new Map();
+    const testedDecks = new Map();
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
       if (!cache.has(k)) {
@@ -1004,7 +1025,7 @@
       return cache.get(k);
     };
     let deck = start.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
-    if (giveUp != null && !ss) floor = (1 - giveUp) * Tr.deckSkills(opts, deck).value;
+    sc.startFrom(deck);
     let cur = score(deck);
     const nOf = (cards, t) => cards.filter((x) => D.card(x.id).ty === t).length;
     const cap = opts.parent ? 2 : 1;
@@ -1038,7 +1059,7 @@
     }
     // The start and final decks, rescored with more careers for the readout.
     function result() {
-      const full = buildCtx(Object.assign({}, sim, { runs: 16, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
+      const full = sc.ctxOf(16);
       // Validate every candidate actually evaluated by the cheap search, not just its winner.
       const finalists = new Map(testedDecks);
       const put = d => finalists.set(d.map(x => x.id + ":" + x.lb).sort().join(","), d);
@@ -1052,7 +1073,7 @@
       const keyOf = (d) => d.map((x) => x.id + ":" + x.lb).sort().join(",");
       const top = ranked.slice(0, HELD_OUT_DECKS);
       if (!top.some((x) => keyOf(x.cards) === startKey)) top.push(ranked.find((x) => keyOf(x.cards) === startKey));
-      const held = buildCtx(Object.assign({}, sim, { runs: HELD_OUT_RUNS, seed: ((sim.seed || 12345) ^ 0x5bd1e995) >>> 0, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
+      const held = sc.ctxOf(HELD_OUT_RUNS, ((sim.seed || 12345) ^ 0x5bd1e995) >>> 0);
       const checked = top.filter(Boolean).map((x) => ({ cards: x.cards, r: evaluate(x.cards, held) }));
       checked.sort((a, b) => (better(a.r, b.r) ? -1 : better(b.r, a.r) ? 1 : 0));
       const winner = checked[0].cards;
@@ -1060,12 +1081,8 @@
       const before = (checked.find((x) => keyOf(x.cards) === startKey) || { r: evaluate(start, held) }).r;
       let close = null;
       if (checked[1]) {
-        const a = checked[0].r, b = checked[1].r, n = Math.min(a.fitCareers.length, b.fitCareers.length);
-        const d = Array.from({ length: n }, (_, i) => a.fitCareers[i] - b.fitCareers[i]);
-        const mean = d.reduce((x, y) => x + y, 0) / Math.max(1, n);
-        const se = n > 1 ? Math.sqrt(d.reduce((x, y) => x + (y - mean) * (y - mean), 0) / (n - 1) / n) : Infinity;
-        const gap = a.value - b.value;
-        if (!(ss && a.ssShare !== b.ssShare) && gap < 2 * se) close = { cards: checked[1].cards, gap, se, est: b };
+        const cc = sc.closeCall(checked[0].r, checked[1].r);
+        if (cc) close = { cards: checked[1].cards, gap: cc.gap, se: cc.se, est: checked[1].r };
       }
       const finalSwaps = [];
       const removed = start.filter(x => !winner.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
@@ -1076,6 +1093,121 @@
         validation: { runs:16, candidates:finalists.size, heldOut: { runs: HELD_OUT_RUNS, decks: checked.length }, method:"rescore-all-tested, best few on held-out careers" } };
     }
     return { next, result, progress: () => (slots.length ? Math.min(1, step / (slots.length * 2)) : 1) };
+  }
+
+  // ---- Every deck makeup: the best deck for each, then the best makeup ----
+  // Every way to split the 6 cards (the borrowed one included) over the 7 types that your cards
+  // could fill: at most o.max[type] of a type (Friend and Group up to 2 by default), each type
+  // fixed in o.fixed kept, at least the must-include cards' types, and no more cards of a type
+  // than you have characters for (one more for the borrowed slot when its pool has that type).
+  // o: { pool, borrowPool, borrow, locked: [card ids], fixed: { type: n }, max, trainee }.
+  const MAKEUP_MAX = { friend: 2, group: 2 };
+  function makeupList(o) {
+    const tr = o.trainee ? D.trainee(o.trainee) : null, tchar = tr ? tr.cid : null;
+    const chars = (list) => { const by = {}; (list || []).forEach((x) => { const c = D.card(x.id); if (!c || c.cid === tchar) return; (by[c.ty] = by[c.ty] || new Set()).add(c.cid); }); return by; };
+    const own = chars(o.pool), lend = chars(o.borrow ? o.borrowPool : []);
+    const borrowSlot = o.borrow && (o.borrowPool || []).length ? 1 : 0;
+    const fixed = o.fixed || {}, max = Object.assign({}, MAKEUP_MAX, o.max || {});
+    const least = {};
+    (o.locked || []).forEach((id) => { const c = D.card(id); if (c) least[c.ty] = (least[c.ty] || 0) + 1; });
+    const out = [];
+    const walk = (i, left, m) => {
+      const t = FIT_TYPES[i];
+      if (i === FIT_TYPES.length - 1) { m[t] = left; check(Object.assign({}, m)); return; }
+      for (let n = 0; n <= left; n++) { m[t] = n; walk(i + 1, left - n, m); }
+    };
+    const check = (m) => {
+      let fromBorrow = 0;
+      for (const t of FIT_TYPES) {
+        if (fixed[t] != null && m[t] !== +fixed[t]) return;
+        if (max[t] != null && m[t] > max[t]) return;
+        if (m[t] < (least[t] || 0)) return;
+        const have = own[t] ? own[t].size : 0;
+        if (m[t] > have) {
+          if (m[t] > have + 1 || !(lend[t] && lend[t].size)) return;
+          fromBorrow++;
+        }
+      }
+      if (fromBorrow > borrowSlot) return;
+      out.push(m);
+    };
+    walk(0, 6, {});
+    return out;
+  }
+  // A makeup as text: "2 speed · 1 stamina · 1 power · 1 wit · 1 friend".
+  const makeupKey = (m) => FIT_TYPES.filter((t) => m[t]).map((t) => m[t] + " " + t).join(" · ");
+
+  // Runs Find my best deck over every makeup: (1) Euophrys' pick in each makeup (one shared
+  // ranking cache), scored on the same FIT_RUNS careers as the search; (2) the o.finalists best
+  // get the full targetSearch with their makeup held; (3) their winners are raced again on fresh
+  // careers (a third seed, HELD_OUT_RUNS) and the best is the makeup to use; a runner-up within
+  // the noise is a close call. A stepper like targetSearch: next() does a little, result() ends it.
+  const SWEEP_FINALISTS = 5;
+  const SWEEP_COST = 40; // a finalist's full search, in quick checks (for the progress bar)
+  function makeupSweep(opts, sim, pool, borrowPool, o) {
+    const sc = fitScorer(opts, sim);
+    const quickCtx = sc.ctxOf(FIT_RUNS);
+    const list = (o && o.makeups) || [];
+    const K = (o && o.finalists) || SWEEP_FINALISTS;
+    const rankCache = new Map();
+    const rows = [];
+    let i = 0, skipped = 0, fin = null, fi = 0, search = null;
+    const slim = (r) => ({ value: r.value, stats: r.stats, sp: r.sp, raceL: r.raceL, short: r.short, skill: r.skill, ssShare: r.ssShare, rating: r.rating, scoring: r.scoring });
+    function next() {
+      if (i < list.length) {
+        const m = list[i++];
+        try {
+          const deck = sc.Tr.pickDeck(Object.assign({}, opts, { comp: m, rankCache }), pool, borrowPool).map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
+          if (deck.length === 6) rows.push({ comp: m, start: deck, quick: slim(sc.evaluate(deck, quickCtx)) });
+          else skipped++;
+        } catch (err) { skipped++; }
+        return true;
+      }
+      if (!fin) {
+        if (!rows.length) throw new Error("None of the deck makeups could be filled with these cards. Mark more owned cards, or allow a borrowed card.");
+        rows.sort((a, b) => (sc.better(a.quick, b.quick) ? -1 : sc.better(b.quick, a.quick) ? 1 : 0));
+        fin = rows.slice(0, K);
+        return true;
+      }
+      if (fi >= fin.length) return false;
+      const f = fin[fi];
+      if (!search) search = targetSearch(Object.assign({}, opts, { comp: f.comp }), sim, f.start, pool, borrowPool);
+      if (search.next()) return true;
+      f.fit = search.result();
+      search = null;
+      fi++;
+      return fi < fin.length;
+    }
+    const total = () => list.length + K * SWEEP_COST;
+    function progress() {
+      const done = i + fi * SWEEP_COST + (search ? search.progress() * SWEEP_COST : 0);
+      return Math.min(1, done / Math.max(1, total()));
+    }
+    // What the page shows while it runs.
+    function status() {
+      if (i < list.length || !fin) return `Makeup ${Math.min(i + 1, list.length)} of ${list.length}`;
+      return `Best deck for makeup ${Math.min(fi + 1, fin.length)} of ${fin.length}`;
+    }
+    function result() {
+      const fresh = sc.ctxOf(HELD_OUT_RUNS, ((sim.seed || 12345) ^ 0x2c1b3c6d) >>> 0);
+      const checked = fin.filter((f) => f.fit).map((f) => ({ f, r: sc.evaluate(f.fit.cards, fresh) }));
+      checked.sort((a, b) => (sc.better(a.r, b.r) ? -1 : sc.better(b.r, a.r) ? 1 : 0));
+      const win = checked[0];
+      const cc = checked[1] ? sc.closeCall(win.r, checked[1].r) : null;
+      const best = rows[0].quick;
+      const table = checked.map((x, k) => ({ comp: x.f.comp, key: makeupKey(x.f.comp), cards: x.f.fit.cards, finalist: k, check: slim(x.r), quick: x.f.quick, gap: x.r.value - win.r.value }))
+        .concat(rows.slice(fin.length).map((x) => ({ comp: x.comp, key: makeupKey(x.comp), cards: x.start, finalist: null, quick: x.quick, gap: x.quick.value - best.value })));
+      const fit = Object.assign({}, win.f.fit);
+      if (cc) fit.close = { cards: checked[1].f.fit.cards, gap: cc.gap, se: cc.se, est: checked[1].r, makeup: makeupKey(checked[1].f.comp) };
+      fit.makeups = { rows: table, tried: list.length, filled: rows.length, skipped, finalists: checked.length, winner: makeupKey(win.f.comp),
+        runs: { quick: FIT_RUNS, final: HELD_OUT_RUNS }, scoring: win.r.scoring };
+      // Each finalist's own search result, for "Use this deck".
+      const finals = checked.map((x) => Object.assign({}, x.f.fit, { makeups: fit.makeups, makeupComp: x.f.comp }));
+      fit.makeupComp = win.f.comp;
+      finals[0] = fit;
+      return { fit, comp: win.f.comp, finals };
+    }
+    return { next, result, progress, status, count: () => list.length };
   }
 
   // Paired, held-out seed checks, separate from the seeds used to search decks.
@@ -1227,7 +1359,7 @@
     };
   }
 
-  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, stepL, onCurve, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { makeupList, makeupKey, makeupSweep, fitScorer, MAKEUP_MAX, SWEEP_FINALISTS, grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, stepL, onCurve, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

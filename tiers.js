@@ -251,7 +251,22 @@
   // that one, and so on, keeping to the deck makeup (comp: { type: count }), then retry each
   // slot with the others fixed until nothing improves. pool/borrowPool: [{id, lb}].
   function buildDeck(opts, pool, borrowPool) {
+    return describeDeck(opts, pickDeck(opts, pool, borrowPool), pool, borrowPool);
+  }
+  // The cards buildDeck picks, without the readout. opts.rankCache (a Map), when given, keeps
+  // each ranking for reuse: a card's score depends on the type and the cards already in the
+  // deck, never on the makeup, so a run over many makeups (optimizer.js makeupSweep) shares
+  // most of its rankings. One cache per pool, borrow pool and settings.
+  function pickDeck(opts, pool, borrowPool) {
     const comp = opts.comp || {};
+    const memo = opts.rankCache || null;
+    const ranked = (t, deck, cands, tag) => {
+      if (!memo) return rank(opts, t, deck, cands);
+      const k = t + "|" + tag + "|" + deck.map((c) => c.id + ":" + c.lb).sort().join(",");
+      let r = memo.get(k);
+      if (!r) { r = rank(opts, t, deck, cands); memo.set(k, r); }
+      return r;
+    };
     const types = Object.keys(TABS);
     const requested = [...new Set(opts.locked || [])];
     const locked = requested.map((id) => pool.find((c) => c.id === id)).filter(Boolean);
@@ -277,7 +292,7 @@
       openTypes(deck).forEach((t) => {
         const cands = from.filter((c) => D.card(c.id).ty === t);
         if (!cands.length) return;
-        const r = rank(opts, t, deck, cands)[0];
+        const r = ranked(t, deck, cands, from === pool ? "P" : "B")[0];
         if (r && (!top || r.score > top.score)) top = r;
       });
       return top;
@@ -304,7 +319,7 @@
         if (lockedIds.has(c.id)) return;
         const rest = deck.filter((_, j) => j !== i);
         const pick = best(rest, c.borrowed ? borrowPool : pool);
-        const cur = rank(opts, D.card(c.id).ty, rest, [c])[0];
+        const cur = ranked(D.card(c.id).ty, rest, [c], "c" + c.id + ":" + c.lb)[0];
         if (pick && cur && pick.score > cur.score + 1e-6 && (pick.id !== c.id || pick.lb !== c.lb)) {
           deck[i] = { id: pick.id, lb: pick.lb, borrowed: c.borrowed, score: pick.score, base: pick.base, skill: pick.skill };
           changed = true;
@@ -312,7 +327,7 @@
       });
       if (!changed) break;
     }
-    return describeDeck(opts, deck, pool, borrowPool);
+    return deck;
   }
 
   // A finished deck as the page shows it: each card's value with the other five fixed and the
@@ -389,7 +404,7 @@
   }
   const hasScenario = (key) => !!(EU && EU.SCENARIOS_BY_SERVER && EU.SCENARIOS_BY_SERVER.gl[key]);
 
-  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, addScenario, hasScenario, rank, buildDeck, describeDeck, deckSkills, deckOffers, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };
+  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, addScenario, hasScenario, rank, buildDeck, pickDeck, describeDeck, deckSkills, deckOffers, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN, IT_INITIAL, IT_SP, IT_MANUAL, itEntry };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTiers = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
