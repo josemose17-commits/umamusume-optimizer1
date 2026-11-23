@@ -305,7 +305,8 @@
       if (L) { it.required = L.level || 2; it.most = it.required; it.free = +L.free || it.free || 0; it.locked = true; it.target = L.target || null; }
       return it;
     };
-    B.support.filter((b) => later(b, "s")).forEach((b) => {
+    // "Debut 10 Select 2" banners (b.select) are for new and returning players only: left out.
+    B.support.filter((b) => later(b, "s") && !b.select).forEach((b) => {
       const feat = [];
       b.pick.forEach(([id, rate]) => {
         if (!card(id)) return;
