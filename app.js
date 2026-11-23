@@ -198,6 +198,9 @@
   let resetArmed = null;
   // The turn-by-turn coach can be folded away (say, while using the deck tabs); it stays as you left it.
   const COACH_KEY = "uma-coach-open-v1";
+  // The shell (ui.js): the sidebar's pages. Import & backup joins My Data with its page.
+  const UI = window.UmaUI || null;
+  const PAGES = ["coach", "plan", "log", "cm", "parents", "skillopt", "pulls", "guide", "all", "tiers", "cards", "trainees"];
   function coachOpen() { try { return localStorage.getItem(COACH_KEY) !== "0"; } catch (e) { return true; } }
 
   function save() {
@@ -213,19 +216,17 @@
 
   function shell() {
     document.getElementById("app").innerHTML = `
-      <header class="masthead">
+      <header class="topbar">
+        <button type="button" class="btn ghost square" id="navToggle" aria-label="Menu" title="Menu">${UI ? UI.ICON.menu : "&#9776;"}</button>
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
-          <div>
-            <h1>Uma Turn Coach</h1>
-            <p class="sub">Enter what this turn shows. The coach picks the best action and explains why.</p>
-          </div>
+          <h1>Uma Turn Coach</h1>
         </div>
         <div class="controls">
-          <label class="field grow"><span>Scenario</span><select id="scenario"></select></label>
-          <label class="field"><span>Build</span><select id="build"></select></label>
+          <label class="field top-field"><span>Scenario</span><select id="scenario" aria-label="Scenario"></select></label>
+          <label class="field top-field"><span>Build</span><select id="build" aria-label="Build"></select></label>
           <details class="settings" id="settings">
-            <summary class="btn ghost">Settings</summary>
+            <summary class="btn ghost" title="Settings">${UI ? UI.ICON.gear : ""}<span class="hide-sm">Settings</span></summary>
             <div class="settings-body">
               <label class="field"><span>Max failure you accept <b id="riskOut"></b></span><input id="risk" type="range" min="0" max="40" step="1"></label>
               <label class="field"><span>Deck race bonus %</span><input id="raceBonus" type="number" inputmode="numeric" min="0" max="100"></label>
@@ -235,12 +236,16 @@
               <p class="mini" id="calibNote"></p>
             </div>
           </details>
-          <button type="button" class="btn ghost" id="newCareer">New career</button>
+          <button type="button" class="btn" id="newCareer">New career</button>
+          <button type="button" class="btn ghost square" id="themeToggle" aria-label="Theme"></button>
         </div>
       </header>
+      <nav class="sidebar" id="sidebar" aria-label="Pages">${UI ? UI.navHTML(PAGES) : ""}</nav>
+      <div class="scrim" id="scrim"></div>
+      <div class="workspace" id="workspace">
 
-      <details class="coach" id="coachPanel"${coachOpen() ? " open" : ""}>
-        <summary><h2>Turn-by-turn coach</h2><span class="mini" id="coachSummary"></span></summary>
+      <section class="coach page" id="coachPanel">
+        <header class="page-head"><h2>Turn-by-turn coach</h2><p class="sub">Enter what this turn shows. The coach picks the best action and explains why.</p><span class="mini" id="coachSummary" hidden></span></header>
         <div class="coach-body">
       <section class="turnbar" aria-label="Career turns">
         <div class="turn-head">
@@ -327,9 +332,9 @@
         </aside>
       </main>
         </div>
-      </details>
+      </section>
 
-      <nav class="tabs" role="tablist">
+      <nav class="tabs" role="tablist" hidden>
         <button type="button" role="tab" data-tab="plan">Turn plan</button>
         <button type="button" role="tab" data-tab="log">Career log</button>
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
@@ -344,12 +349,11 @@
       </nav>
       <section id="tabBody" class="tab-body"></section>
       <footer class="foot">Scenario notes are compiled from JP and Global guides as of October 2026 (Global after the July 2026 rebalance). Turns marked "approx." can shift, so the in-game goal list always wins. Scores are estimates: 100 means a typical training for this point in the career. Card, trainee and CM data from <a href="https://gametora.com/umamusume" target="_blank" rel="noopener">GameTora</a>${HAS_DATA ? " (built " + D.DATA.meta.built + ")" : ""}. Skill length gains from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>. Fan-made tool, not affiliated with Cygames.</footer>
+      </div>
       <div class="dock" id="dock"><div class="dock-text" id="dockText"></div><button type="button" class="btn" id="dockDone">Done ▶</button></div>
     `;
 
-    $("#coachPanel").addEventListener("toggle", (e) => {
-      try { localStorage.setItem(COACH_KEY, e.target.open ? "1" : "0"); } catch (err) { /* ignore */ }
-    });
+    if (UI) UI.init();
     const sel = $("#scenario");
     const groups = [["global", "On Global now"], ["global-soon", "Coming to Global next"], ["jp-current", "JP latest"], ["jp", "JP only (future Global)"], ["announced", "Announced"]];
     sel.innerHTML = groups.map(([st, lab]) => {
@@ -781,7 +785,7 @@
       }
     });
 
-    document.querySelector(".tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); } });
+    document.querySelector("#sidebar").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); if (UI) UI.closeDrawer(); window.scrollTo({ top: 0 }); } });
     $("#tabBody").addEventListener("click", (e) => {
       if (state.tab === "parents" && gp() && gp().click(e)) return;
       if (state.tab === "parents" && parents() && parents().click(e)) return;
@@ -798,7 +802,7 @@
         else window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
-      const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
+      const t = e.target.closest("[data-goto]"); if (t) { state.tab = "coach"; setTurn(+t.dataset.goto); renderTab(); window.scrollTo({ top: 0, behavior: "smooth" }); }
       const s = e.target.closest("[data-pick]"); if (s) { sel.value = s.dataset.pick; sel.dispatchEvent(new Event("change")); state.tab = "guide"; save(); renderTab(); }
       if (e.target.closest("[data-undo]")) undoTurn();
       if (e.target.closest("#ownAddBtn")) {
@@ -954,6 +958,7 @@
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
       if (tag === "input" || tag === "select" || tag === "textarea" || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (state.tab !== "coach") return;
       if (e.key === "ArrowLeft") { setTurn(state.turn - 1); e.preventDefault(); }
       if (e.key === "ArrowRight") { setTurn(state.turn + 1); e.preventDefault(); }
     });
@@ -5458,8 +5463,13 @@
   function renderTab() {
     if (HAS_DATA && P && W) W.migrate(state, workflowOptions());
     const sc = scenario();
-    $$(".tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
+    // The pages (ui.js sidebar): the coach is its own page, kept in the document and shown here.
+    if (!PAGES.includes(state.tab)) state.tab = "coach";
+    if (UI) UI.setActive(state.tab);
+    $("#coachPanel").hidden = state.tab !== "coach";
     const body = $("#tabBody");
+    body.hidden = state.tab === "coach";
+    if (state.tab === "coach") { body.innerHTML = ""; return; }
     if (state.tab === "tiers" && HAS_DATA) {
       renderTiers();
       return;
