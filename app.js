@@ -3613,7 +3613,7 @@
       // Whether a cup and style has full-field skill values (data/field-skills.js).
       fieldValues: (pid, style) => !!fieldOf(pid, style),
       pullTeam: (p) => {
-        const PV = window.UmaPullValues, g = PV && PV.groupOf(p), teams = PV ? PV.effectiveTeams((state.pull && state.pull.teams) || {}, pullKinds(), (id) => myUmas().has(id)) : {};
+        const PV = window.UmaPullValues, g = PV && PV.groupOf(p), teams = PV ? PV.effectiveTeams((state.pull && state.pull.teams) || {}, pullKinds(), null, pullMetas()) : {};
         if (!g) return [];
         const list = teams[g] || [], mine = myUmas(), UV = window.UmaUmaValues || null;
         const core = PV.teamPick(p, list, (id) => mine.has(id), UV, D);
@@ -3716,8 +3716,10 @@
   // Each track's team kind (Pull planner): "team" or "meta"; saves from before v4 take the new
   // default (Medium & Long a team, the others one meta uma).
   // The running styles of the teams you plan parents for (Medium & Long by default), in team order.
-  const parentStyles = () => { const PV = window.UmaPullValues; if (!PV) return []; const teams = PV.effectiveTeams((state.pull && state.pull.teams) || {}, pullKinds()); return [...new Set([].concat(...PV.parentGroupsOf(pullKinds()).map((g) => (teams[g] || []).filter((m) => m && m.id && m.style).map((m) => m.style))))]; };
-  const pullKinds = () => { const p = state.pull || {}, PV = window.UmaPullValues; return p.teamsV >= 4 && p.kinds ? p.kinds : PV ? PV.KINDS : {}; };
+  const parentStyles = () => { const PV = window.UmaPullValues; if (!PV) return []; const teams = PV.effectiveTeams((state.pull && state.pull.teams) || {}, pullKinds(), null, pullMetas()); return [...new Set([].concat(...PV.parentGroupsOf(pullKinds()).map((g) => (teams[g] || []).filter((m) => m && m.id && m.style).map((m) => m.style))))]; };
+  const pullKinds = () => { const p = state.pull || {}, PV = window.UmaPullValues; return p.teamsV >= 5 && p.kinds ? p.kinds : PV ? PV.KINDS : {}; };
+  // The meta umas you picked per meta track (none until you pick; saves before v5 have none).
+  const pullMetas = () => { const p = state.pull || {}; return p.teamsV >= 5 && p.meta ? p.meta : {}; };
   // Open a workflow section and any folded sections containing it.
   function showSection(section) {
     const id = { family: "cm-family", who: "pp-who", races: "pp-races", deck: "pp-deck", rating: "pp-rating" }[section] || "cm-" + section;
