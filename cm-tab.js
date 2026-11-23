@@ -402,7 +402,9 @@
       staminaWait = /Calculating/.test(html) ? true : null;
       return `<p class="mini cmp-stamina" role="status">Her stamina check: ${html}</p>`;
     }
-    function teamHTML() {
+    // The bar's pieces: the cup picker, your aces as chips, the ace picker when open, and her
+    // stamina check.
+    function teamParts() {
       const c = st();
       aces(c);
       ctx.sync();
@@ -411,9 +413,9 @@
       const groups = [["Now and next on Global", P.list.filter(x => x.kind === "cm" && x.global.end >= ctx.today && !x.global.est)], ["Later Champions Meetings (Global dates estimated)", P.list.filter(x => x.kind === "cm" && x.global.est)], ["League of Heroes (JP so far, Global dates estimated)", P.list.filter(x => x.kind === "loh")], ["Past Global Champions Meetings", P.list.filter(x => x.kind === "cm" && x.global.end < ctx.today).reverse()]];
       const cupOpts = groups.filter(([, xs]) => xs.length).map(([label, xs]) => `<optgroup label="${esc(label)}">${xs.map(x => `<option value="${x.id}"${x.id === c.cup ? " selected" : ""}>${esc(ctx.cupLabel(x))}</option>`).join("")}</optgroup>`).join("");
       const chips = list.map((a, i) => `<div class="chip cmp-ace-chip${selected && a.tid === selected.tid ? " active" : ""}">
-        <button type="button" class="linkish cmp-ace-name" data-cmp-sel="${a.tid}" aria-pressed="${!!selected && a.tid === selected.tid}">${esc(tName(trainee(a.tid)))} · ${STYLE_LABEL[styleOf(a)]}</button>
-        <button type="button" class="linkish" data-cmp-edit="${i}" aria-label="Change ${esc(tName(trainee(a.tid)))}" aria-expanded="${editAce === i}">Change</button>
-        <button type="button" class="linkish" data-cmp-ace-remove="${i}" aria-label="Remove ${esc(tName(trainee(a.tid)))}">✕</button></div>`).join("");
+        <button type="button" class="linkish cmp-ace-name" data-cmp-sel="${a.tid}" aria-pressed="${!!selected && a.tid === selected.tid}">${esc(tName(trainee(a.tid)))}<span class="cmp-ace-style">${STYLE_LABEL[styleOf(a)]}</span></button>
+        <button type="button" class="linkish icon-btn" data-cmp-edit="${i}" aria-label="Change ${esc(tName(trainee(a.tid)))}" title="Change" aria-expanded="${editAce === i}">✎</button>
+        <button type="button" class="linkish icon-btn" data-cmp-ace-remove="${i}" aria-label="Remove ${esc(tName(trainee(a.tid)))}" title="Remove">✕</button></div>`).join("");
       let editor = "";
       if (editAce != null && editAce <= list.length) {
         const a = list[editAce], t = trainee(a && a.tid);
@@ -421,11 +423,18 @@
           <button type="button" class="btn ghost small" id="cmpAceDone">Done</button></div>`;
       }
       const team = ctx.pullTeam(p).filter((m) => ctx.myUmas().has(+m.tid));
-      return `<label class="field grow"><span>Champions Meeting or League of Heroes</span><select id="cmpCup">${cupOpts}</select></label>
-        <div class="row-wrap cmp-chips" aria-label="Your team"><span class="mini"><b>Your team</b> (up to ${MAX_ACES}; the deck below is for the one picked)</span>${chips}${list.length < MAX_ACES ? `<button type="button" class="btn ghost small" id="cmpAddAce"${mine.length ? "" : " disabled"}>+ Add an ace</button>` : ""}${team.length ? `<button type="button" class="linkish" id="cmpTeam">Use my Pull planner team</button>` : ""}</div>${editor}
-        ${makerHTML(c, p)}
-        ${selected && ctx.staminaSummary ? staminaLine() : ""}
-        ${!mine.length ? `<p class="mini">Your team comes from My umas: tick them in the Trainees tab, or import your umaextractor export in <button type="button" class="linkish" data-goto-tab="data">Import &amp; backup</button>.</p>` : ""}`;
+      return {
+        cup: `<select id="cmpCup" aria-label="Champions Meeting or League of Heroes">${cupOpts}</select>`,
+        chips: `<div class="row-wrap cmp-chips" aria-label="Your team"><span class="cm-bar-label" title="Up to ${MAX_ACES}. Pick one: the deck, skills and parents are for her.">Team</span>${chips}${list.length < MAX_ACES ? `<button type="button" class="btn ghost small" id="cmpAddAce"${mine.length ? "" : " disabled"}>+ Add an ace</button>` : ""}${team.length ? `<button type="button" class="linkish" id="cmpTeam">Use my Pull planner team</button>` : ""}</div>`,
+        editor,
+        extra: `${selected && ctx.staminaSummary ? staminaLine() : ""}
+        ${!mine.length ? `<p class="mini">Your team comes from My umas: tick them in the Trainees tab, or import your umaextractor export in <button type="button" class="linkish" data-goto-tab="data">Import &amp; backup</button>.</p>` : ""}`,
+      };
+    }
+    // The Team maker sub-tab.
+    function makerPaneHTML() {
+      const c = st();
+      return TM ? makerHTML(c, cup(c)) : `<section class="panel"><p class="mini">The team maker didn't load. Refresh the page.</p></section>`;
     }
 
     // ---------- Team maker: the best team for this cup from umas you list ----------
@@ -462,7 +471,7 @@
       const result = r && r.team.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Pick</th><th class="num">L</th><th>Value from</th></tr></thead><tbody>${r.team.map((x) => `<tr><td><b>${pick(x)}</b>${x.fixed ? ' <span class="mini">fixed</span>' : ""}</td><td class="num">${fmtL(x.v)}</td><td class="mini">${HOW[x.how]}${x.asFront ? " (Front Runner's: the one-runner simulator can't value a Runaway)" : ""}</td></tr>`).join("")}</tbody></table></div>
           <p class="mini">Team total <b>${fmtL(r.total)} L</b>${r.repeats ? ` · <span class="warn">${r.repeats === 1 ? "two run one style" : "repeated styles"}: no other pick fits, and they'll fight for one spot</span>` : " · every pick in its own style"}.${r.alts.length ? ` Next best for each slot: ${r.alts.map((a) => `${pick(a)} for ${esc(tName(trainee(a.out)))} (${fmtL(-a.loss)} L)`).join("; ")}.` : ""}</p>
           <div class="row-wrap"><button type="button" class="btn small" id="tmUse">Use this team</button>${r.team.some((x) => !mineIds.has(+x.tid)) ? '<span class="mini warn">Not all are in My umas yet.</span>' : ""}</div>` : "";
-      return `<details class="pred-help cmp-maker" data-tm-open="maker"${open("maker")}><summary><b>Team maker</b> · the best ${MAX_ACES} from umas you list${m.pool.length ? ` (${m.pool.length} in the pool)` : ""}</summary>
+      return `<section class="panel cmp-maker" id="cm-maker"><h3>Team maker <span class="mini">· the best ${MAX_ACES} for ${esc(p.name)} from umas you list${m.pool.length ? ` (${m.pool.length} in the pool)` : ""}</span></h3>
         <p class="mini">List umas, tick the styles each may run (her A/S styles to start) and pin any as <b>Fixed</b>. For ${esc(p.name)} it keeps every fixed uma and fills the rest with the most lengths in all, no two in one style unless nothing else fits, and never two outfits of one character. Runaway (for the umas who can learn it) counts as its own style: she runs ahead of the Front Runners instead of fighting them for one spot. Worth is what she brings herself: her own unique raced on this cup in that style plus her surface, distance and style aptitudes against A (as the Pull planner's teams use it). Her deck, stats and skills aren't in it: those come from her deck below.</p>
         <div class="row-wrap"><label class="field grow"><span>Add an uma</span><select id="tmAdd"><option value="">Pick an uma…</option>${yours.length ? `<optgroup label="My umas">${yours.map(opt).join("")}</optgroup>` : ""}<optgroup label="Others on Global">${others.map(opt).join("")}</optgroup></select></label>
           ${yours.length ? `<button type="button" class="btn ghost small" id="tmAddMine">Add all My umas (${yours.length})</button>` : ""}${m.pool.length ? '<button type="button" class="btn ghost small" id="tmClear">Clear the pool</button>' : ""}</div>
@@ -470,7 +479,7 @@
         ${r && r.problems.length ? `<p class="mini warn">${r.problems.map(esc).join(" ")}</p>` : ""}
         ${result}
         ${m.pool.length ? everyCupHTML(c, m) : ""}
-      </details>`;
+      </section>`;
     }
     // Step 2: the best team for every cup ahead from the same pool.
     function everyCupHTML(c, m) {
@@ -1203,7 +1212,7 @@
       return false;
     }
 
-    return { teamHTML, renderParents, click, change, st, followDeck, refreshStatus: () => {}, importHTML,
+    return { teamParts, makerPaneHTML, renderParents, click, change, st, followDeck, refreshStatus: () => {}, importHTML,
       // The uma.moe link builder and its settings list (General grandparents' borrow search).
       umaMoe: (q) => CP.umaMoe(q), searchSummary: (x) => CP.searchSummary(x, ctx.skillName) };
   }
