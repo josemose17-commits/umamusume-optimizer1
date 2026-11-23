@@ -872,6 +872,15 @@
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
+    // "Training in" (CM & decks' ace per cup, Parents' parent): the scenario her decks are built for.
+    $("#tabBody").addEventListener("change", (e) => {
+      const ti = e.target.dataset && e.target.dataset.trainIn;
+      if (!ti) return;
+      e.stopImmediatePropagation();
+      if (ti === "parents") { state.pcm = state.pcm || {}; state.pcm.trainIn = e.target.value; }
+      else { state.cm = state.cm || {}; state.cm.trainInBy = Object.assign({}, state.cm.trainInBy, { [state.cm.preset]: e.target.value }); }
+      save(); renderTab();
+    });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && gp() && gp().change(e)) e.stopImmediatePropagation(); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
@@ -2706,12 +2715,27 @@
     const era = erasMemo.eraAt(date), sc = era && SCENARIOS.find((x) => x.id === era.coach);
     return era && sc ? { era, sc, key: era.key, date } : null;
   }
-  // Each deck host's scenario: CM & decks its cup's, Parents the ace's cup's (③'s preset), the
-  // Tier list the coach's. { sc, key, era (null for the coach's) }.
+  // Where you train: a scenario you picked (an era id) wins. The ace: by default her cup's date
+  // (CM & decks' "Training in", per cup: state.cm.trainInBy). A parent or grandparent: by default
+  // now, Global's scenario today, since you train her right away (state.pcm.trainIn).
+  const eraScen = (era, picked) => { const sc = era && SCENARIOS.find((x) => x.id === era.coach); return sc ? { era, sc, key: era.key, picked: !!picked } : null; };
+  function erasList() { if (!erasMemo) cupScenario(presetById((state.cm || {}).preset) || defaultPreset()); return erasMemo ? [...erasMemo.eras.values()] : []; }
+  function pickedEra(v) { if (!v || v === "now" || v === "cup") return null; erasList(); return erasMemo ? erasMemo.eras.get(+v) || null : null; }
+  function cupScen(p) {
+    const pick = pickedEra(((state.cm || {}).trainInBy || {})[p && p.id]);
+    return (pick && eraScen(pick, true)) || cupScenario(p);
+  }
+  function parentScen() {
+    const pick = pickedEra((state.pcm || {}).trainIn);
+    if (pick) return eraScen(pick, true);
+    erasList();
+    return erasMemo ? Object.assign(eraScen(erasMemo.eraAt(TODAY)) || {}, { now: true }) : null;
+  }
+  // Each deck host's scenario: CM & decks its cup's (or the one you picked), Parents where you
+  // train the parent, the Tier list the coach's. { sc, key, era (null for the coach's) }.
   function hostScen(host = "cm") {
-    const pid = host === "parents" ? (state.pcm || {}).preset : host === "cm" ? (state.cm || {}).preset : null;
-    const s = pid ? cupScenario(presetById(pid)) : null;
-    return s || { sc: scenario(), key: T.FROM_COACH[state.scenario] || "GM", era: null };
+    const s = host === "parents" ? parentScen() : host === "cm" && (state.cm || {}).preset ? cupScen(presetById(state.cm.preset)) : null;
+    return s && s.sc ? s : { sc: scenario(), key: T.FROM_COACH[state.scenario] || "GM", era: null };
   }
   const scenFor = (host) => hostScen(host).sc;
   const euScen = (host = "cm") => eu().scen || hostScen(host).key || "GM";
@@ -2720,16 +2744,24 @@
   function scenNote(host) {
     const hs = hostScen(host);
     if (!hs.era) return "";
+    const eras = erasList().filter((e) => !e.start || e.start >= addDaysISO(TODAY, -120)), parent = host === "parents";
+    const cupId = (state.cm || {}).preset, cur = parent ? (state.pcm || {}).trainIn || "now" : ((state.cm || {}).trainInBy || {})[cupId] || "cup";
+    const auto = parent ? parentScen() : cupScenario(presetById(cupId));
+    const opts = [[parent ? "now" : "cup", (parent ? "Now: " : "This cup's date: ") + ((auto && auto.era) ? auto.era.name : "?")]]
+      .concat(eras.map((e) => [String(e.id), e.name + (e.start ? " (from ~" + fmtDate(e.start) + ")" : " (now)")]));
     const differs = hs.sc.id !== state.scenario;
-    return `<p class="mini${differs ? " warn" : ""}">Trained in <b>${esc(hs.era.name)}</b>: Global's scenario ~${TRAIN_LEAD} days before this cup${hs.era.dateEst && hs.era.start ? ` (from ~${esc(fmtDate(hs.era.start))}, GameTora's forecast)` : ""}${hs.era.est ? "; Euophrys has no preset for it, so its weights are Grand Masters' with its own friend card as the link" : ""}. ${differs ? `The turn coach is on ${esc(scenario().name)}: that's only for the career you're playing now.` : ""}</p>`;
+    const why = hs.picked ? "your pick" : parent ? "Global's scenario today: you train her now" : `Global's scenario ~${TRAIN_LEAD} days before this cup`;
+    return `<div class="row-wrap"><label class="field"><span>${parent ? "Training her in" : "The ace trains in"}</span><select data-train-in="${host}">${opts.map(([v, l]) => `<option value="${v}"${String(cur) === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label></div>
+      <p class="mini${differs ? " warn" : ""}">Built for <b>${esc(hs.era.name)}</b> (${esc(why)})${hs.era.est ? "; Euophrys has no preset for it, so its weights are Grand Masters' with its own friend card as the link" : ""}. ${differs ? `The turn coach is on ${esc(scenario().name)}: that's only for the career you're playing now.` : ""}</p>`;
   }
+  const addDaysISO = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   // A preset's name: Euophrys' own, or the forecast scenario it estimates.
   const presetName = (key) => (T.SCENARIOS.find((x) => x[0] === key) || [0, null])[1] || ((erasMemo && [...erasMemo.eras.values()].find((e) => e.key === key)) || {}).name || key;
   // host "tiers": the Tier list (the coach's scenario); otherwise the deck is for cup p, trained in
   // its scenario (cupScenario), unless you chose a preset in Euophrys settings.
   function euOpts(c, p, tid = deckTrainee(c.goal === "ace" ? "parents" : "cm"), host = null) {
     const sv = skillMap(p.id, c.style);
-    const key = host === "tiers" ? euScen("tiers") : eu().scen || ((cupScenario(p) || {}).key) || euScen("tiers");
+    const key = host === "tiers" ? euScen("tiers") : eu().scen || ((c.goal === "ace" ? parentScen() : cupScen(p)) || {}).key || euScen("tiers");
     const o = { scenario: key, overrides: eu().over[key] || (eu().over[key] = { general: {}, tabs: {} }), trainee: tid, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +c.itManual, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace") {
       o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(p), cardAvailable: card => CARD_RELEASE.available(card, p) };
@@ -2793,7 +2825,7 @@
     const num = (k, v, step, path) => `<input type="number" step="${step}" data-eu="${path}" data-k="${k}" value="${v}">`;
     const coachName = (SCENARIOS.find((x) => x.id === state.scenario) || {}).name;
     return `<details class="eu-settings" ${euOpen ? "open" : ""}>
-      <summary>Euophrys settings: <b>${esc(presetName(scen))}</b> preset${auto ? (hs.era ? ` (this cup's scenario: Global trains in ${esc(hs.era.name)} ${hs.era.est ? "(estimated from Grand Masters' weights with its own friend card) " : ""}~${TRAIN_LEAD} days before it)` : T.FROM_COACH[state.scenario] ? " (from the coach's scenario)" : ` (${esc(coachName)} isn't in Euophrys' list yet, so Grand Masters, the newest one)`) : ""}${Object.keys(over.general).length || Object.keys(over.tabs).length ? " · custom weights" : ""}</summary>
+      <summary>Euophrys settings: <b>${esc(presetName(scen))}</b> preset${auto ? (hs.era ? ` (where she trains: ${esc(hs.era.name)}${hs.era.est ? ", estimated from Grand Masters' weights with its own friend card" : ""}; ${hs.picked ? "your pick" : hs.now ? "now" : `Global's scenario ~${TRAIN_LEAD} days before this cup`})` : T.FROM_COACH[state.scenario] ? " (from the coach's scenario)" : ` (${esc(coachName)} isn't in Euophrys' list yet, so Grand Masters, the newest one)`) : ""}${Object.keys(over.general).length || Object.keys(over.tabs).length ? " · custom weights" : ""}</summary>
       <div class="eu-body">
         <label class="field"><span>Scenario preset</span><select data-eu-scen="1"><option value="">${hs.era ? "This cup's scenario" : "Same as the coach"}</option>${T.SCENARIOS.map(([k, l]) => `<option value="${k}" ${eu().scen === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
         <div><span class="mini"><b>Stat weights for ${esc(tab === "friend" ? "Friend and Group" : tab === "wisdom" ? "Wit" : tab[0].toUpperCase() + tab.slice(1))} cards</b> (what each point of gain is worth)</span>
@@ -3033,7 +3065,7 @@
     const C = window.UmaStatCurves, cup = C && C.cups && C.cups[p.id], v = cup && cup.styles && (cup.styles[style] || cup.styles[dataStyle(style)]);
     const listed = (cup && cup.courseStats) || [];
     if (!v || v.status !== "ok" || !(v.steps || []).length) return { target, listed, notes: [] };
-    const out = Object.assign({}, target), notes = [], caps = E.capsFor(state, (cupScenario(p) || {}).sc || scenario());
+    const out = Object.assign({}, target), notes = [], caps = E.capsFor(state, (cupScen(p) || {}).sc || scenario());
     const val = (j, x) => (j === 1 ? 0 : OPT.onCurve(v.curves[j], x, false));
     const slope = (j, x) => Math.max(0, (val(j, x + 50) - val(j, x)) / 50);
     listed.forEach((i) => {
@@ -3091,7 +3123,7 @@
     return `<b>${result.need} stamina</b> · ${style} · ${pressure} · ${goalText} · from ${staminaStatsFrom(presetById(c.preset), c)} · full spurt in ${result.hits}/${result.samples} races at target${gap}${override}${capped}${comparison}${linked}`;
   }
 
-  const staminaPlaceholder = (p, result, style) => Math.min(raceBuildTarget(p, result, style).stamina, E.capsFor(state, (cupScenario(p) || {}).sc || scenario()).stamina);
+  const staminaPlaceholder = (p, result, style) => Math.min(raceBuildTarget(p, result, style).stamina, E.capsFor(state, (cupScen(p) || {}).sc || scenario()).stamina);
   function showStamina(p, c, entry) {
     const node = deckElement("cm", "#cmStaminaEstimate");
     const field = deckElement("cm", '[data-cm-target="stamina"]');
@@ -3270,7 +3302,7 @@
   // Her gaps: each stat's target (yours, else the race build's, within the caps) against the
   // predicted average. Parents fills what's short with blue sparks.
   function raceGaps(r, c) {
-    const p = presetById(r.preset), caps = E.capsFor(state, (cupScenario(p) || {}).sc || scenario()), mine = cmTargets(c || {}) || {};
+    const p = presetById(r.preset), caps = E.capsFor(state, (cupScen(p) || {}).sc || scenario()), mine = cmTargets(c || {}) || {};
     const bt = p ? raceBuildTarget(p, r.stamina, r.style) : {};
     const target = E.STATS.map((s) => Math.min(caps[s] != null ? caps[s] : Infinity, r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
     const stats = r.est.stats.slice();
@@ -3618,7 +3650,7 @@
       // focus: Independent Training's Training Focus ("balanced", "stamina", "sprint"), or none.
       simulate: (p, tid, cards, n, blueStart = [], focus = null) => {
         const c = state.pcm || {};
-        const psc = (cupScenario(p) || {}).sc || scenario();
+        const psc = (parentScen() || {}).sc || scenario();
         const sim = OPT.buildCtx({ scenario: psc, build: p.build, trainee: tid, caps: E.capsFor(state, psc), raceShare: Math.min(0.5, n / 60), runs: 16,
           helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false });
         sim.start = sim.start.map((v, i) => v + (blueStart[i] || 0));
@@ -3631,8 +3663,8 @@
       skillName: (id) => skillInfo(id)[0],
       charName: (cid) => charNames.get(+cid) || "#" + cid,
       turnText: (t) => E.turnInfo(t, scenario()).text,
-      // The scenario the cup's decks are trained in (its date), for veterans' baselines.
-      scenario: () => ({ id: scenFor("cm").id, name: scenFor("cm").name }),
+      // Where you train the parent (Parents' "Training in"), for veterans' SS baselines.
+      scenario: () => ({ id: scenFor("parents").id, name: scenFor("parents").name }),
       scenarioName: (id) => (SCENARIOS.find((x) => x.id === id) || { name: id }).name,
       // Your Pull planner team for the cup's track, as the planner races it there: the 2 of your 3
       // umas worth the most on that cup (no two in one running style when another fits), then the
