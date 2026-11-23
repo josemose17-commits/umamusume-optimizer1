@@ -2728,6 +2728,9 @@
   const parentPurchaseRoutes = window.UmaParentPrerequisites.create(window.UmaSkillPurchases.skills);
   let euLoading = false;
   let euOpen = false; // keep the weights panel open across re-renders
+  // The deck's "Constraints & advanced" card, open or closed, per deck (CM & decks, Parents).
+  const advOpen = {};
+  document.addEventListener("toggle", (e) => { const d = e.target; if (d && d.dataset && d.dataset.advOpen && d.isConnected) advOpen[d.dataset.advOpen] = d.open; }, true);
   // Euophrys' card data is large, so it loads the first time a ranking needs it.
   function euReady() {
     if (window.EuophrysCards) return true;
@@ -3309,34 +3312,42 @@
     const t = D.trainee(deckTrainee("cm")), where = t && RW.CHARS[t.cid];
     return `<b>Runaway</b>: a Front Runner sub-style the Runaway skill unlocks${where === "JP" ? " (JP has it for her; on Global once she gets it)" : ""}. She runs on her Front Runner grade, counts as a Front Runner for skill conditions and style debuffs, sets herself well ahead of the Front Runners and burns far more stamina. The stamina check races her as a Runaway (keeping her big lead costs HP). Skill values, the skill comparison, stat curves and course values are <b>Front Runner's</b>: the one-runner simulator holds a lone Runaway to her lead, so most skills show almost no gain there (with that switched off they come out a little above Front Runner's), and only a full-field race can value her properly. Learn the Runaway skill in her career, or she runs as a Front Runner.`;
   }
-  function cmHeader(p, c, team) {
+  // CM & decks' top bar: the cup (picker, course, dates), your aces as chips and the picked
+  // ace's running style. Everything under it is for the ace you picked.
+  function cmBar(p, c, t) {
     const [stCls, stText] = presetStatus(p);
-    const s = p.stats;
-    return `<section class="panel cm-head">
-      ${team}
-      <div class="cm-title"><h2>${esc(p.name)}</h2>
+    const s = p.stats, b = E.BUILDS[p.build];
+    const styles = c ? STYLES.concat(runawayFor(c) ? [[RW.STYLE, RW.LABEL]] : []) : [];
+    return `<section class="panel cm-bar">
+      <div class="cm-bar-row cm-bar-cup">
+        ${t.cup}
         <span class="chip">${p.kind === "loh" ? "League of Heroes " + p.no : "Champions Meeting #" + p.no}</span>
-        <span class="chip cm-${stCls}">${stText}</span></div>
-      <div class="cm-facts">
-        <div class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + esc(p.course.layout) + ")" : ""} · ${p.course.dist}${courseBonusText(p)}</div>
-        <div>${esc(p.conditions)}</div>
-        <div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div>
+        <span class="chip cm-${stCls}">${stText}</span>
       </div>
-      ${c ? `<div class="row-wrap">
-        <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.concat(runawayFor(c) ? [[RW.STYLE, RW.LABEL]] : []).map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
-        ${RW && RW.is(c.style) ? `<p class="mini">${runawayNote(p, c)}</p>` : ""}
-        ${c.style === "Nige" ? `<label class="field"><span>Front Runners in this cup</span><select data-cm-contest="${esc(p.id)}"><option value="0"${contestShare(p.id) ? "" : " selected"}>She leads alone</option>${CONTEST_SHARES.map((v) => `<option value="${v}"${contestShare(p.id) === v ? " selected" : ""}>Fight for the lead: someone ahead ${Math.round(v * 100)}% of the race</option>`).join("")}</select></label>` : ""}
-        <button type="button" class="btn ghost small" data-cm-build="${p.build}" ${state.build === p.build ? "disabled" : ""}>${state.build === p.build ? "Turn coach build: " + esc(E.BUILDS[p.build].label) : "Set the turn coach to " + esc(E.BUILDS[p.build].label)}</button>
-      </div>` : ""}
-      <p class="mini">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
+      <div class="cm-facts">
+        <span class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + esc(p.course.layout) + ")" : ""} · ${p.course.dist}${courseBonusText(p)}</span>
+        <span>${esc(p.conditions)}</span>
+        <span>Global <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP ${fmtDate(p.jp.start)}</span>
+        ${c ? (state.build === p.build ? `<span>Turn coach build: ${esc(b.label)}</span>` : `<button type="button" class="linkish" data-cm-build="${p.build}">Set the turn coach to ${esc(b.label)}</button>`) : ""}
+      </div>
+      <div class="cm-bar-row cm-bar-team">
+        ${t.chips}
+        ${c ? `<div class="seg style-seg cm-bar-style" role="radiogroup" aria-label="Her running style">${styles.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div>` : ""}
+      </div>
+      ${t.editor}
+      ${c && c.style === "Nige" ? `<label class="field cm-bar-contest"><span>Front Runners in this cup</span><select data-cm-contest="${esc(p.id)}"><option value="0"${contestShare(p.id) ? "" : " selected"}>She leads alone</option>${CONTEST_SHARES.map((v) => `<option value="${v}"${contestShare(p.id) === v ? " selected" : ""}>Fight for the lead: someone ahead ${Math.round(v * 100)}% of the race</option>`).join("")}</select></label>` : ""}
+      ${c && RW && RW.is(c.style) ? `<p class="mini">${runawayNote(p, c)}</p>` : ""}
+      ${t.extra}
+      <p class="mini cm-sim-note">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
     </section>`;
   }
 
   // The CM & decks tab: the cup and your team, then the selected ace's racing deck, exactly
   // as the deck optimizer builds it, with her gaps (target minus predicted) for Parents.
-  // CM & decks' sub-tab (kept in this browser): Team, Deck, Skills or CM results.
+  // CM & decks' sub-tab (kept in this browser): Team maker, Deck, Skills or CM results.
   const CM_SUB_KEY = "uma-cm-sub-v1";
-  const cmSub = () => { try { return localStorage.getItem(CM_SUB_KEY) || "deck"; } catch (e) { return "deck"; } };
+  const CM_SUBS = ["maker", "deck", "skills", "results"];
+  const cmSub = () => { let k = null; try { k = localStorage.getItem(CM_SUB_KEY); } catch (e) { /* ignore */ } return CM_SUBS.includes(k) ? k : "deck"; };
   function setCmSub(k) {
     try { localStorage.setItem(CM_SUB_KEY, k); } catch (e) { /* ignore */ }
     const box = document.querySelector(".cm-split");
@@ -3348,18 +3359,15 @@
     loadSkillValues(p.id);
     euReady();
     const c = x.ace ? cm("cm") : null;
-    // Two columns on a wide screen: the cup and team (left), the deck, skills and your CM results
-    // as sub-tabs (right). Narrower, one column with Team as the first sub-tab. Every section is
-    // drawn; the sub-tab only shows one (the code that reads them finds them all).
-    const sub = cmSub(), tabs = [["team", "Team", true], ["deck", "Deck"], ["skills", "Skills"], ["results", "CM results"]];
+    // The cup and team bar across the top; under it the sub-tabs. Every pane is drawn and the
+    // sub-tab only shows one (the code that reads them finds them all).
+    const sub = cmSub(), tabs = [["maker", "Team maker"], ["deck", "Deck"], ["skills", "Skills"], ["results", "CM results"]];
     const pane = (k, html) => `<div class="subpane" data-pane="${k}">${html}</div>`;
-    const none = `<section class="panel"><p class="mini">Add an ace to your team to build her deck.</p></section>`;
+    const none = `<section class="panel"><p class="mini">Add an ace to your team above to build her deck.</p></section>`;
     body.innerHTML = `<div class="cm cm-split" data-sub="${sub}">
-      <aside class="cm-side subpane" data-pane="team">${cmHeader(p, c, plan.teamHTML())}</aside>
-      <div class="cm-main">
-        <nav class="subtabs" role="tablist" aria-label="CM &amp; decks">${tabs.map(([k, l, narrow]) => `<button type="button" role="tab" class="subtab${narrow ? " only-narrow" : ""}" data-cm-sub="${k}" aria-selected="${sub === k}">${l}</button>`).join("")}</nav>
-        ${pane("deck", c ? cmOptimizer(p, c, "cm") : none)}${pane("skills", c ? cmSkills(p, c, "cm") : none)}${pane("results", cmLogHTML(p))}
-      </div>
+      ${cmBar(p, c, plan.teamParts())}
+      <nav class="subtabs" role="tablist" aria-label="CM &amp; decks">${tabs.map(([k, l]) => `<button type="button" role="tab" class="subtab" data-cm-sub="${k}" aria-selected="${sub === k}">${l}</button>`).join("")}</nav>
+      ${pane("maker", plan.makerPaneHTML())}${pane("deck", c ? cmOptimizer(p, c, "cm") : none)}${pane("skills", c ? cmSkills(p, c, "cm") : none)}${pane("results", cmLogHTML(p))}
     </div>`;
   }
 
@@ -3386,8 +3394,14 @@
     // In the Parents tab the long explanations go into one closed box, to keep ③ short.
     const notes = [];
     const note = (html) => (host === "parents" ? (notes.push(html), "") : html);
-    return `<section class="panel cm-opt" data-deck-host="${host}">
-      <h3>Deck optimizer</h3>
+    const nLock = c.locked.length, nMust = (c.must || []).length;
+    const advSum = [nLock ? `${nLock} must-include card${nLock === 1 ? "" : "s"}` : "", nMust ? `${nMust} must-have skill${nMust === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+    const tr = deckTrainee(host) ? D.trainee(deckTrainee(host)) : null;
+    // Three cards: what the search uses, what it aims for, and the rarer constraints (closed
+    // unless you open them). Find my best deck stays pinned to the bottom of the screen.
+    return `<div class="cm-opt deck-cards" data-deck-host="${host}">
+      <section class="panel deck-card" data-deck-card="core">
+      <h3>Core setup</h3>
       ${scenNote(host)}
       <p class="mini" data-card-availability>${future ? `Cards expected by ${esc(fmtDate(by))}; ~ releases are estimates. Untick “Only cards I own” to try future cards at LB4.` : "Cards released on Global today; updated daily from GameTora."}${missingScores ? ` ${missingScores} card${missingScores === 1 ? " lacks" : "s lack"} scoring data and ${missingScores === 1 ? "is" : "are"} left out of searches.` : ""}</p>
 
@@ -3409,9 +3423,16 @@
       ${c.independent ? note(`<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for the ${c.itRaces} extra race${c.itRaces === 1 ? "" : "s"} from ② (on top of her career goals), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: ${host === "parents" ? "② Races sends the count of extra races here" : "the Parents tab plans the fewest G1s for affinity"}.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>`) : ""}
       ${compHTML(c)}
       ${scenFor(host).id === "grandlive" ? `<details class="pred-help" data-cmp-open="${host}-events"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
+      ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to try every SSR and SR available ${future ? "by this cup" : "on Global today"} at max limit break.</p>` : ""}
+      ${notes.length ? `<details class="pred-help"><summary>How the deck builder works</summary>${notes.join("")}</details>` : ""}
+      </section>
+      <section class="panel deck-card" data-deck-card="targets">
+      <h3>Targets &amp; stamina</h3>
       ${targetsHTML(p, c, host)}
       ${host === "cm" ? raceSkillsHTML(c) : ""}
-      ${euSettingsHTML("speed", host)}
+      </section>
+      <details class="panel deck-card deck-adv" data-deck-card="advanced" data-adv-open="${host}"${advOpen[host] ? " open" : ""}>
+      <summary><h3>Constraints &amp; advanced</h3><span class="mini">${advSum ? `<b>${advSum}</b>` : "Must-include cards, must-have skills, Euophrys' weights"}</span></summary>
       <div class="row-wrap">
         <label class="field grow"><span>Must include (optional)</span><input id="cmLock" list="cmCardList" placeholder="A card that must be in the deck" autocomplete="off"></label>
         <button type="button" class="btn ghost small" id="cmLockAdd">Add</button>
@@ -3419,14 +3440,15 @@
       <datalist id="cmCardList">${available.filter(x => T.entry(x.id, owned[x.id] != null ? +owned[x.id] : 4)).sort((a, b) => b.r - a.r || a.n.localeCompare(b.n)).map(card => { const r = CARD_RELEASE.info(card); return `<option value="${esc(D.label(card))}"${r.estimated ? ` label="Expected ~${esc(fmtDate(r.date))}"` : ""}></option>`; }).join("")}</datalist>
       ${c.locked.length ? `<div class="row-wrap">${c.locked.map((id) => `<span class="chip lockchip">${esc(D.card(id).n)}${cardReleaseHTML(D.card(id))} <button type="button" class="linkish" data-cm-unlock="${id}" aria-label="Remove ${esc(D.card(id).n)}">✕</button></span>`).join("")}</div>` : ""}
       ${mustHTML(c)}
-      ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to try every SSR and SR available ${future ? "by this cup" : "on Global today"} at max limit break.</p>` : ""}
-      ${notes.length ? `<details class="pred-help"><summary>How the deck builder works</summary>${notes.join("")}</details>` : ""}
-      <div class="row-wrap run-row">
+      ${euSettingsHTML("speed", host)}
+      </details>
+      <div class="run-bar">
         <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? (host === "cm" || cmTargets(c) ? "Simulating careers…" : "Building…") : "Find my best deck"}</button>
         ${running && (host === "cm" || cmTargets(c)) ? `<span class="progress" id="cmProg"><i style="width:${Math.round((j.optRun.f || 0) * 100)}%"></i></span>` : ""}
+        <span class="run-bar-note">${tr ? esc(tr.n) + " · " : ""}${esc(STYLE_LABEL[c.style] || c.style)}${host === "cm" ? " · " + esc(p.name) : ""}</span>
       </div>
       <div id="cmOut">${j.optResult ? optResultHTML(j.optResult, c, host) : ""}</div>
-    </section>`;
+    </div>`;
   }
 
   // Target stats: blank boxes show the race build's targets.

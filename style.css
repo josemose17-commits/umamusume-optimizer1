@@ -390,7 +390,7 @@ tr.phase-row b { color: var(--fg); font-family: var(--font-display); font-size: 
 .collection summary h2::before { content: "▸ "; color: var(--muted); }
 .collection[open] summary h2::before { content: "▾ "; }
 .coll-body { display: grid; gap: 10px; margin-top: 8px; }
-.coll-body input:not([type]), .cm input:not([type]), .cm select, .db-controls select, .coll-body select { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+.coll-body input:not([type]), .cm input:not([type]), .cm select, .db-controls select, .coll-body select { background-color: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0; }
 .codebox, .paste textarea { width: 100%; font-family: var(--font-mono); font-size: .8rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; color: inherit; resize: vertical; }
 .cardrow-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 .own { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--muted); }
@@ -960,21 +960,11 @@ body:not([data-page="coach"]) .dock { display: none !important; }
 .subtab[aria-selected="true"] { background: var(--accent-soft); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
 .subtab.only-narrow { display: none; }
 
-/* CM & decks: cup and team on the left, the deck, skills and results on the right */
-.cm-split { display: grid; gap: var(--gap); grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); align-items: start; }
-.cm-side, .cm-main { display: grid; gap: var(--gap); min-width: 0; align-content: start; grid-template-columns: minmax(0, 1fr); }
-.cm-main > .subpane { display: none; min-width: 0; }
-.cm-split[data-sub="deck"] .subpane[data-pane="deck"], .cm-split[data-sub="team"] .subpane[data-pane="deck"],
-.cm-split[data-sub="skills"] .subpane[data-pane="skills"], .cm-split[data-sub="results"] .subpane[data-pane="results"] { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
-.cm-side .cm-head { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 1180px) {
-  .cm-split { grid-template-columns: minmax(0, 1fr); }
-  .subtab.only-narrow { display: inline-flex; }
-  .cm-split:not([data-sub="team"]) .cm-side { display: none; }
-  .cm-split[data-sub="team"] .subpane[data-pane="deck"] { display: none; }
-  .cm-split[data-sub="team"] .cm-main { order: -1; }
-  .cm-split[data-sub="team"] .cm-main > .subtabs { margin-bottom: 0; }
-}
+/* CM & decks: the cup and team bar on top, then sub-tabs (Team maker, Deck, Skills, CM results) */
+.cm-split { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
+.cm-split > .subpane { display: none; min-width: 0; }
+.cm-split[data-sub="maker"] > .subpane[data-pane="maker"], .cm-split[data-sub="deck"] > .subpane[data-pane="deck"],
+.cm-split[data-sub="skills"] > .subpane[data-pane="skills"], .cm-split[data-sub="results"] > .subpane[data-pane="results"] { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
 
 /* Parents: a stepper, one step at a time; locked steps say why */
 .stepper { display: flex; gap: 6px; overflow-x: auto; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); scrollbar-width: thin; counter-reset: step; }
@@ -1030,3 +1020,55 @@ details.notes[open] > summary::after { content: "Hide"; }
 details.notes[open] .notes-peek { visibility: hidden; }
 details.notes > p { margin: 0; padding: 2px 12px 10px 34px; }
 details.notes > p + p { padding-top: 0; }
+
+/* ===================== CM & decks pass 2: cup & team bar, deck cards, pinned Find ===================== */
+.cm-bar { gap: 10px; padding: 14px var(--pad); grid-template-columns: minmax(0, 1fr); }
+.cm-bar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.cm-bar #cmpCup { width: auto; max-width: 100%; min-width: 0; font-size: 1.08rem; font-weight: 700; min-height: 40px; padding-left: 12px; background-color: var(--surface-2); }
+.cm-facts { display: flex; flex-wrap: wrap; gap: 2px 18px; color: var(--muted); font-size: .84rem; }
+.cm-facts .cm-course { font-size: inherit; color: var(--fg); }
+.cm-facts .linkish { font-size: inherit; }
+.cm-bar-team { padding-top: 10px; border-top: 1px solid var(--line); }
+.cm-bar-team .cmp-chips { margin: 0; flex: 1 1 auto; gap: 8px; align-items: center; min-width: 0; }
+.cm-bar-label { font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-right: 2px; }
+.cm-bar .cmp-ace-chip { width: auto; gap: 2px; padding: 3px 4px 3px 12px; border-radius: 999px; background: var(--surface-2); }
+.cm-bar .cmp-ace-chip.active { background: var(--accent-soft); border-color: var(--accent); }
+.cm-bar .cmp-ace-name { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; color: var(--fg); }
+.cmp-ace-style { font-size: .74rem; font-weight: 500; color: var(--muted); }
+.icon-btn { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; color: var(--muted); text-decoration: none; font-size: .82rem; }
+.icon-btn:hover { background: var(--surface-3); color: var(--fg); }
+.cm-bar-style { margin-left: auto; }
+.cm-bar-style button { min-height: 32px; padding: 4px 12px; font-size: .84rem; }
+.cm-bar .cmp-ace-pick, .cm-bar-contest { max-width: 520px; }
+.cm-bar .cm-sim-note { color: var(--faint); }
+@media (max-width: 700px) {
+  .cm-bar-style { margin-left: 0; width: 100%; }
+  .cm-bar-style button { flex: 1 1 0; padding: 4px 6px; }
+  .cm-bar .cmp-ace-chip { max-width: 100%; }
+  .cm-bar #cmpCup { width: 100%; font-size: .98rem; }
+}
+
+/* The deck optimizer: three cards, then the pinned Find button and the result */
+.deck-cards { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.deck-card { grid-template-columns: minmax(0, 1fr); align-content: start; }
+.deck-card > h3, .deck-card > summary h3 { margin: 0; font-size: 1.02rem; }
+.panel .deck-card { background: var(--surface-2); }
+details.deck-adv > summary { list-style: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+details.deck-adv > summary::-webkit-details-marker { display: none; }
+details.deck-adv > summary::before { content: ""; width: 7px; height: 7px; flex: none; align-self: center; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-right: 2px; }
+details.deck-adv[open] > summary::before { transform: rotate(45deg); }
+details.deck-adv > summary .mini { color: var(--muted); }
+details.deck-adv > summary .mini b { color: var(--warn); font-weight: 600; }
+.run-bar { position: sticky; bottom: 12px; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 10px 14px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--line-strong); border-radius: var(--r); box-shadow: var(--shadow); }
+.run-bar .btn { min-width: 190px; min-height: 40px; font-size: .95rem; }
+.run-bar .progress { flex: 1 1 140px; }
+.run-bar-note { margin-left: auto; color: var(--muted); font-size: .82rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) {
+  .run-bar { bottom: 8px; padding: 8px 10px; }
+  .run-bar .btn { flex: 1 1 auto; min-width: 0; }
+  .run-bar-note { display: none; }
+}
+.cmp-maker > h3 .mini { font-weight: 400; color: var(--muted); }
+/* Dropdowns in CM & decks, Parents and the card lists keep their arrow, with room for it. */
+.cm select, .db-controls select, .coll-body select { padding-right: 28px; }
