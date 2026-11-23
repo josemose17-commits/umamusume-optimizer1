@@ -17,7 +17,7 @@ let seed = 5;
 const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 const owned = {};
 D.DATA.supports.filter((c) => D.onGlobal(c, today) && c.r >= 2).forEach((c) => { if (rnd() < 0.5) owned[c.id] = Math.floor(rnd() * 5); });
-const teams = { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou" }] };
+const teams = { sprint: [], mile: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou" }] };
 const UV = require("../data/uma-values.js");
 const make = (extra) => PV.create(Object.assign({ D, T, A, B, P, today, until, teams, owned, umas: new Set([101401]), umaValues: UV,
   deckOpts: (p, style, tid, scen) => ({ scenario: scen || "GM", trainee: tid, skills: skills(p, style), costs: {}, skillWeight: 1, borrow: true }),
@@ -35,7 +35,7 @@ const prepared = () => {
 test("your team: 2 of your 3 race each cup (by what each brings there), the third slot a flex; one you aren't pulling for isn't yours", () => {
   const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today)).map((t) => t.id));
   const dirt = [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou", rotate: true }];
-  const v = make({ teams: { sm: [], ml: [], dirt }, umas: mine });
+  const v = make({ teams: { sprint: [], mile: [], ml: [], dirt }, umas: mine });
   const dirtCups = P.list.filter((p) => p.global.start > today && p.global.start <= until && PV.groupOf(p) === "dirt");
   assert.equal(v.pairs.length + v.unrotated.length, dirtCups.length * 3);
   // Valentine Yukino Bijin isn't in your plan or My umas: never assumed yours from her release.
@@ -56,7 +56,7 @@ test("your team: 2 of your 3 race each cup (by what each brings there), the thir
 
 test("2 of your 3: the ones worth the most lengths on the cup, from her own unique and aptitudes", () => {
   const mine = new Set([101401, 109801, 102902]);
-  const v = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou", rotate: true }] }, umas: mine });
+  const v = make({ teams: { sprint: [], mile: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou", rotate: true }] }, umas: mine });
   const cup = P.list.find((p) => p.id === "cm22"), c = UV.cups.cm22;
   assert.ok(c && c.status === "ok");
   // El Condor Pasa's dirt B costs her the measured B->A on dirt, and her unique more than makes up for it.
@@ -243,7 +243,7 @@ test("copies after the pulls: the spark plus the binomial, capped at LB4", () =>
 
 test("a flex slot: each cup your best other uma there, in a style the others don't run, a fresh one when the gap is small", () => {
   const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today)).map((t) => t.id));
-  const v = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { rotate: true }] }, umas: mine });
+  const v = make({ teams: { sprint: [], mile: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { rotate: true }] }, umas: mine });
   const rot = v.pairs.filter((p) => p.rotating);
   const cups = [...new Set(v.pairs.map((p) => p.cup.id))];
   assert.equal(rot.length, cups.length, "one flex uma a cup");
@@ -260,7 +260,7 @@ test("a flex slot: each cup your best other uma there, in a style the others don
   for (let i = 1; i < rot.length; i++) if (rot[i].trainee.id === rot[i - 1].trainee.id) repeats++;
   assert.ok(repeats <= rot.length / 2, "mostly a fresh uma each cup");
   // Without umas of yours, both slots sit out (and say so).
-  const none = make({ teams: { sm: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { rotate: true }] }, umas: new Set() });
+  const none = make({ teams: { sprint: [], mile: [], ml: [], dirt: [{ id: 101401, style: "Senkou" }, { rotate: true }] }, umas: new Set() });
   assert.equal(none.pairs.length, 0);
   assert.equal(none.unrotated.length, cups.length * 2);
 });
@@ -367,7 +367,7 @@ test("your plan, locked: each row at its # Pulls, free pulls first, and it fits 
 });
 
 test("your team by date: one of your 3 races once she's yours; your selector picks first", () => {
-  const teams = { sm: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi", rotate: true }],
+  const teams = { mile: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi", rotate: true }],
     ml: [{ id: 111501, style: "Oikomi" }, { id: 111901, style: "Oikomi" }, { id: 102501, style: "Sasi", rotate: true }], dirt: [] };
   const mine = new Set(D.DATA.trainees.filter((t) => D.onGlobal(t, today) && [105301, 102501].indexOf(t.id) === -1).map((t) => t.id));
   const yours = new Map([[111901, "2027-11-06"], [111501, "2028-04-25"], [105301, "2026-11-29"], [102501, "2027-04-05"]]);

@@ -6,23 +6,24 @@ const PV = require("../pull-values.js");
 const VP = require("../vet-plan.js");
 
 const teams = {
-  sm: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi", rotate: true }],
+  sprint: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi", rotate: true }],
   ml: [{ id: 111501, style: "Oikomi" }, { id: 111901, style: "Oikomi" }, { id: 102501, style: "Sasi", rotate: true }],
   dirt: [{ id: null, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou", rotate: true }],
 };
 
 test("team kinds: by default Medium & Long is a team, the others one meta uma", () => {
-  assert.deepEqual(PV.KINDS, { sm: "meta", ml: "team", dirt: "meta" });
+  assert.deepEqual(PV.KINDS, { sprint: "meta", mile: "meta", ml: "team", dirt: "meta" });
   assert.deepEqual(PV.parentGroupsOf(PV.KINDS), ["ml"]);
-  assert.deepEqual(PV.parentGroupsOf({}), ["sm", "ml", "dirt"], "no kinds: every track a team");
+  assert.deepEqual(PV.parentGroupsOf({}), ["sprint", "mile", "ml", "dirt"], "no kinds: every track a team");
+  assert.deepEqual(Object.keys(PV.GROUPS), ["sprint", "mile", "ml", "dirt"], "Sprint and Mile are their own tracks");
 });
 
 test("team kinds: a meta track races its first named uma alone, never a flex", () => {
   const t = PV.effectiveTeams(teams, PV.KINDS);
-  assert.deepEqual(t.sm, [{ id: 105301, style: "Sasi" }]);
+  assert.deepEqual(t.sprint, [{ id: 105301, style: "Sasi" }]);
   assert.deepEqual(t.dirt, [{ id: 109801, style: "Senkou" }], "the first one named");
   assert.equal(t.ml, teams.ml, "the team stays as it is");
-  assert.deepEqual(PV.effectiveTeams({ sm: [{ rotate: true }] }, PV.KINDS).sm, [], "no uma named yet");
+  assert.deepEqual(PV.effectiveTeams({ sprint: [{ rotate: true }] }, PV.KINDS).sprint, [], "no uma named yet");
 });
 
 test("team kinds: the cleanout keeps a general grandparent for your team's styles only", () => {
@@ -38,6 +39,16 @@ test("team kinds: the cleanout keeps a general grandparent for your team's style
 
 test("team kinds: with has(id), a meta track races the first named uma you have", () => {
   const t = PV.effectiveTeams(teams, PV.KINDS, (id) => id === 106301);
-  assert.deepEqual(t.sm, [{ id: 106301, style: "Sasi" }]);
+  assert.deepEqual(t.sprint, [{ id: 106301, style: "Sasi" }]);
   assert.deepEqual(t.dirt, [{ id: 109801, style: "Senkou" }], "none yours: the first named");
+});
+
+test("team kinds: a meta track races the meta uma you picked, none until you pick (your team umas aren't meta umas)", () => {
+  const t = PV.effectiveTeams(teams, PV.KINDS, null, {});
+  assert.deepEqual(t.sprint, [], "no pick: no uma");
+  assert.deepEqual(t.dirt, []);
+  assert.equal(t.ml, teams.ml);
+  const p = PV.effectiveTeams(teams, PV.KINDS, null, { dirt: { id: 109801, style: "Senkou" }, mile: { id: 105301, style: "Sasi" } });
+  assert.deepEqual(p.dirt, [{ id: 109801, style: "Senkou" }]);
+  assert.deepEqual(p.mile, [{ id: 105301, style: "Sasi" }], "a track with no team list yet");
 });

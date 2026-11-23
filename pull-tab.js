@@ -12,7 +12,8 @@
   // they're yours; the third is yours too, but in CM and LoH that slot is a flex: a fresh uma of
   // yours each cup.
   const DEFAULT_TEAMS = {
-    sm: [{ id: 105301, style: "Sasi" }, { id: 106301, style: "Sasi" }, { id: 106101, style: "Sasi", rotate: true }],
+    sprint: [],
+    mile: [],
     ml: [{ id: 111501, style: "Oikomi" }, { id: 111901, style: "Oikomi" }, { id: 102501, style: "Sasi", rotate: true }],
     dirt: [{ id: 101401, style: "Senkou" }, { id: 109801, style: "Senkou" }, { id: 102902, style: "Senkou", rotate: true }],
   };
@@ -86,7 +87,18 @@
         });
         p.teamsV = 4;
       }
+      // Once (v5): Sprint and Mile are their own tracks, and a meta track's uma is the one you
+      // pick (p.meta), none until you do: your team umas aren't meta umas.
+      if (p.teamsV < 5) {
+        p.kinds = Object.assign({}, PV.KINDS, p.kinds && p.kinds.ml ? { ml: p.kinds.ml } : {}, p.kinds && p.kinds.dirt ? { dirt: p.kinds.dirt } : {});
+        delete p.kinds.sm;
+        if (!p.teams.sprint) p.teams.sprint = [];
+        if (!p.teams.mile) p.teams.mile = [];
+        p.meta = {};
+        p.teamsV = 5;
+      }
       if (!p.kinds) p.kinds = Object.assign({}, PV.KINDS);
+      if (!p.meta) p.meta = {};
       if (!p.plan) p.plan = JSON.parse(JSON.stringify(DEFAULT_PLAN));
       if (!p.selPicks) p.selPicks = Object.assign({}, DEFAULT_PICKS);
       return p;
@@ -111,7 +123,7 @@
       return Object.assign({ mine }, PV.planParts(mine, { today: ctx.today, done: p.done, selPicks: p.selPicks, selUma: !!p.selUma, events: B.events || [], caratsNow: p.carats, pullCarats: B.meta.pullCarats }));
     }
     // What the decks rest on (a re-plan with the same keeps them), and everything the route does.
-    const teamsOf = (p) => PV.effectiveTeams(p.teams, p.kinds);
+    const teamsOf = (p) => PV.effectiveTeams(p.teams, p.kinds, null, p.meta || {});
     const deckKey = (p) => JSON.stringify([ctx.today, until(p), teamsOf(p), PV.parentGroupsOf(p.kinds), ctx.ownedCode(), ctx.settingsKey(), [...ctx.myUmas()].sort(), p.usePlan && p.plan, p.selUma && p.selPicks]);
     const inputsKey = (p) => JSON.stringify([deckKey(p), p.carats, p.perMonth, p.sTickets, p.tTickets, p.ssrPicks, p.minCups, p.minPct, p.fade, p.usePlan, p.plan, p.selFree, p.selPaid, p.selUma, p.selPicks, p.done]);
     const cardName = (id) => { const c = D.card(id); return c ? c.n + " (" + RARITY[c.r] + " " + c.ty + ")" : "#" + id; };
@@ -303,21 +315,41 @@
     // cup, averaged; her worst cup too. → [{ t, avg, worst, style }] best first, with .cups.
     const styleName = (k) => (STYLES.find(([s]) => s === k) || [0, k])[1];
     const metaMemo = new Map();
+    // Meta picks for a track: kamigame's JP CM ranking for its distance (data/tier-list.js), SS
+    // then S then A, within a tier the longest on JP's list since her JP release first; the first
+    // three are the top 3. Each with her value over the track's cups ahead (team-maker.js worth:
+    // her own unique raced there in her best A/S style plus aptitudes). Without a tier list, by
+    // value. → [{ t, tier, months, top, avg, style }] with .tier, .dist, .cups.
+    const TRACK_DIST = { sprint: "Sprint", mile: "Mile", dirt: "Dirt" };
     function metaSuggest(g) {
-      const UV = root.UmaUmaValues, TM = root.UmaTeamMaker;
-      if (!UV || !TM) return [];
+      const UV = root.UmaUmaValues, TM = root.UmaTeamMaker, TL = root.UmaTierList;
       const key = g + "|" + ctx.today;
       if (metaMemo.has(key)) return metaMemo.get(key);
-      const cups = P.list.filter((q) => PV.groupOf(q) === g && q.global.start > ctx.today && UV.cups[q.id] && UV.cups[q.id].status === "ok");
-      const ids = new Set();
-      cups.forEach((q) => Object.keys(UV.cups[q.id].umas).forEach((id) => ids.add(+id)));
-      const rows = [...ids].map((id) => D.trainee(id)).filter((t) => t && TM.goodStyles(t).length).map((t) => {
+      const cups = UV && TM ? P.list.filter((q) => PV.groupOf(q) === g && q.global.start > ctx.today && UV.cups[q.id] && UV.cups[q.id].status === "ok") : [];
+      const valueOf = (t) => {
+        if (!cups.length || !TM.goodStyles(t).length) return { avg: null, style: TM && TM.goodStyles(t)[0] || "Senkou" };
         const per = cups.map((q) => TM.goodStyles(t).map((st) => ({ st, v: TM.worth(t, q, st, UV).v })).sort((a, b) => b.v - a.v)[0]);
         const n = {};
         per.forEach((x) => { n[x.st] = (n[x.st] || 0) + 1; });
-        const style = Object.keys(n).sort((a, b) => n[b] - n[a])[0];
-        return { t, avg: per.reduce((a, x) => a + x.v, 0) / Math.max(1, per.length), worst: Math.min(...per.map((x) => x.v)), style };
-      }).sort((a, b) => b.avg - a.avg);
+        return { avg: per.reduce((a, x) => a + x.v, 0) / per.length, style: Object.keys(n).sort((a, b) => n[b] - n[a])[0] };
+      };
+      const dist = TRACK_DIST[g], list = TL && TL.cm && dist && TL.cm[dist];
+      let rows;
+      if (list) {
+        const asOf = TL.meta.updated || ctx.today, order = ["SS", "S", "A"];
+        const months = (t) => (t.jp ? Math.max(0, (Date.parse(asOf) - Date.parse(t.jp)) / (30.44 * 864e5)) : null);
+        rows = [];
+        order.forEach((tier) => (list[tier] || []).map((id) => D.trainee(id)).filter(Boolean)
+          .map((t) => Object.assign({ t, tier, months: months(t) }, valueOf(t)))
+          .sort((a, b) => (b.months || 0) - (a.months || 0) || (b.avg || 0) - (a.avg || 0))
+          .forEach((x) => rows.push(x)));
+        rows.forEach((x, i) => { x.top = i < 3; });
+        rows.tier = true; rows.dist = dist;
+      } else {
+        const ids = new Set();
+        cups.forEach((q) => Object.keys(UV.cups[q.id].umas).forEach((id) => ids.add(+id)));
+        rows = [...ids].map((id) => D.trainee(id)).filter((t) => t && TM.goodStyles(t).length).map((t) => Object.assign({ t }, valueOf(t))).sort((a, b) => b.avg - a.avg);
+      }
       rows.cups = cups.length;
       metaMemo.set(key, rows);
       return rows;
@@ -353,16 +385,18 @@
       // track's cups ahead to pick from.
       const kindSel = (g) => `<label class="field"><span>This track</span><select data-pull-kind="${g}"><option value="team"${(p.kinds || {})[g] !== "meta" ? " selected" : ""}>A team of 3 (parents planned)</option><option value="meta"${(p.kinds || {})[g] === "meta" ? " selected" : ""}>One meta uma, every cup (no parents)</option></select></label>`;
       const metaRow = (g) => {
-        const list = p.teams[g] || [], i = Math.max(0, list.findIndex((m) => m && m.id)), m = list[i] || { id: null, style: "Senkou" }, t = m.id ? D.trainee(m.id) : null;
+        const m = (p.meta || {})[g] || { id: null, style: "Senkou" }, t = m.id ? D.trainee(m.id) : null;
         const s = t ? since(t) : null, from = !s ? null : s.date ? "from ~" + fmtDate(s.date) + " (" + s.why + ")" : "now (" + s.why + ")";
-        const sug = metaSuggest(g), mine = ctx.myUmas();
+        const sug = metaSuggest(g), mine = ctx.myUmas(), TL = root.UmaTierList;
+        const months = (x) => (x.months == null ? "" : x.months < 1 ? "new" : Math.round(x.months) + " mo");
         return `<div class="row-wrap pull-team-row">
-          <label class="field grow"><span>Meta uma</span><input list="pullTrainees" data-pull-team="${g}" data-i="${i}" value="${esc(t ? tLabel(t) : "")}" placeholder="Name [version]" autocomplete="off"></label>
-          <label class="field"><span>Style</span><select data-pull-style="${g}" data-i="${i}">${STYLES.map(([k, l]) => `<option value="${k}" ${m.style === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-          <span class="mini">${t ? esc(from ? "She races every " + PV.GROUPS[g].label + " cup, yours " + from + "." : "She races every " + PV.GROUPS[g].label + " cup once she's yours (tick her in My umas).") : "Pick the uma you'll repeat every cup."}</span></div>
-          ${sug.length ? `<details class="pred-help"><summary class="mini">Meta picks for ${esc(PV.GROUPS[g].label)}: ${sug.slice(0, 3).map((x) => esc(x.t.n)).join(", ")}</summary>
-            <p class="mini">Umas by what they bring themselves over the ${sug.cups} ${esc(PV.GROUPS[g].label)} cups ahead with values (her own unique raced on each cup plus her aptitudes, in her best style there; as the team maker counts it), so one that's good on most of them lasts. ★ = in My umas. Her deck, stats and skills aren't in it.</p>
-            <div class="table-wrap"><table class="plan"><thead><tr><th>Uma</th><th class="num">L a cup</th><th class="num">Worst cup</th><th>Style</th><th></th></tr></thead><tbody>${sug.slice(0, 10).map((x) => `<tr><td>${esc(tLabel(x.t))}${mine.has(x.t.id) ? " ★" : ""}${x.t.en ? "" : ' <span class="mini">(JP only so far)</span>'}</td><td class="num">${x.avg.toFixed(2)}</td><td class="num">${x.worst.toFixed(2)}</td><td>${esc(styleName(x.style))}</td><td><button type="button" class="linkish" data-pull-meta="${g},${x.t.id},${x.style}">Use</button></td></tr>`).join("")}</tbody></table></div></details>` : ""}`;
+          <label class="field grow"><span>Meta uma</span><input list="pullTrainees" data-pull-meta-name="${g}" value="${esc(t ? tLabel(t) : "")}" placeholder="Pick one (the picks below)" autocomplete="off"></label>
+          <label class="field"><span>Style</span><select data-pull-meta-style="${g}">${STYLES.map(([k, l]) => `<option value="${k}" ${m.style === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+          <span class="mini">${t ? esc(from ? "She races every " + PV.GROUPS[g].label + " cup, yours " + from + "." : "She races every " + PV.GROUPS[g].label + " cup once she's yours (tick her in My umas).") : "None picked: " + esc(PV.GROUPS[g].label) + " cups get no uma from your plan until you pick one."}</span></div>
+          ${sug.length ? `<details class="pred-help"${t ? "" : " open"}><summary class="mini">Meta picks for ${esc(PV.GROUPS[g].label)}${sug.tier ? " (top 3: " + sug.filter((x) => x.top).map((x) => esc(x.t.n) + (x.t.en ? "" : " (JP)")).join(", ") + (sug.some((x) => x.t.en) ? "; best on Global now: " + sug.filter((x) => x.t.en).slice(0, 2).map((x) => esc(tLabel(x.t)) + " " + x.tier).join(", ") : "") + ")" : ""}</summary>
+            <p class="mini">${sug.tier ? `From <a href="${esc(TL.meta.url)}" target="_blank" rel="noopener">kamigame's</a> JP Champions Meeting ranking for ${esc(sug.dist)} (updated ${esc(TL.meta.updated || "?")}): SS first, then S, then A; within a tier, the one JP has kept there longest since her JP release first (Global runs about a year behind JP, so that's about how long she stays meta after she comes out here). <b>Top 3</b> are the first three. Value: her own unique and aptitudes over the ${sug.cups} ${esc(PV.GROUPS[g].label)} cups ahead, as the team maker counts it.` : `No tier list loaded: umas by what they bring themselves over the ${sug.cups} cups ahead.`} ★ = in My umas.</p>
+            <div class="table-wrap"><table class="plan"><thead><tr><th>Uma</th>${sug.tier ? "<th>Tier</th><th class=\"num\">Top on JP</th>" : ""}<th class="num">Value</th><th>Style</th><th></th></tr></thead><tbody>${sug.slice(0, 12).map((x) => `<tr${x.top ? ' class="cur"' : ""}><td>${x.top ? "<b>Top 3</b> · " : ""}${esc(tLabel(x.t))}${mine.has(x.t.id) ? " ★" : ""}${x.t.en ? "" : ' <span class="mini">(not on Global yet)</span>'}</td>${sug.tier ? `<td>${x.tier}</td><td class="num">${months(x)}</td>` : ""}<td class="num">${x.avg == null ? "—" : x.avg.toFixed(2)}</td><td>${esc(styleName(x.style))}</td><td><button type="button" class="linkish" data-pull-meta="${g},${x.t.id},${x.style}">Use</button></td></tr>`).join("")}</tbody></table></div>
+            ${sug.tier && TL.unmatched && TL.unmatched.some((u) => u.distance === sug.dist) ? `<p class="mini">Not matched to an outfit (left out): ${TL.unmatched.filter((u) => u.distance === sug.dist).map((u) => esc(u.name) + " (" + u.tier + ")").join(", ")}.</p>` : ""}</details>` : ""}`;
       };
       const rotating = Object.keys(PV.GROUPS).some((g) => (p.kinds || {})[g] !== "meta" && (p.teams[g] || []).some((m) => m && m.rotate));
       return `<section class="panel">
@@ -720,9 +754,9 @@
       if (e.target.closest("#pullRun")) { run(); return true; }
       const meta = e.target.closest("[data-pull-meta]");
       if (meta) {
-        const [g, id, style] = meta.dataset.pullMeta.split(","), p = S(), list = p.teams[g] || (p.teams[g] = []);
-        const i = Math.max(0, list.findIndex((m) => m && m.id));
-        list[i] = { id: +id, style };
+        const [g, id, style] = meta.dataset.pullMeta.split(","), p = S();
+        if (!p.meta) p.meta = {};
+        p.meta[g] = { id: +id, style };
         ctx.save(); ctx.flash(`${umaName(+id)} is your ${PV.GROUPS[g].label} meta uma.`); ctx.rerender();
         return true;
       }
@@ -804,6 +838,22 @@
         else { ctx.flash("Pick a trainee from the list (name and version)."); return true; }
         ctx.save();
         ctx.rerender();
+        return true;
+      }
+      if (t.dataset.pullMetaName) {
+        const g = t.dataset.pullMetaName, id = byLabel.get(t.value.trim().toLowerCase());
+        if (!p.meta) p.meta = {};
+        if (!t.value.trim()) p.meta[g] = null;
+        else if (id) p.meta[g] = { id, style: (p.meta[g] || {}).style || "Senkou" };
+        else { ctx.flash("Pick a trainee from the list (name and version)."); return true; }
+        ctx.save(); ctx.rerender();
+        return true;
+      }
+      if (t.dataset.pullMetaStyle) {
+        const g = t.dataset.pullMetaStyle;
+        if (!p.meta) p.meta = {};
+        if (p.meta[g]) p.meta[g].style = t.value;
+        ctx.save();
         return true;
       }
       if (t.dataset.pullKind) {

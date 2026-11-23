@@ -21,7 +21,8 @@
 (function (root) {
   "use strict";
   const GROUPS = {
-    sm: { label: "Sprint & Mile", builds: ["sprint", "mile"] },
+    sprint: { label: "Sprint", builds: ["sprint"] },
+    mile: { label: "Mile", builds: ["mile"] },
     ml: { label: "Medium & Long", builds: ["medium", "long"] },
     dirt: { label: "Dirt", builds: ["dirt"] },
   };
@@ -76,7 +77,7 @@
   const EVENT_DAYS = 14; // a story event's SSR is yours (to LB4) by the end of its event
   const needsOf = (cup, style) => [cup.course.surface === "Dirt" ? 1 : 0, DIST_IX[cup.course.dist], STYLE_IX[style]].filter((i) => i != null);
 
-  // o: { D, T, A, B (data/banners.js), P (data/presets.js), today, until, teams: { sm|ml|dirt:
+  // o: { D, T, A, B (data/banners.js), P (data/presets.js), today, until, teams: { sprint|mile|ml|dirt:
   //      [{ id, style, rotate }] (rotate: a flex slot, a fresh uma of yours each cup; its id, if
   //      any, is an uma you'll have) }, owned: { cardId: lb }, umas: Set of trainee ids you own,
   //      yours: Map(trainee id → date) (umas your plan gets, from then), lockedPicks: Map(selector
@@ -1362,15 +1363,18 @@
     return { locked, freePulls, yours, lockedPicks, budget, done: new Set(Object.keys(done).concat(rows.filter((x) => rowDone(x, today, done)).map(rowKey))) };
   }
 
-  // Team kinds per track ({ sm|ml|dirt: "team" | "meta" }): a "meta" track races one uma you
-  // repeat every cup (the first named one, or with has(id) the first named one you have; never a
-  // flex) instead of a team of 3, and gets no parents. → the teams as the planner uses them.
-  const KINDS = { sm: "meta", ml: "team", dirt: "meta" };
-  function effectiveTeams(teams, kinds, has) {
+  // Team kinds per track ({ sprint|mile|ml|dirt: "team" | "meta" }): a "meta" track races one
+  // uma you repeat every cup instead of a team of 3, and gets no parents. metas: { track: { id,
+  // style } | null }, the meta uma you picked (none until you pick); without metas (older
+  // callers), the team's first named uma (with has(id), the first you have). Never a flex.
+  // → the teams as the planner uses them.
+  const KINDS = { sprint: "meta", mile: "meta", ml: "team", dirt: "meta" };
+  function effectiveTeams(teams, kinds, has, metas) {
     const out = {};
-    Object.keys(teams || {}).forEach((g) => {
-      const list = teams[g] || [], kind = (kinds || {})[g] || "team";
+    Object.keys(Object.assign({}, teams || {}, metas || {})).forEach((g) => {
+      const list = (teams || {})[g] || [], kind = (kinds || {})[g] || "team";
       if (kind !== "meta") { out[g] = list; return; }
+      if (metas) { const m = metas[g]; out[g] = m && m.id ? [{ id: m.id, style: m.style }] : []; return; }
       const m = (has && list.find((x) => x && x.id && has(+x.id))) || list.find((x) => x && x.id) || null;
       out[g] = m ? [{ id: m.id, style: m.style }] : [];
     });
