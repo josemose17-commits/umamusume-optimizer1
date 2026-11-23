@@ -787,6 +787,10 @@
 
     document.querySelector("#sidebar").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); if (UI) UI.closeDrawer(); window.scrollTo({ top: 0 }); } });
     $("#tabBody").addEventListener("click", (e) => {
+      const subBtn = e.target.closest("[data-cm-sub]");
+      if (subBtn) { setCmSub(subBtn.dataset.cmSub); return; }
+      const stepBtn = e.target.closest("[data-step-go]");
+      if (stepBtn) { showStep(stepBtn.dataset.stepGo); return; }
       if (state.tab === "parents" && gp() && gp().click(e)) return;
       if (state.tab === "parents" && parents() && parents().click(e)) return;
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
@@ -3295,13 +3299,33 @@
 
   // The CM & decks tab: the cup and your team, then the selected ace's racing deck, exactly
   // as the deck optimizer builds it, with her gaps (target minus predicted) for Parents.
+  // CM & decks' sub-tab (kept in this browser): Team, Deck, Skills or CM results.
+  const CM_SUB_KEY = "uma-cm-sub-v1";
+  const cmSub = () => { try { return localStorage.getItem(CM_SUB_KEY) || "deck"; } catch (e) { return "deck"; } };
+  function setCmSub(k) {
+    try { localStorage.setItem(CM_SUB_KEY, k); } catch (e) { /* ignore */ }
+    const box = document.querySelector(".cm-split");
+    if (box) { box.dataset.sub = k; box.querySelectorAll("[data-cm-sub]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.cmSub === k))); }
+  }
   function renderDecks(body) {
     if (!P || !T) { body.innerHTML = `<div class="empty">The CM data didn't load. Refresh the page.</div>`; return; }
     const plan = cmPlan(), x = W.current(state), p = presetById(x.cup) || defaultPreset();
     loadSkillValues(p.id);
     euReady();
     const c = x.ace ? cm("cm") : null;
-    body.innerHTML = `<div class="cm">${cmHeader(p, c, plan.teamHTML())}${cmLogHTML(p)}${c ? cmOptimizer(p, c, "cm") + cmSkills(p, c, "cm") : `<section class="panel"><p class="mini">Add an ace to your team above to build her deck.</p></section>`}</div>`;
+    // Two columns on a wide screen: the cup and team (left), the deck, skills and your CM results
+    // as sub-tabs (right). Narrower, one column with Team as the first sub-tab. Every section is
+    // drawn; the sub-tab only shows one (the code that reads them finds them all).
+    const sub = cmSub(), tabs = [["team", "Team", true], ["deck", "Deck"], ["skills", "Skills"], ["results", "CM results"]];
+    const pane = (k, html) => `<div class="subpane" data-pane="${k}">${html}</div>`;
+    const none = `<section class="panel"><p class="mini">Add an ace to your team to build her deck.</p></section>`;
+    body.innerHTML = `<div class="cm cm-split" data-sub="${sub}">
+      <aside class="cm-side subpane" data-pane="team">${cmHeader(p, c, plan.teamHTML())}</aside>
+      <div class="cm-main">
+        <nav class="subtabs" role="tablist" aria-label="CM &amp; decks">${tabs.map(([k, l, narrow]) => `<button type="button" role="tab" class="subtab${narrow ? " only-narrow" : ""}" data-cm-sub="${k}" aria-selected="${sub === k}">${l}</button>`).join("")}</nav>
+        ${pane("deck", c ? cmOptimizer(p, c, "cm") : none)}${pane("skills", c ? cmSkills(p, c, "cm") : none)}${pane("results", cmLogHTML(p))}
+      </div>
+    </div>`;
   }
 
   // Her gaps: each stat's target (yours, else the race build's, within the caps) against the
@@ -3622,6 +3646,7 @@
       coachTargets: () => (state.targets && E.STATS.some((x) => state.targets[x] > 0) ? state.targets : null),
       sync: () => syncWorkflow(),
       familyHTML: () => parents().familyHTML(),
+      parentsStep: () => { try { return localStorage.getItem(STEP_KEY); } catch (e) { return null; } },
       generalHTML: () => (gp() ? gp().html() : ""),
       family: () => parents().st().family || {},
       planFamily: (p1, train, userChoice) => {
@@ -3797,6 +3822,20 @@
   const pullKinds = () => { const p = state.pull || {}, PV = window.UmaPullValues; return p.teamsV >= 5 && p.kinds ? p.kinds : PV ? PV.KINDS : {}; };
   // The meta umas you picked per meta track (none until you pick; saves before v5 have none).
   const pullMetas = () => { const p = state.pull || {}; return p.teamsV >= 5 && p.meta ? p.meta : {}; };
+  // Parents' stepper (cm-tab.js renderParents): one step showing, kept in this browser.
+  const STEP_KEY = "uma-parents-step-v1";
+  function showStep(k) {
+    try { localStorage.setItem(STEP_KEY, k); } catch (e) { /* ignore */ }
+    document.querySelectorAll("[data-step-pane]").forEach((el) => { el.hidden = el.dataset.stepPane !== k; });
+    document.querySelectorAll("[data-step-go]").forEach((b) => b.setAttribute("aria-current", b.dataset.stepGo === k ? "step" : "false"));
+  }
+  // An element inside a hidden stepper step or CM & decks sub-tab: show that step or sub-tab first.
+  function reveal(el) {
+    const step = el && el.closest("[data-step-pane]");
+    if (step && step.hidden) showStep(step.dataset.stepPane);
+    const pane = el && el.closest(".cm-split .subpane");
+    if (pane) setCmSub(pane.dataset.pane);
+  }
   // Open a workflow section and any folded sections containing it.
   function showSection(section) {
     const id = { family: "cm-family", who: "pp-who", races: "pp-races", deck: "pp-deck", rating: "pp-rating" }[section] || "cm-" + section;
@@ -3805,6 +3844,7 @@
     setTimeout(() => {
       const el = document.getElementById(id);
       if (!el) return;
+      reveal(el);
       let p = el;
       while (p && p.id !== "tabBody") { if (p.tagName === "DETAILS") p.open = true; p = p.parentElement; }
       el.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -4159,7 +4199,8 @@
       if (!f) return `<td class="num">${r.est.stats[i]}</td>`;
       const t = Math.min(f.target[s], f.caps[s]);
       const d = r.est.stats[i] - t;
-      return `<td class="num">${r.est.stats[i]}<div class="mini">${t}</div><div class="mini ${d < 0 ? "short" : "over"}">${d < 0 ? d : "+" + d}</div></td>`;
+      // The difference as a pill: emerald when met, amber a little short (up to 50), red past that.
+      return `<td class="num">${r.est.stats[i]}<div class="mini">${t}</div><div><span class="gap-pill ${d < 0 ? (d < -50 ? "bad" : "warn") : "good"} ${d < 0 ? "short" : "over"}">${d < 0 ? d : "+" + d}</span></div></td>`;
     };
     const blue = (x) => (x > 1100 ? 10 : x >= 600 ? 5 : 0);
     return `<div class="predicted">
