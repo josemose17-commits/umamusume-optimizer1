@@ -936,8 +936,8 @@ body:not([data-page="coach"]) .dock { display: none !important; }
   #newCareer { order: 3; flex: none; min-height: 34px; padding: 5px 10px; font-size: .84rem; }
   .topbar .settings { order: 4; }
   #themeToggle { order: 5; }
-  .topbar .top-field:has(#scenario) { order: 6; flex: 1 1 52%; }
-  .topbar .top-field:has(#build) { order: 7; flex: 1 1 36%; }
+  .topbar .top-field:has(#scenario) { order: 6; flex: 1 1 46%; }
+  .topbar .top-field:has(#build) { order: 7; flex: 1 1 30%; }
   .topbar #scenario, .topbar #build { width: 100%; max-width: none; }
   .topbar .settings summary { width: 36px; padding: 0; }
 }
@@ -999,3 +999,34 @@ body:not([data-page="coach"]) .dock { display: none !important; }
 .linkish { font-family: var(--font-body); text-decoration-thickness: 1px; }
 td .linkish:not([data-cmp-sel]), .opt-rank { font-family: var(--font-mono); }
 .cmp-ace-chip .linkish { text-decoration: none; }
+
+/* ===================== Redesign 3: Import & backup, header import chip, Notes drawers ===================== */
+/* Header chip: your umaextractor import (amber icon until there is one); opens Import & backup */
+.import-chip { gap: 7px; font-weight: 550; font-size: .84rem; white-space: nowrap; }
+.import-chip svg { color: var(--accent); flex: none; }
+.import-chip.empty svg { color: var(--warn); }
+.import-chip-txt { font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) { .import-chip-txt { display: none; } .import-chip { width: 36px; padding: 0; } }
+@media (max-width: 600px) { .import-chip { order: 8; flex: none; } }
+
+/* Import & backup page */
+.data-page { display: grid; gap: var(--gap); max-width: 860px; }
+.data-page .panel h3 { margin: 0; }
+.import-stats { align-items: center; gap: 8px 10px; }
+.import-stats .pill b { font-weight: 700; margin-right: 2px; }
+.cmp-import textarea { width: 100%; min-height: 96px; font-family: var(--font-mono); font-size: .8rem; }
+.cmp-import-line { margin-top: 2px; }
+
+/* Notes: a long explanation folded to its first sentence */
+details.notes { border: 1px solid var(--line); border-radius: var(--r-sm); background: color-mix(in srgb, var(--surface-2) 45%, transparent); min-width: 0; }
+details.notes > summary { list-style: none; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px; font-size: .82rem; color: var(--muted); border-radius: var(--r-sm); }
+details.notes > summary::-webkit-details-marker { display: none; }
+details.notes > summary:hover { color: var(--fg); background: var(--surface-2); }
+details.notes > summary svg { flex: none; width: 16px; height: 16px; color: var(--accent); }
+details.notes > summary::after { content: "Show"; flex: none; margin-left: auto; padding-left: 8px; font-size: .74rem; font-weight: 600; color: var(--accent); }
+details.notes[open] > summary::after { content: "Hide"; }
+.notes-tag { flex: none; font-weight: 650; color: var(--fg); }
+.notes-peek { flex: 1 1 0; width: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.notes[open] .notes-peek { visibility: hidden; }
+details.notes > p { margin: 0; padding: 2px 12px 10px 34px; }
+details.notes > p + p { padding-top: 0; }
