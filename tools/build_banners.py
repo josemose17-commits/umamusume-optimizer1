@@ -100,8 +100,9 @@ def from_calculator(data, rarity, now):
             # A select banner ("Debut 10 Select 2"): you choose rate_up_picks of the listed cards to
             # feature; the others aren't featured.
             k = b.get("rate_up_picks")
+            # These ("Debut 10 Select 2") are for new and returning players only: left out.
             if isinstance(k, int) and 0 < k < len(pick):
-                row["select"] = k
+                continue
             out[kind].append(row)
     return out
 
