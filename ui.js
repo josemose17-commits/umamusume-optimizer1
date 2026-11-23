@@ -21,6 +21,7 @@
     menu: svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),
     sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
     moon: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+    help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6M12 17h.01"/>'),
     gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   };
   // The sidebar, by what you're doing: playing a career, planning ahead, reading, your own data.
@@ -77,7 +78,62 @@
     root.document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
   }
 
-  const api = { NAV, ICON, navHTML, label, init, setActive, closeDrawer, toggleNav, toggleTheme };
+  // Long explanations fold into a Notes drawer that shows their first sentence, so a page leads
+  // with its controls and results. Only plain explanatory paragraphs fold: no action buttons or
+  // fields, nothing the app updates by id, no warning or bold status line, nothing already in a
+  // drawer. Neighbouring ones share a drawer. A drawer you open stays open across redraws.
+  const FOLD_MIN = 200;
+  const isLong = (text) => String(text || "").trim().length >= FOLD_MIN;
+  function peekOf(text) {
+    const t = String(text || "").replace(/\s+/g, " ").trim();
+    const m = t.match(/^(.{12,150}?[.!?:])(?=\s|$)/);
+    return m ? m[1].replace(/:$/, "") : t.length > 120 ? t.slice(0, 117).replace(/\s+\S*$/, "") + "…" : t;
+  }
+  const NOT_IN = "details:not(.panel), table, summary, li, .notes, .dock, .settings, .topbar, .stepper";
+  function foldable(p) {
+    if (!p || p.tagName !== "P" || p.classList.length !== 1 || !p.classList.contains("mini")) return false;
+    if (p.id || p.querySelector("[id], input, select, textarea, label, button:not(.linkish)")) return false;
+    if (!isLong(p.textContent) || p.closest(NOT_IN)) return false;
+    let first = p.firstChild;
+    while (first && first.nodeType === 3 && !first.textContent.trim()) first = first.nextSibling;
+    return !(first && first.nodeType === 1 && /^(B|STRONG)$/.test(first.tagName));
+  }
+  const openNotes = new Set();
+  const noteKey = (d) => ((root.document.body.dataset.page || "") + "|" + d.textContent.replace(/\s+/g, " ").trim().slice(0, 90));
+  function tidy(scope) {
+    if (!scope || !scope.querySelectorAll) return 0;
+    let n = 0;
+    const done = new Set();
+    scope.querySelectorAll("p.mini").forEach((p) => {
+      if (done.has(p) || !foldable(p)) return;
+      const group = [p];
+      for (let x = p.nextElementSibling; x && foldable(x); x = x.nextElementSibling) group.push(x);
+      group.forEach((x) => done.add(x));
+      const d = root.document.createElement("details");
+      d.className = "notes";
+      d.innerHTML = `<summary>${ICON.help}<span class="notes-tag">Notes</span><span class="notes-peek">${esc(peekOf(p.textContent))}</span></summary>`;
+      p.parentNode.insertBefore(d, p);
+      group.forEach((x) => d.appendChild(x));
+      if (openNotes.has(noteKey(d))) d.open = true;
+      n++;
+    });
+    return n;
+  }
+  // Folds what a page draws, as it draws it (before the browser paints).
+  function watchNotes(el) {
+    if (!el || !root.MutationObserver) return;
+    const obs = new root.MutationObserver(() => { tidy(el); obs.takeRecords(); });
+    obs.observe(el, { childList: true, subtree: true });
+    tidy(el);
+    root.document.addEventListener("toggle", (e) => {
+      const d = e.target;
+      if (!d || !d.classList || !d.classList.contains("notes") || !d.isConnected) return;
+      const k = noteKey(d);
+      if (d.open) openNotes.add(k); else openNotes.delete(k);
+    }, true);
+  }
+
+  const api = { NAV, ICON, navHTML, label, init, setActive, closeDrawer, toggleNav, toggleTheme, FOLD_MIN, isLong, peekOf, foldable, tidy, watchNotes };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaUI = api;
 })(typeof window !== "undefined" ? window : globalThis);

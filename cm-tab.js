@@ -425,7 +425,7 @@
         <div class="row-wrap cmp-chips" aria-label="Your team"><span class="mini"><b>Your team</b> (up to ${MAX_ACES}; the deck below is for the one picked)</span>${chips}${list.length < MAX_ACES ? `<button type="button" class="btn ghost small" id="cmpAddAce"${mine.length ? "" : " disabled"}>+ Add an ace</button>` : ""}${team.length ? `<button type="button" class="linkish" id="cmpTeam">Use my Pull planner team</button>` : ""}</div>${editor}
         ${makerHTML(c, p)}
         ${selected && ctx.staminaSummary ? staminaLine() : ""}
-        ${!mine.length ? `<p class="mini">Your team comes from My umas: tick them in the Trainees tab, or import your umaextractor export in <button type="button" class="linkish" data-goto-tab="parents" data-goto-section="import">Parents</button>.</p>` : ""}`;
+        ${!mine.length ? `<p class="mini">Your team comes from My umas: tick them in the Trainees tab, or import your umaextractor export in <button type="button" class="linkish" data-goto-tab="data">Import &amp; backup</button>.</p>` : ""}`;
     }
 
     // ---------- Team maker: the best team for this cup from umas you list ----------
@@ -512,11 +512,11 @@
           <p class="mini">${esc(p.name)} · ${a ? STYLE_LABEL[styleOf(a)] : "no ace yet"}. Fill her gaps with blue sparks, make Parent 1 with a borrowed grandparent, borrow Parent 2, reach ${MIN_AFFINITY}+ affinity.</p>
           <p class="mini">${r && r.x.skillPlan ? `White targets follow the ace's source-checked purchases · ${r.x.skillPlan.model}${r.jointPasses ? ` · ${r.jointPasses} planning passes` : ""}. ${r.jointConverged===false ? "Targets shifted in the final check; find them again to compare another pass." : ""}` : "Find parents checks the ace's skill sources, then plans the white hints her purchases need."}</p>
           <div class="row-wrap cmp-chips" aria-label="Your team">${aces(c).filter((x) => trainee(x.tid)).map((x) => `<button type="button" class="chip${a && x.tid === a.tid ? " active" : ""}" data-cmp-sel="${x.tid}" aria-pressed="${!!a && x.tid === a.tid}">${esc(tName(trainee(x.tid)))}</button>`).join("")}<button type="button" class="linkish" data-goto-tab="cm">${a ? "Team and decks in CM & decks" : "Pick your team in CM & decks"} →</button></div>
+          ${importHTML()}
         </section>
         ${steps}${skipped}
         ${ctx.generalHTML ? ctx.generalHTML() : ""}
         <details class="panel" id="cm-family" data-cmp-open="family-tools"${opened["family-tools"] ? " open" : ""}><summary><b>Family table</b> · enter and compare a family by hand</summary>${ctx.familyHTML()}</details>
-        ${importHTML()}
         ${howHTML()}
       </div>`;
       if (job) body.querySelectorAll("button, select, input, textarea").forEach((el) => { el.disabled = true; });
@@ -1008,13 +1008,24 @@
         <details data-cmp-open="check"><summary class="mini">The family it counts</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Slot</th><th>Character</th><th class="num">G1 wins</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
     }
 
-    function importHTML() {
+    // The umaextractor import: its own panel on My Data → Import & backup; elsewhere a status
+    // line that links there.
+    function importHTML(o) {
       const v = ctx.veterans(), n = v.list.length, owned = Object.keys(ctx.owned()).length;
-      return `<details class="panel cmp-import" id="cm-import"${n ? "" : " open"}><summary><b>Your umaextractor export</b> · ${n ? `${plural(n, "veteran")} imported ${esc(v.at || "")}` : "not imported yet"} · ${plural(owned, "card")} in My cards · ${plural(ctx.myUmas().size, "uma")} in My umas</summary>
-        <p class="mini">Import your veterans, umas and cards. Import again any time; your cards' limit breaks never go down.</p>
-        <textarea class="fp-vets" id="cmpVetsText" rows="3" placeholder="Paste the umaextractor JSON here"></textarea>
+      const status = `${n ? `${plural(n, "veteran")} imported ${esc(v.at || "")}` : "not imported yet"} · ${plural(owned, "card")} in My cards · ${plural(ctx.myUmas().size, "uma")} in My umas`;
+      if (!(o && o.page)) return `<p class="mini cmp-import-line"><b>Umaextractor:</b> ${status} · <button type="button" class="linkish" data-goto-tab="data">${n ? "Import again" : "Import"}</button></p>`;
+      return `<section class="panel cmp-import" id="cm-import">
+        <h3>Umaextractor import</h3>
+        <div class="row-wrap import-stats">
+          <span class="pill ${n ? "good" : "warn"}"><b class="num">${n}</b> veteran${n === 1 ? "" : "s"}</span>
+          <span class="pill"><b class="num">${ctx.myUmas().size}</b> in My umas</span>
+          <span class="pill"><b class="num">${owned}</b> card${owned === 1 ? "" : "s"} in My cards</span>
+          <span class="mini">${n ? `Imported ${esc(v.at || "")}` : "Not imported yet"}</span>
+        </div>
+        <p class="mini">Paste or pick umaextractor's JSON export: your veterans (for Parents), the umas you own (My umas) and your support cards (My cards). Import again any time; your cards' limit breaks never go down.</p>
+        <textarea class="fp-vets" id="cmpVetsText" rows="4" placeholder="Paste the umaextractor JSON here"></textarea>
         <div class="row-wrap"><button type="button" class="btn small" id="cmpImport">Import</button><label class="btn ghost small">Pick the file<input type="file" accept=".json,application/json" id="cmpVetsFile" hidden></label></div>
-      </details>`;
+      </section>`;
     }
 
     function howHTML() {
@@ -1192,7 +1203,7 @@
       return false;
     }
 
-    return { teamHTML, renderParents, click, change, st, followDeck, refreshStatus: () => {},
+    return { teamHTML, renderParents, click, change, st, followDeck, refreshStatus: () => {}, importHTML,
       // The uma.moe link builder and its settings list (General grandparents' borrow search).
       umaMoe: (q) => CP.umaMoe(q), searchSummary: (x) => CP.searchSummary(x, ctx.skillName) };
   }

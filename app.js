@@ -200,7 +200,7 @@
   const COACH_KEY = "uma-coach-open-v1";
   // The shell (ui.js): the sidebar's pages. Import & backup joins My Data with its page.
   const UI = window.UmaUI || null;
-  const PAGES = ["coach", "plan", "log", "cm", "parents", "skillopt", "pulls", "guide", "all", "tiers", "cards", "trainees"];
+  const PAGES = ["coach", "plan", "log", "cm", "parents", "skillopt", "pulls", "guide", "all", "tiers", "cards", "trainees", "data"];
   function coachOpen() { try { return localStorage.getItem(COACH_KEY) !== "0"; } catch (e) { return true; } }
 
   function save() {
@@ -225,6 +225,7 @@
         <div class="controls">
           <label class="field top-field"><span>Scenario</span><select id="scenario" aria-label="Scenario"></select></label>
           <label class="field top-field"><span>Build</span><select id="build" aria-label="Build"></select></label>
+          <button type="button" class="btn ghost import-chip" id="importChip" title="Import &amp; backup">${UI ? UI.ICON.data : ""}<span class="import-chip-txt" id="importChipTxt">Import</span></button>
           <details class="settings" id="settings">
             <summary class="btn ghost" title="Settings">${UI ? UI.ICON.gear : ""}<span class="hide-sm">Settings</span></summary>
             <div class="settings-body">
@@ -353,7 +354,7 @@
       <div class="dock" id="dock"><div class="dock-text" id="dockText"></div><button type="button" class="btn" id="dockDone">Done ▶</button></div>
     `;
 
-    if (UI) UI.init();
+    if (UI) { UI.init(); UI.watchNotes($("#tabBody")); }
     const sel = $("#scenario");
     const groups = [["global", "On Global now"], ["global-soon", "Coming to Global next"], ["jp-current", "JP latest"], ["jp", "JP only (future Global)"], ["announced", "Announced"]];
     sel.innerHTML = groups.map(([st, lab]) => {
@@ -378,6 +379,7 @@
     $("#resetCalib").addEventListener("click", () => { state.calib = []; state.fcal = []; commit(); flash("Learned deck strength cleared"); });
     $("#resetMode").addEventListener("change", (e) => { state.resetMode = e.target.value; commit(); });
     $("#newCareer").addEventListener("click", () => newCareer($("#newCareer")));
+    $("#importChip").addEventListener("click", () => { state.tab = "data"; save(); renderTab(); if (UI) UI.closeDrawer(); window.scrollTo({ top: 0 }); });
 
     $("#maxEnergyPlus4").addEventListener("click", () => {
       state.maxEnergy = Math.min(150, (state.maxEnergy || 100) + 4);
@@ -796,7 +798,7 @@
       if (state.tab === "pulls" && pulls() && pulls().click(e)) return;
       if (state.tab === "cm" && cmLogClick(e.target)) return;
       if (state.tab === "skillopt" && soClick(e)) return;
-      if (deckTab() && cmPlan() && cmPlan().click(e)) return;
+      if ((deckTab() || state.tab === "data") && cmPlan() && cmPlan().click(e)) return;
       const nav = e.target.closest("[data-goto-tab]");
       if (nav) {
         const dest = nav.dataset.gotoTab === "cmplan" ? "cm" : nav.dataset.gotoTab;
@@ -893,7 +895,7 @@
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "skillopt") soChange(e); });
-    $("#tabBody").addEventListener("change", (e) => { if (deckTab() && cmPlan()) cmPlan().change(e); });
+    $("#tabBody").addEventListener("change", (e) => { if ((deckTab() || state.tab === "data") && cmPlan()) cmPlan().change(e); });
     $("#tabBody").addEventListener("toggle", (e) => { if (state.tab === "parents" && parents()) parents().onToggle(e); }, true);
     $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null || e.target.dataset.cmTarget != null) setTimeout(renderTab, 0); });
     $("#tabBody").addEventListener("input", (e) => {
@@ -1781,6 +1783,44 @@
     return ids.length + " owned · " + ssr + " SSR · " + mlb + " at max limit break";
   }
 
+  // My Data → Import & backup: your umaextractor import (veterans, My umas, cards) and the
+  // backup code for your cards, in one place. The header chip shows the import and opens it.
+  // Read straight from storage (family-planner.js keeps it there), so the chip needs no planner.
+  let vetsRaw, vetsVal = { at: "", list: [] };
+  function vetsInfo() {
+    let raw = null;
+    try { raw = localStorage.getItem("uma-veterans-v1"); } catch (e) { /* ignore */ }
+    if (raw !== vetsRaw) { vetsRaw = raw; let v = null; try { v = JSON.parse(raw); } catch (e) { v = null; } vetsVal = v && Array.isArray(v.list) ? v : { at: "", list: [] }; }
+    return vetsVal;
+  }
+  function importChip() {
+    const el = $("#importChipTxt"), btn = $("#importChip");
+    if (!el || !btn) return;
+    const v = vetsInfo(), n = v.list.length;
+    el.textContent = n ? `${n} veteran${n === 1 ? "" : "s"}${v.at ? " · " + shortDate(v.at) : ""}` : "Import";
+    btn.title = n ? `Umaextractor: ${n} veteran${n === 1 ? "" : "s"} imported ${v.at || ""}. Import & backup` : "Umaextractor: not imported yet. Import & backup";
+    btn.classList.toggle("empty", !n);
+  }
+  function shortDate(iso) {
+    const d = new Date(iso + "T00:00:00");
+    return isNaN(d) ? iso : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+  function dataPage() {
+    return `<div class="data-page">
+      <header class="page-head"><h2>Import &amp; backup</h2><p class="sub">Everything here is saved in this browser only. Import again any time; keep a backup code to move to another device.</p></header>
+      ${cmPlan().importHTML({ page: true })}
+      <section class="panel" id="data-backup">
+        <h3>Backup code</h3>
+        <p class="mini">Your support cards, their limit breaks, and the cards and outfits you don't use, as one code. Your veterans and My umas come back with an umaextractor import.</p>
+        <div class="row-wrap">
+          <button type="button" class="btn ghost small" id="ownExport">Copy backup code</button>
+          <label class="field grow"><span>Restore from a backup code</span><input id="ownImportCode" placeholder="UMA1:..." autocomplete="off"></label>
+          <button type="button" class="btn ghost small" id="ownImport">Restore</button>
+        </div>
+        <textarea id="ownCodeOut" class="codebox" readonly hidden aria-label="Backup code"></textarea>
+      </section>
+    </div>`;
+  }
   function collectionPanel() {
     return `<details class="panel collection" id="collPanel" ${ownedIds().length ? "" : "open"}>
       <summary><h2>My cards</h2><span class="mini" id="collCount">${ownedSummary()}</span></summary>
@@ -1791,12 +1831,7 @@
           <label class="field"><span>Limit break</span><select id="ownAddLb">${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${lb === 4 ? "selected" : ""}>LB${lb}</option>`).join("")}</select></label>
           <button type="button" class="btn small" id="ownAddBtn">Add</button>
         </div>
-        <div class="row-wrap">
-          <button type="button" class="btn ghost small" id="ownExport">Copy backup code</button>
-          <label class="field grow"><span>Restore from a backup code</span><input id="ownImportCode" placeholder="UMA1:..." autocomplete="off"></label>
-          <button type="button" class="btn ghost small" id="ownImport">Restore</button>
-        </div>
-        <textarea id="ownCodeOut" class="codebox" readonly hidden aria-label="Backup code"></textarea>
+        <p class="mini">Backup code and umaextractor import: <button type="button" class="linkish" data-goto-tab="data">Import &amp; backup</button>.</p>
         ${hiddenPanelHTML()}
       </div>
     </details>`;
@@ -3734,7 +3769,7 @@
       // search still stands (searching again for the new count could move the count again).
       keepDeckResult: () => { const j = deckJob("parents"), r = j && j.optResult; if (r && r.key !== optKey("parents") && r.key === optKey("parents", { itRaces: r.itRaces })) { r.key = optKey("parents"); r.racesFollowed = true; } },
       deckRun: () => { const j = deckJob("parents"); return j && j.optRun ? j.optRun.f || 0 : null; },
-      rerender: () => { if (deckTab()) renderTab(); },
+      rerender: () => { if (deckTab() || state.tab === "data") renderTab(); },
     });
     return cmTab;
   }
@@ -3838,6 +3873,7 @@
   }
   // Open a workflow section and any folded sections containing it.
   function showSection(section) {
+    if (section === "import") { state.tab = "data"; save(); renderTab(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
     const id = { family: "cm-family", who: "pp-who", races: "pp-races", deck: "pp-deck", rating: "pp-rating" }[section] || "cm-" + section;
     // Everything but the racing deck is in the Parents tab.
     if (state.tab !== "parents" && section !== "deck-cm") { state.tab = "parents"; save(); renderTab(); }
@@ -5507,6 +5543,7 @@
     // The pages (ui.js sidebar): the coach is its own page, kept in the document and shown here.
     if (!PAGES.includes(state.tab)) state.tab = "coach";
     if (UI) UI.setActive(state.tab);
+    importChip();
     $("#coachPanel").hidden = state.tab !== "coach";
     const body = $("#tabBody");
     body.hidden = state.tab === "coach";
@@ -5531,6 +5568,10 @@
     }
     if (state.tab === "skillopt" && HAS_DATA && SO) {
       renderSkillOpt(body);
+      return;
+    }
+    if (state.tab === "data" && HAS_DATA && cmPlan()) {
+      body.innerHTML = dataPage();
       return;
     }
     if ((state.tab === "cards" || state.tab === "trainees") && HAS_DATA) {
