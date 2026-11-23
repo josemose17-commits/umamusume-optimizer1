@@ -124,7 +124,7 @@
       const p = d && d.predicted;
       return p && p.stats && p.target ? p.target.map((t, i) => Math.max(0, Math.round(t - p.stats[i]))) : null;
     }
-    const inputsKey = (c) => { const a = current(c), d = a && deckOf(c, a), tid = d && d.fresh && d.fresh.plan && d.fresh.plan.tid; return JSON.stringify([ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.family(), d && d.fresh, d && d.predicted, tid ? ctx.parentDeck(tid) : null]); };
+    const inputsKey = (c) => { const a = current(c), d = a && deckOf(c, a), tid = d && d.fresh && d.fresh.plan && d.fresh.plan.tid; return JSON.stringify([ctx.veterans().at, ctx.veterans().list.length, [...ctx.myUmas()].sort(), ctx.family(), d && d.fresh, d && d.predicted, tid ? ctx.parentDeck(tid) : null, ctx.scenario().id]); };
 
     async function ready(p) {
       for (let i = 0; !ctx.euReady(); i++) { if (i > 600) throw new Error("The card data didn't load. Check your connection."); await new Promise((r) => setTimeout(r, 100)); }
