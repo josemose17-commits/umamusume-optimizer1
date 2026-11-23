@@ -21,14 +21,11 @@ test("ui: navHTML shows only the pages the app has", () => {
   assert.doesNotMatch(html, /Planning/, "a group with no pages is left out");
 });
 
-test("ui: Notes fold long explanations only, and peek at their first sentence", () => {
+test("ui: (?) help takes long explanations only", () => {
+  assert.strictEqual(UI.FOLD_MIN, 120);
   assert.strictEqual(UI.isLong("x".repeat(UI.FOLD_MIN - 1)), false);
   assert.strictEqual(UI.isLong("x".repeat(UI.FOLD_MIN)), true);
-  assert.strictEqual(UI.peekOf("Mark the cards you own and their limit break. The deck optimizer uses them."), "Mark the cards you own and their limit break.");
-  assert.strictEqual(UI.peekOf("Global's rules: 150 carats a pull, so 200 pulls are 30,000 carats."), "Global's rules");
-  assert.strictEqual(UI.peekOf("Tokyo 1600 m Dirt · 9 runners. Race check: the JP Umalator."), "Tokyo 1600 m Dirt · 9 runners.");
-  const long = "word ".repeat(60);
-  const p = UI.peekOf(long);
-  assert.ok(p.length <= 118 && p.endsWith("…"), "no sentence end: cut at a word, with an ellipsis");
+  assert.strictEqual(UI.isLong("  short  "), false);
   assert.strictEqual(UI.foldable(null), false);
+  assert.ok(UI.ICON.lock && UI.ICON.help, "the lock and (?) icons");
 });
