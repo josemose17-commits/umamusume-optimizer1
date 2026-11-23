@@ -51,18 +51,19 @@
   // GameTora's scenario ids → the scenario Global trains in from its start: Euophrys' own preset
   // (key), or an estimate on a base preset with the scenario's friend card as its link (Euophrys
   // has no preset for it). Names as Global's banners give them.
+  // coach: the turn coach's scenario id (scenarios.js), for its career simulation.
   const ERAS = {
-    4: { name: "Grand Concert", key: "GL" },
-    5: { name: "Grand Masters", key: "GM" },
-    6: { name: "Project L'Arc", base: "GM" },
-    7: { name: "U.A.F. Ready GO!", base: "GM" },
-    8: { name: "Great Food Festival", base: "GM" },
-    9: { name: "Hashire! Mecha Umamusume", base: "GM" },
-    10: { name: "The Twinkle Legends", base: "GM" },
-    11: { name: "Design Your Island", key: "DYI", jp: true },
-    12: { name: "Paradise ♪ Yukoma Hot Springs", base: "DYI" },
-    13: { name: "Beyond Dreams", base: "DYI" },
-    14: { name: "Order Up! Tracen Ramen!", base: "DYI" },
+    4: { name: "Grand Concert", key: "GL", coach: "grandlive" },
+    5: { name: "Grand Masters", key: "GM", coach: "grandmasters" },
+    6: { name: "Project L'Arc", base: "GM", coach: "larc" },
+    7: { name: "U.A.F. Ready GO!", base: "GM", coach: "uaf" },
+    8: { name: "Great Food Festival", base: "GM", coach: "cooking" },
+    9: { name: "Hashire! Mecha Umamusume", base: "GM", coach: "mecha" },
+    10: { name: "The Twinkle Legends", base: "GM", coach: "legends" },
+    11: { name: "Design Your Island", key: "DYI", jp: true, coach: "island" },
+    12: { name: "Paradise ♪ Yukoma Hot Springs", base: "DYI", coach: "onsen" },
+    13: { name: "Beyond Dreams", base: "DYI", coach: "dreams" },
+    14: { name: "Order Up! Tracen Ramen!", base: "DYI", coach: "ramen" },
   };
   const NOW_ERA = 4; // Global's scenario before the forecast's first
   // SSR pick tickets: on a close call, Speed before Wit before Stamina and Guts (the scenario
@@ -205,27 +206,7 @@
     const weight = (date) => (fade ? Math.pow(1 - fade, Math.max(0, (Date.parse(date) - Date.parse(today)) / (365.25 * DAY))) : 1);
 
     // ---- the scenario each cup's decks are trained in ----
-    // Its preset in tiers.js: Euophrys' own, Design Your Island from Euophrys' JP bundle, or an
-    // estimate: the base preset with the scenario's friend (or group) SSR from its opening banner
-    // as the link card, at Design Your Island's link bonus (Euophrys' value for Tucker Bryne).
-    const eraList = [{ id: NOW_ERA, start: "0000-00-00" }].concat((B.scenarios || []).filter((s) => ERAS[s.id]));
-    const dyiBonus = 1000;
-    const eras = new Map();
-    eraList.forEach((s) => {
-      const E = ERAS[s.id], era = { id: s.id, name: E.name, start: s.start === "0000-00-00" ? null : s.start, est: !E.key, key: E.key || "EST" + s.id, link: null };
-      if (o.eras !== false) {
-        if (E.key && !T.hasScenario(E.key)) T.addScenario(E.key, E.key, { bondPerDay: 10 });
-        if (!E.key) {
-          const open = B.support.find((b) => b.start && Math.abs(Date.parse(b.start) - Date.parse(s.start)) <= 3 * DAY
-            && b.pick.some(([id]) => { const c = card(id); return c && c.r === 3 && (c.ty === "friend" || c.ty === "group") && scorable(id); }));
-          const linkId = open ? open.pick.map(([id]) => id).find((id) => { const c = card(id); return c && c.r === 3 && (c.ty === "friend" || c.ty === "group") && scorable(id); }) : null;
-          era.link = linkId || null;
-          T.addScenario(era.key, E.base, { bondPerDay: 10, scenarioLink: linkId ? [T.entry(linkId, 4).char_name] : [], scenarioBonus: linkId ? dyiBonus : 0 });
-        }
-      }
-      eras.set(s.id, era);
-    });
-    const eraAt = (date) => { let e = eras.get(NOW_ERA); eraList.forEach((s) => { if (s.start <= date && eras.has(s.id)) e = eras.get(s.id); }); return e; };
+    const { eras, eraAt } = erasFor(B, T, card, scorable, o.eras !== false);
 
     // Your umas and when each is yours: My umas now; o.yours (the umas your plan gets: a trainee
     // banner of it, a selector pick) from then; and your team umas (a flex slot's named uma
@@ -1363,6 +1344,35 @@
     return { locked, freePulls, yours, lockedPicks, budget, done: new Set(Object.keys(done).concat(rows.filter((x) => rowDone(x, today, done)).map(rowKey))) };
   }
 
+  // The scenario Global trains in on each date: Grand Concert now, then the forecast's scenarios
+  // (B.scenarios: GameTora's ids and dates). Each era's Euophrys preset: its own (key), or an
+  // estimate registered in tiers.js (register): the base preset with the scenario's friend or
+  // group SSR from its opening banner as the link card. → { eras: Map(id → era), eraAt(date) }.
+  function erasFor(B, T, card, scorable, register = true) {
+    // Its preset in tiers.js: Euophrys' own, Design Your Island from Euophrys' JP bundle, or an
+    // estimate: the base preset with the scenario's friend (or group) SSR from its opening banner
+    // as the link card, at Design Your Island's link bonus (Euophrys' value for Tucker Bryne).
+    const eraList = [{ id: NOW_ERA, start: "0000-00-00" }].concat((B.scenarios || []).filter((s) => ERAS[s.id]));
+    const dyiBonus = 1000;
+    const eras = new Map();
+    eraList.forEach((s) => {
+      const E = ERAS[s.id], era = { id: s.id, name: E.name, start: s.start === "0000-00-00" ? null : s.start, est: !E.key, key: E.key || "EST" + s.id, link: null, coach: E.coach, dateEst: !!s.est };
+      if (register) {
+        if (E.key && !T.hasScenario(E.key)) T.addScenario(E.key, E.key, { bondPerDay: 10 });
+        if (!E.key) {
+          const open = B.support.find((b) => b.start && Math.abs(Date.parse(b.start) - Date.parse(s.start)) <= 3 * DAY
+            && b.pick.some(([id]) => { const c = card(id); return c && c.r === 3 && (c.ty === "friend" || c.ty === "group") && scorable(id); }));
+          const linkId = open ? open.pick.map(([id]) => id).find((id) => { const c = card(id); return c && c.r === 3 && (c.ty === "friend" || c.ty === "group") && scorable(id); }) : null;
+          era.link = linkId || null;
+          T.addScenario(era.key, E.base, { bondPerDay: 10, scenarioLink: linkId ? [T.entry(linkId, 4).char_name] : [], scenarioBonus: linkId ? dyiBonus : 0 });
+        }
+      }
+      eras.set(s.id, era);
+    });
+    const eraAt = (date) => { let e = eras.get(NOW_ERA); eraList.forEach((s) => { if (s.start <= date && eras.has(s.id)) e = eras.get(s.id); }); return e; };
+    return { eras, eraAt };
+  }
+
   // Team kinds per track ({ sprint|mile|ml|dirt: "team" | "meta" }): a "meta" track races one
   // uma you repeat every cup instead of a team of 3, and gets no parents. metas: { track: { id,
   // style } | null }, the meta uma you picked (none until you pick); without metas (older
@@ -1381,7 +1391,7 @@
     return out;
   }
   const parentGroupsOf = (kinds) => Object.keys(GROUPS).filter((g) => ((kinds || {})[g] || "team") !== "meta");
-  const api = { create, teamPick, flexPick, styleFor, teamLogic, KINDS, effectiveTeams, parentGroupsOf, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
+  const api = { create, erasFor, ERAS, teamPick, flexPick, styleFor, teamLogic, KINDS, effectiveTeams, parentGroupsOf, GROUPS, groupOf, binom, median, POOL_LAG, SELECTOR_CARATS, ERAS, parsePlan, matchPlan, budgetFrom, planParts, rowKey, rowDone };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaPullValues = api;
 })(typeof window !== "undefined" ? window : globalThis);
