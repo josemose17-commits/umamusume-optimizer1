@@ -851,7 +851,7 @@
       if (euSum) euOpen = !euSum.parentElement.open;
       const ppSum = e.target.closest(".pp-skills > summary");
       if (ppSum) ppSkillsOpen = !ppSum.parentElement.open;
-      if (e.target.closest('#euReset, [data-cm-id="euReset"]')) { eu().over[euScen()] = { general: {}, tabs: {} }; save(); renderTab(); return; }
+      if (e.target.closest('#euReset, [data-cm-id="euReset"]')) { eu().over[euScen(state.tab === "tiers" ? "tiers" : deckHost(e.target))] = { general: {}, tabs: {} }; save(); renderTab(); return; }
       const add = e.target.closest("[data-add-card]");
       if (add) { addToDeck(+add.dataset.addCard); return; }
       const use = e.target.closest("[data-use-trainee]");
@@ -2692,11 +2692,45 @@
     if (!state.eu) state.eu = { scen: "", over: {} };
     return state.eu;
   }
-  const euScen = () => eu().scen || T.FROM_COACH[state.scenario] || "GM";
-  const euOver = () => eu().over[euScen()] || (eu().over[euScen()] = { general: {}, tabs: {} });
-  function euOpts(c, p, tid = deckTrainee(c.goal === "ace" ? "parents" : "cm")) {
+  // The scenario a cup's decks are trained in (pull-values.js eras): Global's scenario TRAIN_LEAD
+  // days before the cup starts (today for a cup that close). → { era, sc (the coach's scenario,
+  // for the career simulation), key (Euophrys preset), date } or null without the data.
+  const TRAIN_LEAD = 10;
+  let erasMemo = null;
+  function cupScenario(p) {
+    const PV = window.UmaPullValues;
+    if (!PV || !window.UmaBanners || !T || !p || !p.global || !p.global.start) return null;
+    if (!erasMemo) erasMemo = PV.erasFor(window.UmaBanners, T, (id) => D.card(id), (id) => !!T.entry(id, 4));
+    const d = new Date(p.global.start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - TRAIN_LEAD);
+    const date = d.toISOString().slice(0, 10) < TODAY ? TODAY : d.toISOString().slice(0, 10);
+    const era = erasMemo.eraAt(date), sc = era && SCENARIOS.find((x) => x.id === era.coach);
+    return era && sc ? { era, sc, key: era.key, date } : null;
+  }
+  // Each deck host's scenario: CM & decks its cup's, Parents the ace's cup's (③'s preset), the
+  // Tier list the coach's. { sc, key, era (null for the coach's) }.
+  function hostScen(host = "cm") {
+    const pid = host === "parents" ? (state.pcm || {}).preset : host === "cm" ? (state.cm || {}).preset : null;
+    const s = pid ? cupScenario(presetById(pid)) : null;
+    return s || { sc: scenario(), key: T.FROM_COACH[state.scenario] || "GM", era: null };
+  }
+  const scenFor = (host) => hostScen(host).sc;
+  const euScen = (host = "cm") => eu().scen || hostScen(host).key || "GM";
+  const euOver = (host = "cm") => eu().over[euScen(host)] || (eu().over[euScen(host)] = { general: {}, tabs: {} });
+  // The scenario this deck is trained in, and a word when the turn coach is on another one.
+  function scenNote(host) {
+    const hs = hostScen(host);
+    if (!hs.era) return "";
+    const differs = hs.sc.id !== state.scenario;
+    return `<p class="mini${differs ? " warn" : ""}">Trained in <b>${esc(hs.era.name)}</b>: Global's scenario ~${TRAIN_LEAD} days before this cup${hs.era.dateEst && hs.era.start ? ` (from ~${esc(fmtDate(hs.era.start))}, GameTora's forecast)` : ""}${hs.era.est ? "; Euophrys has no preset for it, so its weights are Grand Masters' with its own friend card as the link" : ""}. ${differs ? `The turn coach is on ${esc(scenario().name)}: that's only for the career you're playing now.` : ""}</p>`;
+  }
+  // A preset's name: Euophrys' own, or the forecast scenario it estimates.
+  const presetName = (key) => (T.SCENARIOS.find((x) => x[0] === key) || [0, null])[1] || ((erasMemo && [...erasMemo.eras.values()].find((e) => e.key === key)) || {}).name || key;
+  // host "tiers": the Tier list (the coach's scenario); otherwise the deck is for cup p, trained in
+  // its scenario (cupScenario), unless you chose a preset in Euophrys settings.
+  function euOpts(c, p, tid = deckTrainee(c.goal === "ace" ? "parents" : "cm"), host = null) {
     const sv = skillMap(p.id, c.style);
-    const o = { scenario: euScen(), overrides: euOver(), trainee: tid, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +c.itManual, eventSuccessRate: +c.eventSuccessRate };
+    const key = host === "tiers" ? euScen("tiers") : eu().scen || ((cupScenario(p) || {}).key) || euScen("tiers");
+    const o = { scenario: key, overrides: eu().over[key] || (eu().over[key] = { general: {}, tabs: {} }), trainee: tid, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: itArg(c), itManual: +c.itManual, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace") {
       o.parent = { targets: parentTargetsFor(c, p).targets, statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY, skillsBy: skillsBy(p), cardAvailable: card => CARD_RELEASE.available(card, p) };
       if (c.globalSkills) o.must = o.must.filter((id) => released(id, p));
@@ -2751,16 +2785,17 @@
 
   // Euophrys' scenario preset and weights, editable like on its site.
   function euSettingsHTML(ty, host = "cm") {
-    const scen = euScen();
+    if (state.tab === "tiers") host = "tiers";
+    const scen = euScen(host), hs = hostScen(host), over = euOver(host);
     const auto = !eu().scen;
     const tab = T.TABS[ty || "speed"][0];
-    const w = T.weightsFor(scen, ty || "speed", Object.assign({}, euOver().general, euOver().tabs[tab]), null, itArg(cm(host)));
+    const w = T.weightsFor(scen, ty || "speed", Object.assign({}, over.general, over.tabs[tab]), null, itArg(cm(host === "tiers" ? "cm" : host)));
     const num = (k, v, step, path) => `<input type="number" step="${step}" data-eu="${path}" data-k="${k}" value="${v}">`;
     const coachName = (SCENARIOS.find((x) => x.id === state.scenario) || {}).name;
     return `<details class="eu-settings" ${euOpen ? "open" : ""}>
-      <summary>Euophrys settings: <b>${esc(T.SCENARIOS.find((x) => x[0] === scen)[1])}</b> preset${auto ? (T.FROM_COACH[state.scenario] ? " (from the coach's scenario)" : ` (${esc(coachName)} isn't in Euophrys' list yet, so Grand Masters, the newest one)`) : ""}${Object.keys(euOver().general).length || Object.keys(euOver().tabs).length ? " · custom weights" : ""}</summary>
+      <summary>Euophrys settings: <b>${esc(presetName(scen))}</b> preset${auto ? (hs.era ? ` (this cup's scenario: Global trains in ${esc(hs.era.name)} ${hs.era.est ? "(estimated from Grand Masters' weights with its own friend card) " : ""}~${TRAIN_LEAD} days before it)` : T.FROM_COACH[state.scenario] ? " (from the coach's scenario)" : ` (${esc(coachName)} isn't in Euophrys' list yet, so Grand Masters, the newest one)`) : ""}${Object.keys(over.general).length || Object.keys(over.tabs).length ? " · custom weights" : ""}</summary>
       <div class="eu-body">
-        <label class="field"><span>Scenario preset</span><select data-eu-scen="1"><option value="">Same as the coach</option>${T.SCENARIOS.map(([k, l]) => `<option value="${k}" ${eu().scen === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+        <label class="field"><span>Scenario preset</span><select data-eu-scen="1"><option value="">${hs.era ? "This cup's scenario" : "Same as the coach"}</option>${T.SCENARIOS.map(([k, l]) => `<option value="${k}" ${eu().scen === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
         <div><span class="mini"><b>Stat weights for ${esc(tab === "friend" ? "Friend and Group" : tab === "wisdom" ? "Wit" : tab[0].toUpperCase() + tab.slice(1))} cards</b> (what each point of gain is worth)</span>
           <div class="eu-grid">${["Speed", "Stamina", "Power", "Guts", "Wit", "Skill pts", "Energy"].map((l, i) => `<label class="field"><span>${l}</span>${num(i, w.stats[i], 0.1, "tab:stats")}</label>`).join("")}
             <label class="field"><span>Cap per stat</span>${num("cap", w.cap, 50, "tab")}</label></div></div>
@@ -2784,11 +2819,12 @@
 
   function euInput(el) {
     const [where, field] = el.dataset.eu.split(":");
-    const o = euOver();
+    const host = state.tab === "tiers" ? "tiers" : deckHost(el);
+    const o = euOver(host);
     const ty = state.tab === "tiers" ? (tier().type || "speed") : "speed";
     const tab = T.TABS[ty][0];
     const bag = where === "tab" ? (o.tabs[tab] = o.tabs[tab] || {}) : o.general;
-    const base = T.weightsFor(euScen(), ty, Object.assign({}, o.general, o.tabs[tab]), null, itArg(cm(deckHost(el))));
+    const base = T.weightsFor(euScen(host), ty, Object.assign({}, o.general, o.tabs[tab]), null, itArg(cm(host === "tiers" ? "cm" : host)));
     const v = el.type === "checkbox" ? el.checked : +el.value;
     if (field) { const arr = (bag[field] || base[field]).slice(); arr[+el.dataset.k] = v; bag[field] = arr; }
     else bag[el.dataset.k] = v;
@@ -2808,7 +2844,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, state.scenario, JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2828,7 +2864,8 @@
     let stamina = null;
     // Independent Training parent runs race their agenda (see itShare).
     const raceShare = itShare(c);
-    const simulationMeta = { scenario: scenario().id, trainee: tid };
+    const hsc = scenFor(host);
+    const simulationMeta = { scenario: hsc.id, trainee: tid };
     const done = (r, opts, fit) => {
       // The predicted stats: the target search's own careers, or a readout from the same
       // simulation for Euophrys' pick.
@@ -2836,11 +2873,11 @@
       if (!est) {
         try {
           const sv = skillMap(p.id, c.style);
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, trainee: tid, caps: E.capsFor(state, scenario()), raceShare, runs: 16, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
+          const ctx = OPT.buildCtx({ scenario: hsc, build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, trainee: tid, caps: E.capsFor(state, hsc), raceShare, runs: 16, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
-      if ((scenario().id === "grandlive" || est && est.scoring === "race") && c.goal === "race" && est) r.skills = est.skills;
+      if ((hsc.id === "grandlive" || est && est.scoring === "race") && c.goal === "race" && est) r.skills = est.skills;
       const result = Object.assign(r, { key, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
@@ -2874,11 +2911,11 @@
         const r = T.buildDeck(opts, pool, bp);
         const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
         const rv = c.goal === "race" ? raceValues(p, c.style, stamina) : null;
-        if (!tg && !ss && !staminaTrainingTarget(stamina) && !(state.scenario === "grandlive" && c.goal === "race") && !rv) { done(r, opts, null); return; }
+        if (!tg && !ss && !staminaTrainingTarget(stamina) && !(hsc.id === "grandlive" && c.goal === "race") && !rv) { done(r, opts, null); return; }
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
         if (ss && !tg && !staminaTrainingTarget(stamina)) ss.ignoreFit = true;
-        const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: E.capsFor(state, scenFor(host)), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
         const tick = () => {
           try {
@@ -2906,7 +2943,7 @@
   // card. Returns what happened, for the result's note, or null when it doesn't apply.
   const IT_LINK = { GL: "Light Hello" };
   function itLink(c, pool, bp) {
-    const name = c.independent && IT_LINK[euScen()];
+    const name = c.independent && IT_LINK[euScen(c.goal === "ace" ? "parents" : "cm")];
     if (!name) return null;
     if (c.comp.friend === 0) return { name, blocked: true };
     const mine = pool.filter((x) => D.card(x.id).n === name).sort((a, b) => D.card(b.id).r - D.card(a.id).r || b.lb - a.lb)[0];
@@ -2996,7 +3033,7 @@
     const C = window.UmaStatCurves, cup = C && C.cups && C.cups[p.id], v = cup && cup.styles && (cup.styles[style] || cup.styles[dataStyle(style)]);
     const listed = (cup && cup.courseStats) || [];
     if (!v || v.status !== "ok" || !(v.steps || []).length) return { target, listed, notes: [] };
-    const out = Object.assign({}, target), notes = [], caps = E.capsFor(state, scenario());
+    const out = Object.assign({}, target), notes = [], caps = E.capsFor(state, (cupScenario(p) || {}).sc || scenario());
     const val = (j, x) => (j === 1 ? 0 : OPT.onCurve(v.curves[j], x, false));
     const slope = (j, x) => Math.max(0, (val(j, x + 50) - val(j, x)) / 50);
     listed.forEach((i) => {
@@ -3054,7 +3091,7 @@
     return `<b>${result.need} stamina</b> · ${style} · ${pressure} · ${goalText} · from ${staminaStatsFrom(presetById(c.preset), c)} · full spurt in ${result.hits}/${result.samples} races at target${gap}${override}${capped}${comparison}${linked}`;
   }
 
-  const staminaPlaceholder = (p, result, style) => Math.min(raceBuildTarget(p, result, style).stamina, E.capsFor(state, scenario()).stamina);
+  const staminaPlaceholder = (p, result, style) => Math.min(raceBuildTarget(p, result, style).stamina, E.capsFor(state, (cupScenario(p) || {}).sc || scenario()).stamina);
   function showStamina(p, c, entry) {
     const node = deckElement("cm", "#cmStaminaEstimate");
     const field = deckElement("cm", '[data-cm-target="stamina"]');
@@ -3102,7 +3139,7 @@
     if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
     const p = presetById(r.preset), sv = skillMap(p.id, c.style);
     const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-    const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+    const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenFor(host)), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
     const job = OPT.sensitivity(sim, candidates);
     j.sensitivityJob = job; renderCM();
     const tick = () => {
@@ -3148,7 +3185,7 @@
       });
       const sv = skillMap(p.id, c.style);
       const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-      const sim = { scenario: scenario(), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+      const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenFor(host)), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
       const token = {}; j.wishJob = token; j.wish = null; renderCM();
       const out = []; let at = 0;
       const tick = () => {
@@ -3233,7 +3270,7 @@
   // Her gaps: each stat's target (yours, else the race build's, within the caps) against the
   // predicted average. Parents fills what's short with blue sparks.
   function raceGaps(r, c) {
-    const p = presetById(r.preset), caps = E.capsFor(state, scenario()), mine = cmTargets(c || {}) || {};
+    const p = presetById(r.preset), caps = E.capsFor(state, (cupScenario(p) || {}).sc || scenario()), mine = cmTargets(c || {}) || {};
     const bt = p ? raceBuildTarget(p, r.stamina, r.style) : {};
     const target = E.STATS.map((s) => Math.min(caps[s] != null ? caps[s] : Infinity, r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
     const stats = r.est.stats.slice();
@@ -3255,6 +3292,7 @@
     const note = (html) => (host === "parents" ? (notes.push(html), "") : html);
     return `<section class="panel cm-opt" data-deck-host="${host}">
       <h3>Deck optimizer</h3>
+      ${scenNote(host)}
       <p class="mini" data-card-availability>${future ? `Cards expected by ${esc(fmtDate(by))}; ~ releases are estimates. Untick “Only cards I own” to try future cards at LB4.` : "Cards released on Global today; updated daily from GameTora."}${missingScores ? ` ${missingScores} card${missingScores === 1 ? " lacks" : "s lack"} scoring data and ${missingScores === 1 ? "is" : "are"} left out of searches.` : ""}</p>
 
       ${host === "parents" ? `<p class="mini">Finds relevant white skills for the ace, with the parent rating goal set above.</p>` : ""}
@@ -3274,7 +3312,7 @@
       ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${opt(IT_MANUAL_OPTS, c.itManual)}</select></label>` : ""}
       ${c.independent ? note(`<p class="mini it-note"><b>Independent Training:</b> card scores follow players' testing there: initial stats count ${T.IT_INITIAL}× and skill points ${T.IT_SP}× (Skill Point Bonus, events, Initial Skill Points), Specialty Priority counts for nothing, and Friendship Bonus, Mood Effect and Training Effectiveness count as much as you pick above (they haven't been measured there). These weights are assumptions; compare real runs at your limit breaks. A card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. ${c.itRaces != null ? `Race Bonus counts for the ${c.itRaces} extra race${c.itRaces === 1 ? "" : "s"} from ② (on top of her career goals), and the predicted stats race that many times.` : `Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Each race costs rating: ${host === "parents" ? "② Races sends the count of extra races here" : "the Parents tab plans the fewest G1s for affinity"}.`} Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>`) : ""}
       ${compHTML(c)}
-      ${state.scenario === "grandlive" ? `<details class="pred-help" data-cmp-open="${host}-events"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
+      ${scenFor(host).id === "grandlive" ? `<details class="pred-help" data-cmp-open="${host}-events"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
       ${targetsHTML(p, c, host)}
       ${host === "cm" ? raceSkillsHTML(c) : ""}
       ${euSettingsHTML("speed", host)}
@@ -3297,7 +3335,7 @@
 
   // Target stats: blank boxes show the race build's targets.
   function concertSettingsHTML(c) {
-    return state.scenario === "grandlive" ? `<details class="pred-help" data-cmp-open="${c.goal === "ace" ? "parents" : "cm"}-concert"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : "";
+    return scenFor(c.goal === "ace" ? "parents" : "cm").id === "grandlive" ? `<details class="pred-help" data-cmp-open="${c.goal === "ace" ? "parents" : "cm"}-concert"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : "";
   }
 
   function targetsHTML(p, c, host = deckHost()) {
@@ -3380,7 +3418,7 @@
   // this cup's distance (the guide's nearest distance when it skips one), as one-tap choices.
   const GUIDE_ERA = { grandmasters: 5, larc: 6, uaf: 7, cooking: 8, mecha: 9, legends: 10, island: 11, onsen: 12 };
   function guideMakeups(c) {
-    const SD = window.UmaScenarioDecks, e = SD && SD.eras[String(GUIDE_ERA[state.scenario])], p = presetById(c.preset);
+    const hs = hostScen("cm"), SD = window.UmaScenarioDecks, e = SD && SD.eras[String(hs.era ? hs.era.id : GUIDE_ERA[state.scenario])], p = presetById(c.preset);
     if (!e || !p) return null;
     const DISTS = ["Sprint", "Mile", "Medium", "Long"], i = DISTS.indexOf(p.course.dist);
     for (let k = 0; k < DISTS.length; k++) for (const j of [i - k, i + k]) {
@@ -3427,7 +3465,7 @@
   function predictKey(n) {
     const d = predictDeck();
     if (!d) return null;
-    return JSON.stringify([d.cards.map((x) => x.card.id + ":" + x.lb), n, deckTrainee("parents"), state.scenario, (state.pcm || {}).preset, state.caps || {}, state.sparks || {}, (state.pcm || {}).helloProcRate, (state.pcm || {}).helloUnlockRate, (state.pcm || {}).eventSuccessRate, (state.pcm || {}).eventSongBoost]);
+    return JSON.stringify([d.cards.map((x) => x.card.id + ":" + x.lb), n, deckTrainee("parents"), scenFor("parents").id, (state.pcm || {}).preset, state.caps || {}, state.sparks || {}, (state.pcm || {}).helloProcRate, (state.pcm || {}).helloUnlockRate, (state.pcm || {}).eventSuccessRate, (state.pcm || {}).eventSongBoost]);
   }
   function predictNext() {
     predictTimer = null;
@@ -3439,7 +3477,7 @@
     }
     try {
       const d = predictDeck(), c = state.pcm || {}, p = presetById(c.preset);
-      const est = OPT.simulate(OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: deckTrainee("parents"), caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, job.n / 60), runs: 16,
+      const est = OPT.simulate(OPT.buildCtx({ scenario: scenFor("parents"), build: p.build, trainee: deckTrainee("parents"), caps: E.capsFor(state, scenFor("parents")), raceShare: Math.min(0.5, job.n / 60), runs: 16,
         helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false }), d.cards);
       predictCache.set(job.k, { stats: est.stats, sp: est.sp, races: est.races, finals: est.finals });
     } catch (err) { predictCache.set(job.k, null); }
@@ -3580,7 +3618,8 @@
       // focus: Independent Training's Training Focus ("balanced", "stamina", "sprint"), or none.
       simulate: (p, tid, cards, n, blueStart = [], focus = null) => {
         const c = state.pcm || {};
-        const sim = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: tid, caps: E.capsFor(state, scenario()), raceShare: Math.min(0.5, n / 60), runs: 16,
+        const psc = (cupScenario(p) || {}).sc || scenario();
+        const sim = OPT.buildCtx({ scenario: psc, build: p.build, trainee: tid, caps: E.capsFor(state, psc), raceShare: Math.min(0.5, n / 60), runs: 16,
           helloProcRate: +(c.helloProcRate || 0.4), helloUnlockRate: +(c.helloUnlockRate || 0.15), eventSuccessRate: +(c.eventSuccessRate || 0.5), eventSongBoost: +(c.eventSongBoost || 0), independent: true, skillBudget: false });
         sim.start = sim.start.map((v, i) => v + (blueStart[i] || 0));
         if (focus) OPT.applyFocus(sim, focus);
@@ -3592,7 +3631,8 @@
       skillName: (id) => skillInfo(id)[0],
       charName: (cid) => charNames.get(+cid) || "#" + cid,
       turnText: (t) => E.turnInfo(t, scenario()).text,
-      scenario: () => ({ id: scenario().id, name: scenario().name }),
+      // The scenario the cup's decks are trained in (its date), for veterans' baselines.
+      scenario: () => ({ id: scenFor("cm").id, name: scenFor("cm").name }),
       scenarioName: (id) => (SCENARIOS.find((x) => x.id === id) || { name: id }).name,
       // Your Pull planner team for the cup's track, as the planner races it there: the 2 of your 3
       // umas worth the most on that cup (no two in one running style when another fits), then the
@@ -3768,7 +3808,7 @@
       },
       skillL: (p, style, id) => skillMap(p.id, style).map[id] || 0,
       settingsKey: () => JSON.stringify([euScen(), euOver(), c().comp || {}, c().borrow !== false, c().skillW]),
-      settingsText: () => "Euophrys' " + (T.SCENARIOS.find((x) => x[0] === euScen()) || [0, euScen()])[1] + " preset, with CM &amp; decks' deck makeup, friend card and skill weight",
+      settingsText: () => "each cup's scenario preset (Global's scenario by its date), with CM &amp; decks' deck makeup, friend card and skill weight",
       rerender: () => { if (state.tab === "pulls") renderTab(); },
     });
     return pullTab;
@@ -3969,7 +4009,7 @@
     const w = j.wish;
     const total = r.cards.reduce((a, x) => a + x.score, 0);
     return `<div class="opt-result">
-      <h4>${r.goal === "ace" && r.general ? `Best general ${STYLE_LABEL[r.style]} grandparent deck · cards out by ${esc(p.name)}` : `${r.goal === "ace" ? "Best ace parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]}`} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
+      <h4>${r.goal === "ace" && r.general ? `Best general ${STYLE_LABEL[r.style]} grandparent deck · cards out by ${esc(p.name)}` : `${r.goal === "ace" ? "Best ace parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]}`} · ${esc(presetName(r.scen))} weights</h4>
       ${r.skillSetCheck ? `<p class="mini">The skill-set check compared ${r.skillSetCheck.decks} shortlisted deck${r.skillSetCheck.decks === 1 ? "" : "s"}, using equipped skills and affordable purchases together.</p>` : ""}
       ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
       ${!stale && r.racesFollowed && r.itRaces !== c.itRaces ? `<p class="mini">Searched for ${r.itRaces} extra G1${r.itRaces === 1 ? "" : "s"}; her plan (Parents step 3) now runs ${c.itRaces} with this deck, since that's how many keep her at SS with it. Searching again would aim the deck at ${c.itRaces}, which can move the count again, so this deck stays.</p>` : ""}
@@ -4281,7 +4321,7 @@
     c.preset,c.style,contestShare(c.preset),(c.cards||[]).map(x=>[x.id,x.lb,!!x.borrowed]),
     c.raceSkills?Object.assign({},c.raceSkills,{open:undefined}):null,
     ["targets","must","skillW","statsW","globalSkills","ownedOnly","borrow","independent","itRaces","itManual","eventSuccessRate","eventSongBoost","helloProcRate","helloUnlockRate","rankGoal"].map(k=>c[k]),
-    c.family||{},c.predicted,ownedCode(),state.scenario,state.caps,state.sparks,euOver(),pasted[c.preset] && pasted[c.preset][c.style],D.DATA.meta.built
+    c.family||{},c.predicted,ownedCode(),scenFor("cm").id,state.caps,state.sparks,euOver(),pasted[c.preset] && pasted[c.preset][c.style],D.DATA.meta.built
   ]);
   const currentSkillPlan=c=>c.skillPlan && c.skillPlan.key===skillPlanKey(c)?c.skillPlan:null;
   function accessFamily(raw) {
@@ -4881,7 +4921,7 @@
     let tiersHTML = '<div class="empty">Loading the tier list data…</div>';
     if (ready) {
       const cands = tierCandidates(t);
-      const opts = euOpts(c, p, tierTrainee());
+      const opts = euOpts(c, p, tierTrainee(), "tiers");
       let res = [];
       types.forEach((ty) => { res = res.concat(T.rank(opts, ty, t.deck, cands.filter((x) => D.card(x.id).ty === ty))); });
       res.sort((a, b) => b.score - a.score);
