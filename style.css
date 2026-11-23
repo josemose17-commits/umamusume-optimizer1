@@ -944,3 +944,58 @@ body:not([data-page="coach"]) .dock { display: none !important; }
 /* Page grids stay at the screen's width; wide tables scroll inside their own box. */
 .workspace, .tab-body, .coach-body, .inputs { grid-template-columns: minmax(0, 1fr); }
 #dbList { min-width: 0; overflow-x: auto; }
+
+/* ===================== Redesign 2: sub-tabs, CM & decks columns, Parents stepper, tables ===================== */
+/* Gaps and targets: red/amber when short, emerald when met */
+.gap-pill { display: inline-block; min-width: 3.2em; text-align: center; font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: .78rem; font-weight: 600; line-height: 1.5; padding: 0 7px; border-radius: 999px; border: 1px solid transparent; }
+.gap-pill.good { color: var(--good); background: var(--accent-soft); border-color: color-mix(in srgb, var(--good) 40%, transparent); }
+.gap-pill.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.gap-pill.bad { color: var(--bad); background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+
+/* Sub-tabs */
+.subtabs { display: flex; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow-x: auto; scrollbar-width: none; }
+.subtab { flex: none; border: 0; background: none; color: var(--muted); font-weight: 600; padding: 8px 16px; border-radius: var(--r-sm); cursor: pointer; }
+.subtab:hover { color: var(--fg); background: var(--surface-2); }
+.subtab[aria-selected="true"] { background: var(--accent-soft); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.subtab.only-narrow { display: none; }
+
+/* CM & decks: cup and team on the left, the deck, skills and results on the right */
+.cm-split { display: grid; gap: var(--gap); grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); align-items: start; }
+.cm-side, .cm-main { display: grid; gap: var(--gap); min-width: 0; align-content: start; grid-template-columns: minmax(0, 1fr); }
+.cm-main > .subpane { display: none; min-width: 0; }
+.cm-split[data-sub="deck"] .subpane[data-pane="deck"], .cm-split[data-sub="team"] .subpane[data-pane="deck"],
+.cm-split[data-sub="skills"] .subpane[data-pane="skills"], .cm-split[data-sub="results"] .subpane[data-pane="results"] { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
+.cm-side .cm-head { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 1180px) {
+  .cm-split { grid-template-columns: minmax(0, 1fr); }
+  .subtab.only-narrow { display: inline-flex; }
+  .cm-split:not([data-sub="team"]) .cm-side { display: none; }
+  .cm-split[data-sub="team"] .subpane[data-pane="deck"] { display: none; }
+  .cm-split[data-sub="team"] .cm-main { order: -1; }
+  .cm-split[data-sub="team"] .cm-main > .subtabs { margin-bottom: 0; }
+}
+
+/* Parents: a stepper, one step at a time; locked steps say why */
+.stepper { display: flex; gap: 6px; overflow-x: auto; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); scrollbar-width: thin; counter-reset: step; }
+.step { flex: 1 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: none; color: var(--muted); font-weight: 600; cursor: pointer; text-align: left; min-width: 0; position: relative; }
+.step:hover:not(:disabled) { background: var(--surface-2); color: var(--fg); }
+.step-n { display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none; border-radius: 50%; border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: .78rem; }
+.step[aria-current="step"] { background: var(--accent-soft); color: var(--fg); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.step[aria-current="step"] .step-n { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.step.locked { opacity: .55; cursor: not-allowed; }
+.step.locked .step-n::after { content: ""; }
+.step-why { display: block; font-size: .7rem; font-weight: 500; color: var(--faint); }
+.step.locked .step-l::after { content: " 🔒"; font-size: .75em; }
+.step.locked { flex-direction: row; }
+.step.locked .step-l { display: grid; }
+.cmp-step > h3 { margin-top: 0; font-size: 1.1rem; }
+
+/* Long tables scroll inside their box, headers stay */
+.tab-body .table-wrap { max-height: min(72vh, 900px); overflow: auto; }
+.tab-body .table-wrap thead th { box-shadow: 0 1px 0 var(--line); }
+/* Link-style buttons read as text; turn and row numbers in tables keep the number font. */
+.linkish { font-family: var(--font-body); text-decoration-thickness: 1px; }
+td .linkish:not([data-cmp-sel]), .opt-rank { font-family: var(--font-mono); }
+.cmp-ace-chip .linkish { text-decoration: none; }

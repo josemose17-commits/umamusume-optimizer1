@@ -498,13 +498,15 @@
       if (!c.parentsAnyway) c.parentsAnyway = {};
       const planned = !ctx.parentsPlanned || ctx.parentsPlanned(p) || c.parentsAnyway[p.id];
       const skipped = !planned ? `<section class="panel cmp-step"><p class="mini">Parents are planned for your Medium &amp; Long team only: ${esc(ctx.trackLabel ? ctx.trackLabel(p) : "this track")} races one meta uma (Pull planner, Your future teams). <button type="button" class="linkish" data-cmp-anyway="${esc(p.id)}">Plan this cup's parents anyway</button></p></section>` : "";
-      const steps = a && planned ? [
-        panel("gaps", "1 · Her gaps", gapsHTML(c, a, d, r)),
-        panel("p1", "2 · Make Parent 1", p1HTML(c, a, d, r) + prog),
-        panel("training", "3 · Train her", trainHTML(c, a, d, r)),
-        panel("p2", "4 · Parent 2", p2HTML(c, a, d, r)),
-        panel("check", "5 · Her family", checkHTML(r)),
-        panel("vets", "6 · Your veterans", vetsHTML(r))].join("") : "";
+      // The six steps as a stepper: one showing; the ones that need Parent 1 first are locked
+      // until she's found (their reason on the chip). Every step is drawn, so links into one work.
+      const STEPS = [["gaps", "Her gaps", () => gapsHTML(c, a, d, r)], ["p1", "Make Parent 1", () => p1HTML(c, a, d, r) + prog],
+        ["training", "Train her", () => trainHTML(c, a, d, r), "Find Parent 1 first"], ["p2", "Parent 2", () => p2HTML(c, a, d, r), "Find Parent 1 first"],
+        ["check", "Her family", () => checkHTML(r), "Find Parent 1 first"], ["vets", "Your veterans", () => vetsHTML(r)]];
+      const locked = (s) => !!(s[3] && !(r && r.p1));
+      const saved = ctx.parentsStep && ctx.parentsStep(), on = STEPS.find((s) => s[0] === saved && !locked(s)) ? saved : "gaps";
+      const steps = a && planned ? `<nav class="stepper" aria-label="Parent steps">${STEPS.map((s, i) => `<button type="button" class="step${locked(s) ? " locked" : ""}" data-step-go="${s[0]}" aria-current="${s[0] === on ? "step" : "false"}"${locked(s) ? ` disabled title="${s[3]}"` : ""}><span class="step-n">${i + 1}</span><span class="step-l">${s[1]}</span>${locked(s) ? `<span class="step-why">${s[3]}</span>` : ""}</button>`).join("")}</nav>`
+        + STEPS.map((s, i) => `<section class="panel cmp-step" id="cm-${s[0]}" data-step-pane="${s[0]}"${s[0] === on ? "" : " hidden"}><h3>${i + 1} · ${s[1]}</h3>${locked(s) ? `<p class="mini">${s[3]}.</p>` : s[2]()}</section>`).join("") : "";
       body.innerHTML = `<div class="cm cmp">
         <section class="panel"><h2>Parents${a ? " for " + esc(tName(trainee(a.tid))) : ""}</h2>
           <p class="mini">${esc(p.name)} · ${a ? STYLE_LABEL[styleOf(a)] : "no ace yet"}. Fill her gaps with blue sparks, make Parent 1 with a borrowed grandparent, borrow Parent 2, reach ${MIN_AFFINITY}+ affinity.</p>
@@ -538,7 +540,7 @@
       const plan = bluePlan(r, left), after = plan.after;
       const rows = F.STAT_LABELS.map((l, i) => {
         const g = gaps[i], picks = plan.picks.filter((p) => p.i === i);
-        return `<tr${left[i] ? "" : ' class="cmp-cut"'}><td>${l}</td><td class="num">${pred.target[i]}</td><td class="num">${pred.stats[i]}</td><td class="num ${g ? "short" : ""}">${g ? "−" + g : "+" + (pred.stats[i] - pred.target[i])}</td>${give ? `<td class="num">${give[i] >= 1 ? "+" + fmtN(give[i]) : "—"}</td>` : ""}<td>${picks.length ? picks.map((p) => `${esc(p.who)} ~+${fmtN(p.add)}`).join("<br>") : "—"}</td><td class="num ${after[i] > ROLL ? "short" : ""}">${after[i] > ROLL ? "−" + after[i] : after[i] ? `≈ ✓ <span class="mini">(−${after[i]})</span>` : g ? "✓" : "—"}</td></tr>`;
+        return `<tr${left[i] ? "" : ' class="cmp-cut"'}><td>${l}</td><td class="num">${pred.target[i]}</td><td class="num">${pred.stats[i]}</td><td class="num"><span class="gap-pill ${g ? (g > 50 ? "bad" : "warn") : "good"}">${g ? "−" + g : "+" + (pred.stats[i] - pred.target[i])}</span></td>${give ? `<td class="num">${give[i] >= 1 ? "+" + fmtN(give[i]) : "—"}</td>` : ""}<td>${picks.length ? picks.map((p) => `${esc(p.who)} ~+${fmtN(p.add)}`).join("<br>") : "—"}</td><td class="num ${after[i] > ROLL ? "short" : ""}">${after[i] > ROLL ? "−" + after[i] : after[i] ? `≈ ✓ <span class="mini">(−${after[i]})</span>` : g ? "✓" : "—"}</td></tr>`;
       }).join("");
       const who = r && r.p1 ? familyWho(r) : "";
       const bonus = ctx.courseBonus ? ctx.courseBonus(cup(c), styleOf(a), Object.fromEntries(F.STAT_LABELS.map((l, i) => [["speed", "stamina", "power", "guts", "wit"][i], pred.target[i]]))) : "";
