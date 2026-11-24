@@ -3525,9 +3525,11 @@
     return (ctx, levels, sp) => {
       const values = {};
       Object.keys(ctx.skills).forEach((id) => { const r = rows.get(String(id)), v = ctx.skills[id]; values[id] = r && r.sd != null && r.mean != null && r.L > 0 ? (r.mean + k * r.sd) * (v / r.L) : v; });
-      const ids = [...new Set((ctx.learned || []).concat(ctx.available || [], Object.keys(levels)))];
+      // ctx.learned and ctx.available can be Sets or arrays.
+      const learned = [...(ctx.learned || [])].map(String), available = [...(ctx.available || [])].map(String);
+      const ids = [...new Set(learned.concat(available, Object.keys(levels)))];
       ids.forEach((id) => { if (!(id in info)) info[id] = SS.traits(cat.skills[id]); });
-      const plan = SS.solve({ learned: ctx.learned || [], available: ctx.available || [], hints: levels, sp, fast: false, values, info });
+      const plan = SS.solve({ learned, available, hints: levels, sp, fast: false, values, info });
       return Object.assign(plan, { value: plan.spec.value * OPT.L_VALUE, L: plan.spec.value });
     };
   }
