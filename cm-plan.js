@@ -112,6 +112,7 @@
           p2: rental ? member(rental.parent) : rent ? charMember(rent.cid) : null, g21: rental ? member(rental.parents[0]) : null, g22: rental ? member(rental.parents[1]) : null },
       };
     }
+    const ACE_TIE = 0.03;
     function rankVets(x, vets) {
       return (vets || []).filter((v) => +v.cid !== +x.ace.cid).map((v) => {
         const { f, rent } = vetFamily(x, v);
@@ -318,6 +319,12 @@
     // Every version in umas (trainee ids) that could be Parent 1 for the ace, trained with a
     // parent deck that offers offers: one veteran plus a rental, or two veterans, sharing
     // their G1s. The veteran is chosen for both the ace and her own career. Each { kind: "fresh", t, parents, f, s, extra, value, plan }.
+    // Veterans as a new parent's parent: by what they give the ace; within ACE_TIE of each other
+    // (a near-tie), the one that also helps the new parent's own training more.
+    function aceFirst(a, b) {
+      const d = b.ace - a.ace, scale = Math.max(Math.abs(a.ace), Math.abs(b.ace), 0.1);
+      return Math.abs(d) > ACE_TIE * scale ? d : (b.ace + b.train) - (a.ace + a.train);
+    }
     function rankFresh(x, vets, umas, offers, opts = {}) {
       const ace = x.ace.cid, out = [], seen = new Set(), r = rates(vets), baseOffers=offers;
       (umas || []).map(trainee).filter(Boolean).forEach((t) => {
@@ -341,8 +348,9 @@
         pool.forEach((v) => {
           const f = { p1: Object.assign({}, base, { wins: (v.self.wins || []).filter((n) => fit.has(n)) }), g11: member(v.self, v.tid), p2 };
           const y = total(f, [v]), tf = trainingFamily([v]), ts = fam.score(familyOf(tf), tx);
-          const value = y.s.value + y.extra.value + (rentalMode ? contribution(tf, ts, tx, F.SLOTS, true).value : 0), cur = solo.get(v.cid);
-          if (!cur || value > cur.value) solo.set(v.cid, { v, value });
+          // The ace first; her help for the new parent's own training only breaks near-ties.
+          const ace = y.s.value + y.extra.value, train = rentalMode ? contribution(tf, ts, tx, F.SLOTS, true).value : 0, cur = solo.get(v.cid);
+          if (!cur || aceFirst({ ace, train }, cur) < 0) solo.set(v.cid, { v, value: ace, ace, train });
         });
         const top = [...solo.values()].sort((a, b) => b.value - a.value).slice(0, GRAND_SHORT);
         const tryParents = (ps) => {
@@ -352,7 +360,7 @@
           const tf = trainingFamily(ps), ts = fam.score(familyOf(tf), tx);
           const training = contribution(tf, ts, tx, F.SLOTS, true);
           return y.s.problems.length || ts.problems.length ? null : { kind: "fresh", t, parents: ps, f, s: y.s, extra: y.extra, value: y.s.value + y.extra.value,
-            selectionValue: y.s.value + y.extra.value + training.value, rent, plan: pl, rates: r, offers, learning, parentMode: rentalMode ? "rental" : "veterans", rental: rentalMode ? selectedRental || null : null };
+            selectionValue: y.s.value + y.extra.value + training.value, aceValue: y.s.value + y.extra.value, trainValue: training.value, rent, plan: pl, rates: r, offers, learning, parentMode: rentalMode ? "rental" : "veterans", rental: rentalMode ? selectedRental || null : null };
         };
         let best = null;
         if (rentalMode) {
@@ -365,12 +373,12 @@
             // A saved rental that cannot join this pair is never silently substituted.
             if (selectedRental && !rental) return;
             const c = tryParents([a.v].concat(rental ? [asVeteran(rental)] : []));
-            if (c) ranked.push({ v: a.v, value: c.selectionValue, c });
+            if (c) ranked.push({ v: a.v, value: c.aceValue, ace: c.aceValue, train: c.trainValue, c });
           });
-          ranked.sort((a, b) => b.value - a.value);
+          ranked.sort(aceFirst);
           const mine = chosenVet && ranked.find(y => String(y.v.id) === chosenVet);
           best = mine ? mine.c : ranked[0] ? ranked[0].c : null;
-          if (best) best.vetOptions = ranked.map(y => ({ v: y.v, value: y.value, f: y.c.f, s: y.c.s }));
+          if (best) best.vetOptions = ranked.map(y => ({ v: y.v, value: y.value, ace: y.ace, train: y.train, f: y.c.f, s: y.c.s }));
         } else {
           top.forEach((a, i) => top.slice(i + 1).forEach((b) => { const c = tryParents([a.v, b.v]); if (c && (!best || c.value > best.value)) best = c; }));
           if (!best && top.length === 1) best = tryParents([top[0].v]);
@@ -666,7 +674,7 @@
       return Object.assign(rows, { hidden });
     }
 
-    return { context, outlook, trainedParent, itSkills, familyCover, pinkFocus, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
+    return { aceFirst, context, outlook, trainedParent, itSkills, familyCover, pinkFocus, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
   const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };

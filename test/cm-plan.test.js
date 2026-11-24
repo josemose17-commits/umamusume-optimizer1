@@ -607,3 +607,11 @@ test("the assumed field: 2 others of each style, so style-count greens (Maverick
   const debuff = Object.keys(c.skills).find((id) => conds(id).some((x) => /running_style_count_senko_otherself/.test(x)));
   assert.ok(PR.fits(conds(debuff), PR.raceFacts(p, "Nige"), true), "a Pace Chaser debuff still has targets");
 });
+
+test("a new parent's veteran parent: ranked by what she gives the ace; training help only breaks near-ties", () => {
+  const sorted = (xs) => xs.slice().sort(plan.aceFirst).map((x) => x.id);
+  // Clearly better for the ace wins, however much the other helps the new parent's training.
+  assert.deepStrictEqual(sorted([{ id: "train", ace: 1.0, train: 5 }, { id: "ace", ace: 1.5, train: 0 }]), ["ace", "train"]);
+  // Within 3%: the one that also helps training more comes first.
+  assert.deepStrictEqual(sorted([{ id: "a", ace: 1.00, train: 0 }, { id: "b", ace: 0.99, train: 0.5 }]), ["b", "a"]);
+});

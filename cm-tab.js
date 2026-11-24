@@ -180,7 +180,9 @@
       });
     }
     // Best first, among families that can reach the affinity minimum (all, when none can).
-    const reaching = (list) => { const ok = list.filter((x) => x.aff.total >= MIN_AFFINITY); return ok.length ? ok : list; };
+    // The 250 affinity minimum is a warning, not a filter: the best for the ace comes first even
+    // when her family falls short, and the plan says by how much.
+    const reaching = (list) => list;
     async function planParents(c, p, a, v) {
       const t = trainee(a.tid), who = tName(t), style = styleOf(a), d = deckOf(c, a), prefs = freshOf(d);
       const rel = ctx.aceSkills({ preset: p, style });
@@ -681,9 +683,11 @@
         const rest = ctx.veterans().list.filter((x) => !seen.has(x.id) && +x.cid !== +pick.t.cid && +x.cid !== +r.t.cid).sort((a, b) => vetName(a).localeCompare(vetName(b)));
         const top = ranked[0];
         out += `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and ${pick.rental ? `your borrowed grandparent <b>${esc(pick.rental.names[0])}</b> (${sparks(pick.rental.parent) || "no sparks entered"})` : "a borrowed grandparent"} · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
+          ${pick.aff && pick.aff.total < MIN_AFFINITY ? `<p class="mini warn">Her family reaches about ${pick.aff.total} affinity, ${MIN_AFFINITY - pick.aff.total} short of ${MIN_AFFINITY}: sparks fire less often. A veteran or rental with more affinity closes it; she's still first for what her sparks give the ace.</p>` : ""}
           ${whyHTML(r, pick)}
-          <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her${top ? " (" + esc(vetName(top.v)) + ")" : ""}</option>${ranked.map((o, i) => `<option value="${o.v.id}"${String(chosen.veteran) === String(o.v.id) ? " selected" : ""}>${i + 1}. ${esc(vetName(o.v))} · score ${fmt(o.value)}${o.aff ? " · ~" + o.aff.total + " " + o.aff.symbol : ""} · ${sparks(o.v.self)}</option>`).join("")}${rest.length ? `<optgroup label="Not ranked (a stronger one of the same character is above)">${rest.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</optgroup>` : ""}</select></label>
-          <p class="mini">Ranked by what the pair gives the ace and the new parent's own career, best first. The ace's own character isn't offered: as the ace's grandparent she'd have 0 affinity with her.</p>
+          <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her${top ? " (" + esc(vetName(top.v)) + ")" : ""}</option>${ranked.map((o, i) => `<option value="${o.v.id}"${String(chosen.veteran) === String(o.v.id) ? " selected" : ""}>${i + 1}. ${esc(vetName(o.v))} · for the ace ${fmt(o.ace != null ? o.ace : o.value)}${o.aff ? " · ~" + o.aff.total + " " + o.aff.symbol : ""} · ${sparks(o.v.self)}</option>`).join("")}${rest.length ? `<optgroup label="Not ranked (a stronger one of the same character is above)">${rest.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</optgroup>` : ""}</select></label>
+          ${vetWhyHTML(ranked)}
+          <p class="mini">Ranked by what she gives the ace (her sparks for the ace's race, each firing more with more affinity); when two are within 3%, the one that also helps the new parent's own training more comes first. A family under ${MIN_AFFINITY} affinity stays in the ranking, flagged. The ace's own character isn't offered: as the ace's grandparent she'd have 0 affinity with her.</p>
           ${searchHTML("Grandparent search", grandparentSearch(r, prefs.rental), "training", prefs.rental, `the grandparent you borrow for ${tName(pick.t)}`)}
           ${gpHTML(r, prefs)}`;
       } else {
@@ -1019,6 +1023,14 @@
 
     // The umaextractor import: its own panel on My Data → Import & backup; elsewhere a status
     // line that links there.
+    // Why your veterans rank as they do, as the new parent's parent: what she gives the ace, her
+    // help for the new parent's own training, and the family's affinity (250 or short).
+    function vetWhyHTML(ranked) {
+      if (!ranked.length) return "";
+      const L = (v) => (v == null ? "–" : (Math.round(v * 100) / 100).toFixed(2));
+      return `<details data-cmp-open="vet-why"${opened["vet-why"] ? " open" : ""}><summary class="mini">Why this order (${ranked.length} veteran${ranked.length === 1 ? "" : "s"})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>#</th><th>Veteran</th><th class="num">For the ace</th><th class="num">Training help</th><th class="num">Family affinity</th><th>Sparks</th></tr></thead><tbody>${ranked.map((o, i) => `<tr${o.aff && o.aff.total < MIN_AFFINITY ? ' class="cmp-cut"' : ""}><td class="num">${i + 1}</td><td>${esc(vetName(o.v))}</td><td class="num">${L(o.ace != null ? o.ace : o.value)}</td><td class="num">${L(o.train)}</td><td class="num">${o.aff ? `~${o.aff.total}${o.aff.total < MIN_AFFINITY ? ` <span class="warn">(${MIN_AFFINITY - o.aff.total} short)</span>` : ""}` : "–"}</td><td class="mini">${esc(sparks(o.v.self) || "")}</td></tr>`).join("")}</tbody></table></div>
+        <p class="mini">For the ace: her sparks' worth on the ace's race (whites by L × chance to fire, blues filling the ace's gaps, pinks, her unique), with each spark's chance raised by her affinity. Training help: what her blues add to the new parent's own stats; it only breaks near-ties (within 3%). Faded: the family can't reach ${MIN_AFFINITY} affinity even with the borrowed members.</p></details>`;
+    }
     function importHTML(o) {
       const v = ctx.veterans(), n = v.list.length, owned = Object.keys(ctx.owned()).length;
       const status = `${n ? `${plural(n, "veteran")} imported ${esc(v.at || "")}` : "not imported yet"} · ${plural(owned, "card")} in My cards · ${plural(ctx.myUmas().size, "uma")} in My umas`;
@@ -1044,7 +1056,7 @@
         <li><b>Blue sparks:</b> each of the 6 family members gives +5/+12/+21 (1★/2★/3★) at the start, and each blue can fire at both inspirations (early April, Classic and Senior) at 70/80/90% × (1 + that uma's affinity/100) for +1–10/1–16/1–28. Grandparents use the same base chances: their own affinity is lower, which already makes them fire less (JP tests measured grandparent blues at about 90%/80% for 3★/2★ with no affinity).</li>
         <li><b>Pink:</b> the family's stars raise an aptitude at the start (1–3★ +1 grade, 4–6★ +2, 7–9★ +3, 10+ +4), never past A. A to S only happens when a pink fires at an inspiration (1/3/5% × affinity). Your rule: S distance; S surface for a sprint; style up to A.</li>
         <li><b>Whites:</b> the race's skills her deck doesn't already give. A parent you train turns a learned skill into a spark about 20% of the time (40% with its gold), +2.5% per copy her parents and grandparents carry; at SS, sparks come out 1★/2★/3★ 20/70/10%.</li>
-        <li><b>Parent 1:</b> any of My umas, trained from your best veteran for her and a borrowed grandparent, ranked by what she gives the ace. Families under ${MIN_AFFINITY} affinity aren't suggested. Each G1 two family members both won adds +3.</li>
+        <li><b>Parent 1:</b> any of My umas, trained from your best veteran for her and a borrowed grandparent, ranked by what she gives the ace. A family under ${MIN_AFFINITY} affinity isn't skipped: it stays in the ranking with a warning saying how far short it is. Each G1 two family members both won adds +3.</li>
         <li><b>Her races:</b> career goals, then G1s her veteran won, then G1s rentals often won, at B aptitude or better, as many as keep ${pct}% of runs at SS: from your veterans' ratings in the scenario you train in (or the simulation when you have too few).</li>
         <li><b>uma.moe searches:</b> the affinity target and the other parent (her G1 wins) make uma.moe's affinity sort count the whole family. Blue asks for one stat, her biggest gap: 3★ on the rental and 7–9★ across her and her parents. Pink follows your rule, 3★+ across her line. Every listed white goes in as a preferred white (P0 first), which ranks rentals without removing any; the ones you tick are required (any number). Both parents' characters are left out.</li>
       </ul></details>`;
