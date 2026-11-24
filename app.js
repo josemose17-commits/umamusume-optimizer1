@@ -2378,7 +2378,9 @@
     // Parents are trained in Independent Training here, so its race count always applies.
     if (host === "parents") { c.independent = true; c.reachSS = state.cmp.parentRank; }
     if (host === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, compareMakeups: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, makeupMode: "guide", skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
+    if (c.makeupMode == null && c.compareMakeups === false) c.makeupMode = "off";
+    delete c.compareMakeups;
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (c.reachSS === true) c.reachSS = "SS";
     if (c.reachSS === false) c.reachSS = "";
@@ -2923,7 +2925,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.compareMakeups !== false, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2945,6 +2947,7 @@
     const raceShare = itShare(c);
     const hsc = scenFor(host);
     const simulationMeta = { scenario: hsc.id, trainee: tid };
+    let sweepNote = null;
     const done = (r, opts, fit) => {
       // The predicted stats: the target search's own careers, or a readout from the same
       // simulation for Euophrys' pick.
@@ -2957,7 +2960,7 @@
         } catch (err) { est = null; }
       }
       if ((hsc.id === "grandlive" || est && est.scoring === "race") && c.goal === "race" && est) r.skills = est.skills;
-      const result = Object.assign(r, { key, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      const result = Object.assign(r, { key, sweepNote, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
       if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
@@ -2990,18 +2993,41 @@
         const r = T.buildDeck(opts, pool, bp);
         const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
         const rv = c.goal === "race" ? raceValues(p, c.style, stamina) : null;
-        const sweep = host === "cm" && c.goal === "race" && c.compareMakeups !== false;
-        if (!tg && !ss && !staminaTrainingTarget(stamina) && !(hsc.id === "grandlive" && c.goal === "race") && !rv) { if (sweep) r.noSweep = true; done(r, opts, null); return; }
+        const mode = host === "cm" && c.goal === "race" ? c.makeupMode || "guide" : "off";
+        let sweep = mode !== "off";
+        if (!tg && !ss && !staminaTrainingTarget(stamina) && !(hsc.id === "grandlive" && c.goal === "race") && !rv) { if (mode !== "off") sweepNote = "Compare makeups needs this cup's course data or your target stats to score decks; this is Euophrys' pick in your makeup."; done(r, opts, null); return; }
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
         if (ss && !tg && !staminaTrainingTarget(stamina)) ss.ignoreFit = true;
         const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: E.capsFor(state, scenFor(host)), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         // Compare every deck makeup: Euophrys' pick in each makeup your cards can fill, the full
         // search for the best few, then the best makeup (optimizer.js makeupSweep).
+        // Your guide's makeups: the scenario the cup trains in, her distance (or the guide's nearest),
+        // each with its scenario card locked in; every one gets the full search. Without a guide
+        // (or none keeping the counts you set), one search in your makeup, with a note.
+        let makeups = null, meta = null, finalists = OPT.SWEEP_FINALISTS;
+        if (sweep && mode === "guide") {
+          const g = guideMakeups(c), seen = new Set();
+          const full = (m) => Object.fromEntries(MK_TYPES.map(([t]) => [t, m[t] || 0]));
+          const list = g ? g.list.map((x) => { const mc = makeupComp(x); return { comp: full(mc.comp), locked: mc.cards }; })
+            .filter((x) => Object.keys(c.comp).every((t) => x.comp[t] === +c.comp[t]))
+            .filter((x) => { const k = OPT.makeupKey(x.comp); if (seen.has(k)) return false; seen.add(k); return true; }) : [];
+          if (!list.length) {
+            sweepNote = !g ? `No scenario guide makeups for ${esc(hsc.name)} yet, so this is one search in your Deck makeup.` : `None of the ${esc(g.e.guide)} guide's makeups keep the counts you set in Deck makeup, so this is one search in yours.`;
+            sweep = false;
+          } else {
+            makeups = list;
+            finalists = list.length;
+            meta = { mode: "guide", guide: g.e.guide, dist: g.dist, exact: g.exact };
+          }
+        }
+        if (sweep && mode === "all") {
+          makeups = OPT.makeupList({ pool, borrowPool: bp, borrow: c.borrow, locked, fixed: c.comp, trainee: tid });
+          meta = { mode: "all" };
+        }
         if (sweep) {
-          const makeups = OPT.makeupList({ pool, borrowPool: bp, borrow: c.borrow, locked, fixed: c.comp, trainee: tid });
-          const run = OPT.makeupSweep(opts, sim, pool, bp, { makeups });
-          const optsFor = (comp) => Object.assign({}, opts, { comp });
+          const run = OPT.makeupSweep(opts, sim, pool, bp, { makeups, finalists, meta });
+          const optsFor = (comp, lk) => Object.assign({}, opts, { comp, locked: lk || opts.locked });
           j.optRun.text = `Makeup 1 of ${run.count()}`;
           renderCM();
           const step = () => {
@@ -3022,9 +3048,9 @@
                 const f = out.finals[k];
                 if (!f) return;
                 if (key !== optKey(host) || cm(host) !== saved) { flash("Settings or cards changed since this search. Press Find my best deck again."); return; }
-                done(T.describeDeck(optsFor(f.makeupComp), f.cards, pool, bp), optsFor(f.makeupComp), f);
+                done(T.describeDeck(optsFor(f.makeupComp, f.makeupLocked), f.cards, pool, bp), optsFor(f.makeupComp, f.makeupLocked), f);
               };
-              done(T.describeDeck(optsFor(out.comp), out.fit.cards, pool, bp), optsFor(out.comp), out.fit);
+              done(T.describeDeck(optsFor(out.comp, out.locked), out.fit.cards, pool, bp), optsFor(out.comp, out.locked), out.fit);
             } catch (err) { fail(err); }
           };
           setTimeout(step, 0);
@@ -3452,7 +3478,7 @@
         <label class="chip-toggle"><input type="checkbox" data-cm="ownedOnly" ${c.ownedOnly ? "checked" : ""}> Only cards I own (${n})</label>
         <label class="chip-toggle"><input type="checkbox" data-cm="borrow" ${c.borrow ? "checked" : ""}> Borrow 1 card from a friend</label>
         ${host === "cm" ? `<label class="chip-toggle" title="The 50-minute auto mode"><input type="checkbox" data-cm="independent" ${c.independent ? "checked" : ""}> Independent Training</label>` : ""}
-        ${host === "cm" && goal === "race" ? `<label class="chip-toggle" title="Find my best deck tries every deck makeup your cards can fill (the types you set in Deck makeup stay), builds the best deck for the top ${OPT.SWEEP_FINALISTS} and picks the best makeup. About a minute or two; off: one search in your makeup."><input type="checkbox" data-cm="compareMakeups" ${c.compareMakeups !== false ? "checked" : ""}> Compare every deck makeup</label>` : ""}
+        ${host === "cm" && goal === "race" ? `<label class="field" title="Your guide's: every makeup in the scenario guide for her distance gets the full search, and the best wins (under a minute). Every makeup: every split your cards can fill (a minute or two). Off: one search in your Deck makeup."><span>Compare makeups</span><select data-cm="makeupMode">${opt([["guide", "Your scenario guide's"], ["all", "Every makeup"], ["off", "Off: one search"]], c.makeupMode)}</select></label>` : ""}
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
       </div>
       ${c.independent ? `<label class="field"><span>Friendship, Mood, Training eff. count</span><select data-cm="itManual">${opt(IT_MANUAL_OPTS, c.itManual)}</select></label>` : ""}
@@ -3571,7 +3597,7 @@
   const COMP_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]];
   // The scenario master guides' deck makeups (data/scenario-decks.js) for the coach scenario and
   // this cup's distance (the guide's nearest distance when it skips one), as one-tap choices.
-  const GUIDE_ERA = { grandmasters: 5, larc: 6, uaf: 7, cooking: 8, mecha: 9, legends: 10, island: 11, onsen: 12 };
+  const GUIDE_ERA = { grandlive: 4, grandmasters: 5, larc: 6, uaf: 7, cooking: 8, mecha: 9, legends: 10, island: 11, onsen: 12 };
   function guideMakeups(c) {
     const hs = hostScen("cm"), SD = window.UmaScenarioDecks, e = SD && SD.eras[String(hs.era ? hs.era.id : GUIDE_ERA[state.scenario])], p = presetById(c.preset);
     if (!e || !p) return null;
@@ -3597,7 +3623,7 @@
   function compHTML(c) {
     const fixed = COMP_TYPES.reduce((a, [k]) => a + (c.comp[k] != null ? c.comp[k] : 0), 0);
     return `<div class="comp">
-      <span class="mini"><b>Deck makeup</b> (how many of each type, borrowed card included). ${c.goal === "race" && c.compareMakeups !== false ? "With Compare every deck makeup on, every count left at “Any” is compared; a type you set stays." : "Leave “Any” to let the optimizer decide."}</span>
+      <span class="mini"><b>Deck makeup</b> (how many of each type, borrowed card included). ${c.goal === "race" && c.makeupMode === "guide" ? "Compare makeups is on your guide's: each guide makeup that keeps the counts you set here is compared." : c.goal === "race" && c.makeupMode === "all" ? "Compare makeups is on every makeup: every count left at “Any” is compared; a type you set stays." : "Leave “Any” to let the optimizer decide."}</span>
       <div class="comp-row">${COMP_TYPES.map(([k, l]) => `<label class="field comp-f ty-${k}"><span><i class="tydot"></i>${l}</span><select data-cm-comp="${k}"><option value="">Any</option>${[0, 1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${c.comp[k] === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>`).join("")}
       ${Object.keys(c.comp).length ? '<button type="button" class="btn ghost small" id="compClear">Reset</button>' : ""}</div>
       ${fixed > 6 ? `<p class="mini warn">That adds up to ${fixed} cards; a deck has 6.</p>` : ""}
@@ -4187,14 +4213,16 @@
     const gap = (g) => Math.abs(g) < 1e-6 ? "best" : race ? `−${Math.abs(g / OPT.L_VALUE).toFixed(2)} L` : `−${Math.abs(Math.round(g))}`;
     const cur = deckKeyOf(r.cards);
     const g = guideMakeups(c), guide = new Set(g ? g.list.map((x) => OPT.makeupKey(makeupComp(x).comp)) : []);
-    const tag = (row) => (guide.has(row.key) ? ' <span class="pill" title="One of your scenario guide\'s makeups">guide</span>' : "");
+    const byGuide = m.meta && m.meta.mode === "guide";
+    const tag = (row) => (!byGuide && guide.has(row.key) ? ' <span class="pill" title="One of your scenario guide\'s makeups">guide</span>' : "");
     const names = (cards) => cards.map((x) => esc(D.card(x.id).n) + (x.borrowed ? ' <span class="mini">(borrow)</span>' : "")).join(", ");
     const stats = (e) => (e && e.stats ? e.stats.map((v) => Math.round(v)).join(" / ") : "");
     const share = (e) => (e && e.ssShare != null ? `<div class="mini">${Math.round(e.ssShare * 100)}% reach the goal</div>` : "");
     const fin = m.rows.filter((x) => x.finalist != null), rest = m.rows.filter((x) => x.finalist == null);
     return `<div class="makeups">
-      <h4>Deck makeups compared <span class="mini">· ${m.filled} makeups${m.skipped ? `, ${m.skipped} couldn't be filled` : ""}</span></h4>
-      <p class="mini">Every makeup your cards can fill got Euophrys' pick and a quick check on ${m.runs.quick} simulated careers. The best ${m.finalists} got the full search with their makeup held, then their decks were raced again on ${m.runs.final} fresh careers: the best of those is the deck above. ${race ? "Gaps are in lengths on this course (skills included)" : "Gaps are in target-fit points"}; stats are Speed / Stamina / Power / Guts / Wit.</p>
+      <h4>${byGuide ? `${esc(m.meta.guide)} guide's makeups compared` : "Deck makeups compared"} <span class="mini">· ${m.filled} makeup${m.filled === 1 ? "" : "s"}${byGuide ? ` for ${esc(m.meta.dist.toLowerCase())}${m.meta.exact ? "" : " (the guide's nearest distance)"}` : ""}</span></h4>
+      ${m.unfilled && m.unfilled.length ? `<p class="mini warn">Your cards can't fill ${m.unfilled.length === 1 ? "this makeup" : "these makeups"}: ${m.unfilled.map(esc).join("; ")}. Mark more owned cards, or allow a borrowed card.</p>` : ""}
+      <p class="mini">${byGuide ? `Every makeup in the ${esc(m.meta.guide)} guide (with its scenario card, when it has one) got the full search with the makeup held` : `Every makeup your cards can fill got Euophrys' pick and a quick check on ${m.runs.quick} simulated careers. The best ${m.finalists} got the full search with their makeup held`}, then their decks were raced again on ${m.runs.final} fresh careers: the best of those is the deck above. ${race ? "Gaps are in lengths on this course (skills included)" : "Gaps are in target-fit points"}; stats are Speed / Stamina / Power / Guts / Wit.</p>
       <div class="table-wrap"><table class="plan mk-table"><thead><tr><th>#</th><th>Makeup</th><th>Its best deck</th><th class="num">vs best</th><th class="num">Stats</th><th></th></tr></thead><tbody>
         ${fin.map((x, k) => `<tr class="${deckKeyOf(x.cards) === cur ? "cur" : ""}"><td class="num">${k + 1}</td><td><div class="mk-row">${makeupLabel(x.comp)}</div>${tag(x)}</td><td class="mini">${names(x.cards)}</td><td class="num">${gap(x.gap)}${share(x.check)}</td><td class="num mini">${stats(x.check)}</td>
           <td>${deckKeyOf(x.cards) === cur ? '<span class="mini">In use</span>' : `<button type="button" class="btn ghost small" data-cm-makeup-use="${x.finalist}">Use this deck</button>`}</td></tr>`).join("")}
@@ -4214,7 +4242,7 @@
     const total = r.cards.reduce((a, x) => a + x.score, 0);
     return `<div class="opt-result">
       <h4>${r.goal === "ace" && r.general ? `Best general ${STYLE_LABEL[r.style]} grandparent deck · cards out by ${esc(p.name)}` : `${r.goal === "ace" ? "Best ace parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]}`} · ${esc(presetName(r.scen))} weights</h4>
-      ${r.fit && r.fit.makeups ? `<p class="mk-win"><span class="mini"><b>Makeup:</b></span> ${makeupLabel(makeupOfCards(r.cards))}<span class="mini">${deckKeyOf(r.cards) === deckKeyOf(r.fit.makeups.rows[0].cards) ? ` · the best of ${r.fit.makeups.filled}` : " · see the comparison below"}</span></p>` : ""}
+      ${r.fit && r.fit.makeups ? `<p class="mk-win"><span class="mini"><b>Makeup:</b></span> ${makeupLabel(makeupOfCards(r.cards))}<span class="mini">${deckKeyOf(r.cards) === deckKeyOf(r.fit.makeups.rows[0].cards) ? ` · the best of ${r.fit.makeups.filled}${r.fit.makeups.meta && r.fit.makeups.meta.mode === "guide" ? " guide makeup" + (r.fit.makeups.filled === 1 ? "" : "s") : ""}` : " · see the comparison below"}</span></p>` : ""}
       ${r.skillSetCheck ? `<p class="mini">The skill-set check compared ${r.skillSetCheck.decks} shortlisted deck${r.skillSetCheck.decks === 1 ? "" : "s"}, using equipped skills and affordable purchases together.</p>` : ""}
       ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
       ${!stale && r.racesFollowed && r.itRaces !== c.itRaces ? `<p class="mini">Searched for ${r.itRaces} extra G1${r.itRaces === 1 ? "" : "s"}; her plan (Parents step 3) now runs ${c.itRaces} with this deck, since that's how many keep her at SS with it. Searching again would aim the deck at ${c.itRaces}, which can move the count again, so this deck stays.</p>` : ""}
@@ -4231,7 +4259,7 @@
       </div>`;
       }).join("")}</div>
       ${makeupsHTML(r, c)}
-      ${r.noSweep ? `<p class="mini">Compare every deck makeup needs this cup's course data or your target stats to score decks; this is Euophrys' pick in your makeup.</p>` : ""}
+      ${r.sweepNote ? `<p class="mini warn">${r.sweepNote}</p>` : ""}
       ${r.link ? `<p class="mini${r.link.lock ? "" : " warn"}">${r.link.lock ? `<b>${esc(r.link.name)}</b> is in${r.link.borrow ? " as the borrowed card" : ""}: uma.guide calls the scenario's link card mandatory for Independent Training.` : r.link.blocked ? `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but your deck makeup allows no Friend card.` : `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but you don't own her: mark her owned, or allow a borrowed card.`}</p>` : ""}
       ${r.goal === "race" ? `<p class="mini">Build-specific purchases: <button type="button" class="linkish" id="cmRaceShow">${deckJob("cm").raceRunning ? "comparing…" : "see the skill-set comparison above"}</button></p>` + mustResultHTML(r, c) : ""}
       ${predictedHTML(r, host)}

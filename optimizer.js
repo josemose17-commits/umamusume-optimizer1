@@ -1142,6 +1142,8 @@
   // get the full targetSearch with their makeup held; (3) their winners are raced again on fresh
   // careers (a third seed, HELD_OUT_RUNS) and the best is the makeup to use; a runner-up within
   // the noise is a close call. A stepper like targetSearch: next() does a little, result() ends it.
+  // o.makeups holds makeups ({ type: n }) or { comp, locked: [card ids] } (a guide makeup with its
+  // scenario card); o.meta rides along to the result (which list it was).
   const SWEEP_FINALISTS = 5;
   const SWEEP_COST = 40; // a finalist's full search, in quick checks (for the progress bar)
   function makeupSweep(opts, sim, pool, borrowPool, o) {
@@ -1152,15 +1154,17 @@
     const rankCache = new Map();
     const rows = [];
     let i = 0, skipped = 0, fin = null, fi = 0, search = null;
+    const unfilled = [];
+    const lockOf = (extra) => [...new Set((opts.locked || []).concat(extra || []))];
     const slim = (r) => ({ value: r.value, stats: r.stats, sp: r.sp, raceL: r.raceL, short: r.short, skill: r.skill, ssShare: r.ssShare, rating: r.rating, scoring: r.scoring });
     function next() {
       if (i < list.length) {
-        const m = list[i++];
+        const it = list[i++], m = it.comp || it, locked = lockOf(it.locked);
         try {
-          const deck = sc.Tr.pickDeck(Object.assign({}, opts, { comp: m, rankCache }), pool, borrowPool).map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
-          if (deck.length === 6) rows.push({ comp: m, start: deck, quick: slim(sc.evaluate(deck, quickCtx)) });
-          else skipped++;
-        } catch (err) { skipped++; }
+          const deck = sc.Tr.pickDeck(Object.assign({}, opts, { comp: m, locked, rankCache }), pool, borrowPool).map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
+          if (deck.length === 6) rows.push({ comp: m, locked, start: deck, quick: slim(sc.evaluate(deck, quickCtx)) });
+          else { skipped++; unfilled.push(makeupKey(m)); }
+        } catch (err) { skipped++; unfilled.push(makeupKey(m)); }
         return true;
       }
       if (!fin) {
@@ -1171,7 +1175,7 @@
       }
       if (fi >= fin.length) return false;
       const f = fin[fi];
-      if (!search) search = targetSearch(Object.assign({}, opts, { comp: f.comp }), sim, f.start, pool, borrowPool);
+      if (!search) search = targetSearch(Object.assign({}, opts, { comp: f.comp, locked: f.locked }), sim, f.start, pool, borrowPool);
       if (search.next()) return true;
       f.fit = search.result();
       search = null;
@@ -1199,13 +1203,14 @@
         .concat(rows.slice(fin.length).map((x) => ({ comp: x.comp, key: makeupKey(x.comp), cards: x.start, finalist: null, quick: x.quick, gap: x.quick.value - best.value })));
       const fit = Object.assign({}, win.f.fit);
       if (cc) fit.close = { cards: checked[1].f.fit.cards, gap: cc.gap, se: cc.se, est: checked[1].r, makeup: makeupKey(checked[1].f.comp) };
-      fit.makeups = { rows: table, tried: list.length, filled: rows.length, skipped, finalists: checked.length, winner: makeupKey(win.f.comp),
-        runs: { quick: FIT_RUNS, final: HELD_OUT_RUNS }, scoring: win.r.scoring };
+      fit.makeups = { rows: table, tried: list.length, filled: rows.length, skipped, unfilled, finalists: checked.length, winner: makeupKey(win.f.comp),
+        runs: { quick: FIT_RUNS, final: HELD_OUT_RUNS }, scoring: win.r.scoring, meta: (o && o.meta) || null };
       // Each finalist's own search result, for "Use this deck".
-      const finals = checked.map((x) => Object.assign({}, x.f.fit, { makeups: fit.makeups, makeupComp: x.f.comp }));
+      const finals = checked.map((x) => Object.assign({}, x.f.fit, { makeups: fit.makeups, makeupComp: x.f.comp, makeupLocked: x.f.locked }));
       fit.makeupComp = win.f.comp;
+      fit.makeupLocked = win.f.locked;
       finals[0] = fit;
-      return { fit, comp: win.f.comp, finals };
+      return { fit, comp: win.f.comp, locked: win.f.locked, finals };
     }
     return { next, result, progress, status, count: () => list.length };
   }

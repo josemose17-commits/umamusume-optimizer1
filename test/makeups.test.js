@@ -58,3 +58,30 @@ test("makeup sweep: the best deck for the top makeups, the winner first, each de
   });
   assert.deepStrictEqual(out.finals[0].cards, out.fit.cards);
 });
+
+test("Grand Concert's guide makeups: 12, each 6 cards with 1 Pal (Friend), for every distance", () => {
+  const S = require("../data/scenario-decks.js");
+  const gc = S.eras["4"];
+  assert.strictEqual(gc.guide, "Grand Concert");
+  assert.strictEqual(gc.decks.length, 12);
+  gc.decks.forEach((d) => {
+    assert.strictEqual(Object.values(d.comp).reduce((a, b) => a + b, 0), 6);
+    assert.strictEqual(d.comp.friend, 1);
+    assert.deepStrictEqual(d.dist, ["Sprint", "Mile", "Medium", "Long"]);
+  });
+  assert.ok(gc.decks.some((d) => d.comp.speed === 4 && d.comp.wit === 1), "4 Speed / 1 Wit / 1 Pal");
+});
+
+test("makeup sweep: a guide makeup's scenario card stays in its deck", () => {
+  const gl = SCENARIOS.find((s) => s.id === "grandlive");
+  const pool = ssr.slice(0, 50);
+  const card = D.card(pool.find((c) => D.card(c.id).ty === "wit").id);
+  const makeups = [{ comp: { speed: 3, stamina: 0, power: 0, guts: 0, wit: 2, friend: 1, group: 0 }, locked: [card.id] },
+    { comp: { speed: 2, stamina: 1, power: 0, guts: 0, wit: 2, friend: 1, group: 0 }, locked: [card.id] }];
+  const run = O.makeupSweep({ scenario: "GL" }, { scenario: gl, build: "medium", target: { speed: 1300, stamina: 800, power: 1000, guts: 500, wit: 900 } }, pool, [], { makeups, finalists: 2, meta: { mode: "guide", guide: "Test" } });
+  while (run.next());
+  const out = run.result();
+  assert.strictEqual(out.fit.makeups.meta.guide, "Test");
+  out.finals.forEach((f) => assert.ok(f.cards.some((c) => c.id === card.id), "the locked card is in every finalist's deck"));
+  assert.deepStrictEqual(out.locked, [card.id]);
+});

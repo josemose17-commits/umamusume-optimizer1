@@ -27,6 +27,20 @@ GUIDES = {  # guide name in the file name -> Pull planner era id, its portraits 
 REQUIRED = {5: 30137, 6: 30160, 7: 30188, 8: 30207, 10: 30241, 11: 30257, 12: 30276}
 # Cards a guide singles out for the scenario without making them required.
 PREFER = {9: {"Medium": [30226], "Long": [30226]}}  # Mecha: Air Shakur (stamina) in mid/long decks
+# Guides given as text, not .docx: Grand Concert's deck makeups (shared by the user, 2026-11-24),
+# for every distance. "Pal" is Global's name for a Friend card: any Friend card, no named one.
+ALL = ["Sprint", "Mile", "Medium", "Long"]
+MANUAL = {
+    4: {"guide": "Grand Concert", "required": None, "prefer": {}, "decks": [
+        {"dist": ALL, "comp": comp, "note": ""} for comp in [
+            {"speed": 3, "wit": 2, "friend": 1}, {"speed": 2, "wit": 3, "friend": 1},
+            {"speed": 2, "stamina": 1, "wit": 2, "friend": 1}, {"speed": 3, "stamina": 1, "wit": 1, "friend": 1},
+            {"speed": 2, "power": 1, "wit": 2, "friend": 1}, {"speed": 3, "power": 1, "wit": 1, "friend": 1},
+            {"speed": 2, "guts": 1, "wit": 2, "friend": 1}, {"speed": 2, "guts": 2, "wit": 1, "friend": 1},
+            {"speed": 1, "guts": 3, "wit": 1, "friend": 1}, {"speed": 1, "stamina": 2, "wit": 2, "friend": 1},
+            {"speed": 2, "stamina": 2, "wit": 1, "friend": 1}, {"speed": 4, "wit": 1, "friend": 1},
+        ]]},
+}
 DIST = {"short/mile": ["Sprint", "Mile"], "mid/long": ["Medium", "Long"], "short": ["Sprint"], "mile": ["Mile"], "mid": ["Medium"], "long": ["Long"]}
 
 
@@ -74,6 +88,8 @@ def main(paths):
             continue
         era, special = GUIDES[name]
         eras[str(era)] = {"guide": name.replace("_", " "), "required": REQUIRED.get(era), "prefer": PREFER.get(era, {}), "decks": decode(path, era, special)}
+    for era, e in MANUAL.items():
+        eras.setdefault(str(era), e)
     data = {"meta": {"built": datetime.date.today().isoformat(), "source": "the scenario master guides (community documents), example decks decoded from their icon rows"}, "eras": eras}
     out = os.path.join(os.path.dirname(__file__), "..", "data", "scenario-decks.js")
     with open(out, "w", encoding="utf-8") as f:
