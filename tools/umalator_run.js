@@ -72,7 +72,9 @@ for (const strategy of job.strategies) {
   }
   out[strategy] = {};
   for (const [id, v] of Object.entries(res)) {
-    out[strategy][id] = [+v.median.toFixed(3), +v.mean.toFixed(3), +v.min.toFixed(3), +v.max.toFixed(3)];
+    // [median, mean, min, max, sd]: sd, the race-to-race spread of the skill's gain (its own sample).
+    const xs = v.results || [], n = xs.length, sd = n > 1 ? Math.sqrt(xs.reduce((t, x) => t + (x - v.mean) * (x - v.mean), 0) / (n - 1)) : 0;
+    out[strategy][id] = [+v.median.toFixed(3), +v.mean.toFixed(3), +v.min.toFixed(3), +v.max.toFixed(3), +sd.toFixed(3)];
   }
 }
 fs.writeFileSync(outFile, JSON.stringify({ courseId: job.courseId, ms: Date.now() - t0, values: out }));

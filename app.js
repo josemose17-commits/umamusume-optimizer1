@@ -2474,7 +2474,7 @@
     const data = svCache[pid];
     style = dataStyle(style, !!(data && typeof data === "object" && data[style]));
     if (!data || typeof data === "string" || !data[style]) return [];
-    return (field && fieldRows(pid, style, data[style])) || data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
+    return (field && fieldRows(pid, style, data[style])) || data[style].map(([id, med, mean, sd]) => ({ id, L: med / 100, mean: mean / 100, sd: sd == null ? null : sd / 100 }));
   }
   // Full-field values (data/field-skills.js, tools/build_field_skills.mjs) where the cup has them:
   // each skill raced in a field of 9 with and without it, on top of a typical build for her style,
@@ -2535,7 +2535,7 @@
     const rows0 = chartRows(pid, style, field), rows = rows0.filter((r) => countFits(pid, r.id, style));
     if (rows0.fieldBased) { rows.fieldBased = true; return rows; }
     // A rival-ahead skill for a Front Runner fighting for the lead counts at that share.
-    return rows.filter((r) => PR.positionFits(pos, r.id, style)).map((r) => { const k = PR.aheadScale(pos, r.id, style); return k < 1 ? Object.assign({}, r, { L: r.L * k, mean: r.mean == null ? null : r.mean * k, ahead: k }) : r; });
+    return rows.filter((r) => PR.positionFits(pos, r.id, style)).map((r) => { const k = PR.aheadScale(pos, r.id, style); return k < 1 ? Object.assign({}, r, { L: r.L * k, mean: r.mean == null ? null : r.mean * k, sd: r.sd == null ? null : r.sd * k, ahead: k }) : r; });
   }
   // The rows skillRows leaves out, by why: { ahead, back, front }, most valuable first.
   function skillsLeftOut(pid, style) {
@@ -5463,6 +5463,18 @@
     const k = a.k === "" ? SS.kFor(mode) : +a.k;
     return { mode, k, cfg, on: !a.off };
   }
+  // Risk-adjusted chart values (mean + k x sd) for the skills with a spread; null when this cup
+  // has none yet.
+  function soRisk(p, style, values, k) {
+    const rows = skillRows(p.id, style), out = Object.assign({}, values);
+    let n = 0;
+    rows.forEach((r) => {
+      if (r.sd == null || r.mean == null || values[r.id] == null) return;
+      const scale = r.L > 0 ? values[r.id] / r.L : 1;
+      out[r.id] = (r.mean + k * r.sd) * scale; n++;
+    });
+    return n ? { values: out, count: n } : null;
+  }
   // Each listed skill's race traits from the simulator's entries (null until it loads).
   function soTraits(p, ids) {
     const cat = raceCatalog(p);
@@ -5521,8 +5533,11 @@
     const spec = soSpec(b, p);
     const allIds = [...new Set(b.skills.flatMap((x) => window.UmaSkillBudget.create().chain(x.id) || [x.id]))];
     const info = spec.on ? soTraits(p, allIds) : null;
+    // The spec's risk-adjusted length: mean + k x the skill's own race-to-race spread (the cup's
+    // chart data, tools/build_skill_spread.js), scaled as her median was; median where it's missing.
+    const risk = spec.on && loaded ? soRisk(p, b.style, values, spec.k) : null;
     try {
-      if (loaded && b.sp !== "") quick = SO.quickPlan({ skills: b.skills, values, sp: +b.sp, fast: b.fast,
+      if (loaded && b.sp !== "") quick = SO.quickPlan({ skills: b.skills, values: risk ? risk.values : values, sp: +b.sp, fast: b.fast,
         solve: info ? (o) => SS.solve(Object.assign({}, o, { info, cfg: spec.cfg })) : null });
     } catch (e) { quick = null; }
     // Spend all the SP: what's left after the chart's best set buys the best other skills that
@@ -5545,7 +5560,7 @@
         <td><label class="chip-toggle"><input type="checkbox" data-so-have="${i}"${x.have ? " checked" : ""}> Has it</label></td>
         <td><button type="button" class="linkish" data-so-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></td></tr>`;
     }).join("");
-    const quickHTML = !loaded ? `<p class="mini">Loading this cup's skill values…</p>` : b.sp === "" ? `<p class="mini">Enter her SP to see what to buy.</p>` : !b.skills.length ? `<p class="mini">Add the skills her shop offers.</p>` : quick ? `<p><b>Quick plan:</b> ${quick.selected.length ? quick.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing affordable gains length"}. ${quick.spent} / ${quick.budget} SP, ${quick.unspent} left. About <b>+${soNum(quick.L)} L</b> by the course chart${quick.spec ? ` (spec score ${soNum(quick.spec.value)})` : ""}.</p>${soSpecQuickHTML(quick, spec, info)}${soFillHTML(quickFill, quick.budget, "the chart")}<p class="mini">Highlighted in the list. Chart gains added up for her running style, with hint${b.fast ? " and Fast Learner" : ""} discounts and gold prerequisites counted${adj.wit ? `, and each Wit-checked skill valued at her Wit: it passes its pre-race Wit check in ${Math.round(adj.wit.her * 100)}% of races (the chart assumed ${Math.round(adj.wit.chart * 100)}%)` : ""}. Race-check it below: skills that overlap or need stamina change the answer.${soRushedHTML(b)}</p>` : `<p class="mini warn">Couldn't price this list.</p>`;
+    const quickHTML = !loaded ? `<p class="mini">Loading this cup's skill values…</p>` : b.sp === "" ? `<p class="mini">Enter her SP to see what to buy.</p>` : !b.skills.length ? `<p class="mini">Add the skills her shop offers.</p>` : quick ? `<p><b>Quick plan:</b> ${quick.selected.length ? quick.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing affordable gains length"}. ${quick.spent} / ${quick.budget} SP, ${quick.unspent} left. About <b>+${soNum(quick.L)} L</b> by the course chart${risk ? ` (risk-adjusted: mean ${spec.k >= 0 ? "+" : "−"} ${Math.abs(spec.k)} × spread)` : ""}${quick.spec ? `; spec score ${soNum(quick.spec.value)}` : ""}.</p>${soSpecQuickHTML(quick, spec, info)}${soFillHTML(quickFill, quick.budget, "the chart")}<p class="mini">Highlighted in the list. Chart gains added up for her running style, with hint${b.fast ? " and Fast Learner" : ""} discounts and gold prerequisites counted${adj.wit ? `, and each Wit-checked skill valued at her Wit: it passes its pre-race Wit check in ${Math.round(adj.wit.her * 100)}% of races (the chart assumed ${Math.round(adj.wit.chart * 100)}%)` : ""}. Race-check it below: skills that overlap or need stamina change the answer.${soRushedHTML(b)}</p>` : `<p class="mini warn">Couldn't price this list.</p>`;
     const saved = state.soSaved || [];
     body.innerHTML = `<div class="skillopt">
       <section class="panel"><h2>Skill optimizer</h2>
