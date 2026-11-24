@@ -5430,6 +5430,7 @@
       ${r.staticReason ? `<p class="mini warn">Course-chart only: ${esc(r.staticReason)}</p>` : ""}
       ${soGateHTML(r.gate)}
       <p><b>Buy:</b> ${plan.selected.length ? plan.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing: no purchase gains length"}. ${plan.spent} / ${plan.budget} SP${r.gate && r.gate.cost ? " left after the heals" : ""}, ${plan.unspent} left. <b>+${soNum(plan.result.mean)} L</b> on average${plan.result.ci95 ? ` (± ${soNum(plan.result.ci95)})` : ""} over what she has; worst 10% of races ${soNum(plan.result.low)} L.</p>
+      ${r.spec && r.spec.on ? `<p class="mini">Ranked by <b>mean + ${r.spec.k} × spread</b> of her gain across races (${r.spec.mode === "loh" ? "League of Heroes: steady placings count more" : "Champions Meeting: upside that wins races counts more"}); fragile positional triggers kept at 65-75% of their gain. Advanced changes it.</p>` : ""}
       ${soFillHTML(r.fill, plan.budget, "the race check")}
       ${soLinkHTML(r)}
       ${duelHTML(plan)}${prunedHTML(plan)}${g8PairHTML(p.id, plan.selected.map((x) => x.id).concat(b.skills.filter((x) => x.have).map((x) => x.id)))}
@@ -5453,6 +5454,23 @@
     return ` Rushed (掛かり) chance at her Wit: <b>${Math.round(r * 100)}%</b> of races${has ? `, ${Math.round(w * 100)}% with Restraint, which she has` : `; Restraint would make it ${Math.round(w * 100)}%`}. Rushed burns 60% more HP for up to 12 s and costs part of her conserved power.`;
   }
   const soRushedHTML = (b) => { const line = rushedLine(+b.stats.wisdom, +b.mood, b.skills.some((x) => x.id === "202161" && x.have)); return line ? `</p><p class="mini">${line.trim()}` : ""; };
+  // The spec's settings for this build (skill-spec.js): mode (the cup's kind unless set), the
+  // spread weight k, decay alpha, the early/mid bonus, beam width; off: the plain knapsack.
+  const SS = window.UmaSkillSpec;
+  function soSpec(b, p) {
+    const a = b.adv || {}, mode = a.mode === "cm" || a.mode === "loh" ? a.mode : p.kind === "loh" ? "loh" : "cm";
+    const cfg = { alpha: a.alpha === "" ? SS.DEFAULTS.alpha : +a.alpha, mid: a.mid === "" ? SS.DEFAULTS.mid : +a.mid, beam: a.beam === "" ? SS.DEFAULTS.beam : +a.beam };
+    const k = a.k === "" ? SS.kFor(mode) : +a.k;
+    return { mode, k, cfg, on: !a.off };
+  }
+  // Each listed skill's race traits from the simulator's entries (null until it loads).
+  function soTraits(p, ids) {
+    const cat = raceCatalog(p);
+    if (!cat || !SS) return null;
+    const out = {};
+    ids.forEach((id) => { const t = SS.traits(cat.skills[id]); if (t) out[id] = t; });
+    return out;
+  }
   // Mean lengths per skill (the chart's mean, scaled as her median was), for spending the rest.
   function soMeans(p, style, values) {
     const out = {};
@@ -5462,6 +5480,13 @@
     });
     Object.keys(values).forEach((id) => { if (out[id] == null) out[id] = values[id]; });
     return out;
+  }
+  // How the quick plan scored: the spec's set-dependent value, or the plain knapsack.
+  function soSpecQuickHTML(quick, spec, info) {
+    if (!spec.on) return `<p class="mini">Spec scoring is off (Advanced): chart gains added up, the exact knapsack.</p>`;
+    if (!info || !quick.spec) return `<p class="mini">Loading the skills' race data for the spec scoring; this plan is the plain knapsack for now.</p>`;
+    const per = quick.spec.per || {}, changed = Object.keys(per).filter((id) => Math.abs(per[id] - (quick.selected.find((x) => x.id === id) || {}).L) > 0.005);
+    return `<p class="mini">Spec scoring: fragile triggers kept at 65-75%, early/mid speed skills ×${spec.cfg.mid.toFixed(2)}, late current-speed ×${SS.DEFAULTS.current.toFixed(2)}, late accelerations decaying 1/(1 + ${spec.cfg.alpha} × the acceleration already bought), Groundwork worth 0 under its start count; a beam search (width ${spec.cfg.beam}) checked against the exact knapsack${quick.spec.seeded ? ", which won here" : ""}.${changed.length ? ` Rescored here: ${changed.map((id) => `${skillNameHTML(id)} ${soNum((quick.selected.find((x) => x.id === id) || {}).L)} → ${soNum(per[id])} L`).join(", ")}.` : ""}</p>`;
   }
   // The rest of her SP, spent: skills with no clear gain, bought because unspent SP is wasted.
   function soFillHTML(fill, budget, by) {
@@ -5493,7 +5518,13 @@
     const adj = soAdjust(p, b, loaded ? skillMap(p.id, b.style).map : {}), values = adj.values;
     const names = soCupNames(p), apt = soApt(b, p);
     let quick = null;
-    try { if (loaded && b.sp !== "") quick = SO.quickPlan({ skills: b.skills, values, sp: +b.sp, fast: b.fast }); } catch (e) { quick = null; }
+    const spec = soSpec(b, p);
+    const allIds = [...new Set(b.skills.flatMap((x) => window.UmaSkillBudget.create().chain(x.id) || [x.id]))];
+    const info = spec.on ? soTraits(p, allIds) : null;
+    try {
+      if (loaded && b.sp !== "") quick = SO.quickPlan({ skills: b.skills, values, sp: +b.sp, fast: b.fast,
+        solve: info ? (o) => SS.solve(Object.assign({}, o, { info, cfg: spec.cfg })) : null });
+    } catch (e) { quick = null; }
     // Spend all the SP: what's left after the chart's best set buys the best other skills that
     // fit, by mean lengths (skill-opt.js fillRest).
     let quickFill = null;
@@ -5514,7 +5545,7 @@
         <td><label class="chip-toggle"><input type="checkbox" data-so-have="${i}"${x.have ? " checked" : ""}> Has it</label></td>
         <td><button type="button" class="linkish" data-so-remove="${i}" aria-label="Remove ${esc(skillInfo(x.id)[0])}">✕</button></td></tr>`;
     }).join("");
-    const quickHTML = !loaded ? `<p class="mini">Loading this cup's skill values…</p>` : b.sp === "" ? `<p class="mini">Enter her SP to see what to buy.</p>` : !b.skills.length ? `<p class="mini">Add the skills her shop offers.</p>` : quick ? `<p><b>Quick plan:</b> ${quick.selected.length ? quick.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing affordable gains length"}. ${quick.spent} / ${quick.budget} SP, ${quick.unspent} left. About <b>+${soNum(quick.L)} L</b> by the course chart.</p>${soFillHTML(quickFill, quick.budget, "the chart")}<p class="mini">Highlighted in the list. Chart gains added up for her running style, with hint${b.fast ? " and Fast Learner" : ""} discounts and gold prerequisites counted${adj.wit ? `, and each Wit-checked skill valued at her Wit: it passes its pre-race Wit check in ${Math.round(adj.wit.her * 100)}% of races (the chart assumed ${Math.round(adj.wit.chart * 100)}%)` : ""}. Race-check it below: skills that overlap or need stamina change the answer.${soRushedHTML(b)}</p>` : `<p class="mini warn">Couldn't price this list.</p>`;
+    const quickHTML = !loaded ? `<p class="mini">Loading this cup's skill values…</p>` : b.sp === "" ? `<p class="mini">Enter her SP to see what to buy.</p>` : !b.skills.length ? `<p class="mini">Add the skills her shop offers.</p>` : quick ? `<p><b>Quick plan:</b> ${quick.selected.length ? quick.selected.map((x) => skillNameHTML(x.id)).join(", ") : "nothing affordable gains length"}. ${quick.spent} / ${quick.budget} SP, ${quick.unspent} left. About <b>+${soNum(quick.L)} L</b> by the course chart${quick.spec ? ` (spec score ${soNum(quick.spec.value)})` : ""}.</p>${soSpecQuickHTML(quick, spec, info)}${soFillHTML(quickFill, quick.budget, "the chart")}<p class="mini">Highlighted in the list. Chart gains added up for her running style, with hint${b.fast ? " and Fast Learner" : ""} discounts and gold prerequisites counted${adj.wit ? `, and each Wit-checked skill valued at her Wit: it passes its pre-race Wit check in ${Math.round(adj.wit.her * 100)}% of races (the chart assumed ${Math.round(adj.wit.chart * 100)}%)` : ""}. Race-check it below: skills that overlap or need stamina change the answer.${soRushedHTML(b)}</p>` : `<p class="mini warn">Couldn't price this list.</p>`;
     const saved = state.soSaved || [];
     body.innerHTML = `<div class="skillopt">
       <section class="panel"><h2>Skill optimizer</h2>
@@ -5543,6 +5574,7 @@
         <p class="mini">L: median lengths gained on this course for her style (Umalator chart, no other skills). Tick <b>Has it</b> for skills she already learned: they're the baseline and cost nothing. SP shown for one tier at its hint level.</p>
         ${quickHTML}
       </section>
+      ${soAdvHTML(b, p)}
       <section class="panel"><h3>Race check</h3>
         <div class="row-wrap"><label class="field grow"><span>Goal</span><select data-so-field="goal"><option value="length"${b.goal !== "win" ? " selected" : ""}>Most lengths gained (fast)</option><option value="win"${b.goal === "win" ? " selected" : ""}>${p.kind === "loh" ? "Best finish" : "Win the race"} in a full field (about a minute)</option></select></label></div>
         ${b.goal === "win" ? soFieldHTML(b, p) : ""}
@@ -5553,6 +5585,20 @@
         <div class="row-wrap"><button type="button" class="btn ghost small" data-so="share">Copy share link</button><label class="field grow"><span>Save as</span><input id="soName" placeholder="${esc((t ? t.n : "Build") + " · " + p.name)}"></label><button type="button" class="btn ghost small" data-so="save">Save</button></div>
         ${saved.length ? `<ul class="so-saved">${saved.map((s, i) => `<li><button type="button" class="linkish" data-so-load="${i}">${esc(s.name)}</button> <span class="mini">${esc(s.at || "")}</span> <button type="button" class="linkish" data-so-del="${i}" aria-label="Delete ${esc(s.name)}">✕</button></li>`).join("")}</ul>` : `<p class="mini">Saved builds stay in this browser. A share link carries the whole build.</p>`}
       </section></div>`;
+  }
+  function soAdvHTML(b, p) {
+    const a = b.adv || {}, spec = soSpec(b, p), num = (k, v, ph, step) => `<input type="number" step="${step}" data-so-adv="${k}" value="${esc(v)}" placeholder="${ph}">`;
+    return `<details class="panel so-adv"><summary><b>Advanced</b> · the spec's scoring (${spec.on ? `${spec.mode === "loh" ? "League of Heroes" : "Champions Meeting"}, k ${spec.k}` : "off"})</summary>
+      <div class="row-wrap">
+        <label class="chip-toggle"><input type="checkbox" data-so-adv="on"${a.off ? "" : " checked"}> Spec scoring</label>
+        <label class="field"><span>Mode</span><select data-so-adv="mode">${[["auto", `Auto (${p.kind === "loh" ? "LoH" : "CM"}, this cup)`], ["cm", "Champions Meeting"], ["loh", "League of Heroes"]].map(([v, l]) => `<option value="${v}"${(a.mode || "auto") === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field"><span>Spread weight k</span>${num("k", a.k, String(SS.kFor(spec.mode)), "0.05")}</label>
+        <label class="field"><span>Accel decay α</span>${num("alpha", a.alpha, String(SS.DEFAULTS.alpha), "0.05")}</label>
+        <label class="field"><span>Early/mid speed ×</span>${num("mid", a.mid, String(SS.DEFAULTS.mid), "0.01")}</label>
+        <label class="field"><span>Beam width</span>${num("beam", a.beam, String(SS.DEFAULTS.beam), "10")}</label>
+      </div>
+      <p class="mini">From the CM &amp; LoH skill optimizer spec. <b>k</b>: the race check ranks sets by mean + k × the race-to-race spread of her gain (CM default +0.35: upside that wins; LoH −0.75: steady placings). <b>α</b>: each late acceleration counts 1/(1 + α × the acceleration already bought). <b>Early/mid speed</b>: their worth beyond the lengths (pace, position). Fragile triggers (surrounded 0.65, near count 0.75, lane time 0.70) count at that share in both plans. The quick plan solves it with a beam search, checked against the exact knapsack. Off: the plain knapsack on chart gains and the race check on mean lengths. Blank boxes use the defaults.</p>
+    </details>`;
   }
   function soFieldHTML(b, p) {
     const why = fieldUnsupported(p);
@@ -5634,8 +5680,12 @@
           }
         }
       }
+      // The spec's objective (mean + k x spread; CM favours upside, LoH steadiness) and its
+      // reliability for fragile positional triggers (the share of their gain kept).
+      const spec = soSpec(b, p), scale = Object.assign({}, raceScale(p, b.style, available));
+      if (spec.on) availableAll.forEach((id) => { const t = SS.traits(catalog.skills[id]); if (t && t.reliability < 1) scale[id] = scale[id] == null ? t.reliability : Math.min(scale[id], t.reliability); });
       // game8's picks are a tag only: the simulator decides.
-      const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available: availableAll, learned: learnedAll, hints, sp: spLeft, values, must: [], compare, scale: raceScale(p, b.style, available), maxEvaluations: 96, fastLearner: b.fast,
+      const plan = await RS.optimize({ catalog, allowChartOnly: !!unsupported, available: availableAll, learned: learnedAll, hints, sp: spLeft, values, must: [], compare, scale, k: spec.on ? spec.k : 0, maxEvaluations: 96, fastLearner: b.fast,
         progress: (f) => { if (!same()) return; soJob.progress = f * (b.goal === "win" && !fieldUnsupported(p) ? 40 : 100); const box = document.getElementById("soOut"); if (box && state.tab === "skillopt") box.innerHTML = `<p class="mini" role="status">Racing skill sets… ${Math.round(soJob.progress)}% <button type="button" class="linkish" data-so="stop">Stop</button></p>`; } });
       // Spend all the SP: what the best set leaves buys the best other skills that fit, by their
       // lengths raced alone (or the chart's mean for skills it didn't race).
@@ -5646,7 +5696,7 @@
         availableAll.forEach((id) => { score[id] = raced[id] != null ? raced[id] : meanOf[id] != null ? meanOf[id] : 0; });
         fill = SO.fillRest({ learned: learnedAll, bought: plan.selected.flatMap((x) => (window.UmaSkillBudget.create().chain(x.id) || [x.id])), available: availableAll, hints, sp: spLeft, spent: plan.spent, fast: b.fast, score });
       }
-      if (same()) soJob.result = { plan, gate, fill, learned, input, staticReason: unsupported, engineNote: soEngineNote(p), field: p.kind === "loh" ? 12 : 9, conditions: skillConditions(catalog, plan.ranking.map((x) => x.id).concat(available)) };
+      if (same()) soJob.result = { plan, gate, fill, learned, input, spec, staticReason: unsupported, engineNote: soEngineNote(p), field: p.kind === "loh" ? 12 : 9, conditions: skillConditions(catalog, plan.ranking.map((x) => x.id).concat(available)) };
       if (same() && b.goal === "win" && !fieldUnsupported(p)) {
         let pool = null;
         try {
@@ -5758,6 +5808,7 @@
     const el = e.target, b = soBuild();
     if (el.dataset.soField === "fillSp") b.noFill = !el.checked;
     else if (el.dataset.soField) { const k = el.dataset.soField; b[k] = el.type === "checkbox" ? el.checked : el.value; }
+    else if (el.dataset.soAdv) { const k = el.dataset.soAdv; b.adv = Object.assign({}, b.adv); if (k === "on") b.adv.off = !el.checked; else b.adv[k] = el.value; }
     else if (el.dataset.soStat) b.stats[el.dataset.soStat] = el.value;
     else if (el.dataset.soApt) b.apt[el.dataset.soApt] = el.value;
     else if (el.dataset.soHint != null) b.skills[+el.dataset.soHint].hint = +el.value;

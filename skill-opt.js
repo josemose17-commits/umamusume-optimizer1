@@ -9,6 +9,14 @@
   const GRADES = "GFEDCBAS";
   const clampInt = (x, lo, hi, d) => { const n = Math.floor(+x); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
 
+  // The spec's settings (Advanced): mode (auto: the cup's kind), the spread weight k (blank: the
+  // mode's default), late-acceleration decay alpha, the early/mid speed bonus, beam width, and
+  // off (the quick plan's exact knapsack on chart gains instead of the spec's scoring).
+  function cleanAdv(a) {
+    a = a && typeof a === "object" ? a : {};
+    const num = (v, lo, hi) => (v === "" || v == null || !Number.isFinite(+v) ? "" : String(Math.min(hi, Math.max(lo, +v))));
+    return { mode: ["auto", "cm", "loh"].includes(a.mode) ? a.mode : "auto", k: num(a.k, -2, 2), alpha: num(a.alpha, 0, 2), mid: num(a.mid, 1, 1.5), beam: num(a.beam, 5, 200), off: !!a.off };
+  }
   // A saved or shared build, cleaned: unknown fields dropped, numbers in range.
   function clean(b) {
     b = b && typeof b === "object" ? b : {};
@@ -16,7 +24,7 @@
       tid: b.tid ? String(b.tid).replace(/\D/g, "").slice(0, 8) : "", stats: {}, apt: {}, mood: MOODS.includes(String(b.mood)) ? String(b.mood) : "0",
       uniqueLv: String(clampInt(b.uniqueLv, 1, 6, 1)), sp: b.sp === "" || b.sp == null ? "" : String(clampInt(b.sp, 0, 20000, 0)),
       fast: !!b.fast, skills: [], goal: b.goal === "win" ? "win" : "length",
-      precise: !!b.precise, spurtGoal: [90, 95, 100].includes(+b.spurtGoal) ? +b.spurtGoal : 95, noFill: !!b.noFill, strength: ["top-strong", "top-typical", "weaker", "equal", "stronger"].includes(b.strength) ? b.strength : "top-strong", mix: null, team: [] };
+      precise: !!b.precise, spurtGoal: [90, 95, 100].includes(+b.spurtGoal) ? +b.spurtGoal : 95, noFill: !!b.noFill, adv: cleanAdv(b.adv), strength: ["top-strong", "top-typical", "weaker", "equal", "stronger"].includes(b.strength) ? b.strength : "top-strong", mix: null, team: [] };
     // Rivals by running style for the full-field check (null: the cup's default spread).
     if (b.mix && typeof b.mix === "object") {
       const mix = {}; let n = 0;
@@ -53,7 +61,7 @@
     const b = clean(build);
     return b64(JSON.stringify([1, b.cup, b.style, b.tid, STATS.map((s) => b.stats[s] || ""), [b.apt.distanceAptitude || "", b.apt.surfaceAptitude || "", b.apt.strategyAptitude || ""],
       b.mood, b.uniqueLv, b.sp, b.fast ? 1 : 0, b.skills.map((x) => x.id + "." + x.hint + (x.have ? "h" : "")),
-      b.goal === "win" ? 1 : 0, b.strength, b.mix ? ["Nige", "Senkou", "Sasi", "Oikomi"].map((k) => b.mix[k]) : 0, b.precise ? 1 : 0, b.spurtGoal, b.noFill ? 1 : 0]));
+      b.goal === "win" ? 1 : 0, b.strength, b.mix ? ["Nige", "Senkou", "Sasi", "Oikomi"].map((k) => b.mix[k]) : 0, b.precise ? 1 : 0, b.spurtGoal, b.noFill ? 1 : 0, [b.adv.mode, b.adv.k, b.adv.alpha, b.adv.mid, b.adv.beam, b.adv.off ? 1 : 0]]));
   }
   function decode(code) {
     let a;
@@ -64,7 +72,7 @@
     ["distanceAptitude", "surfaceAptitude", "strategyAptitude"].forEach((k, i) => { if (a[5] && a[5][i]) apt[k] = a[5][i]; });
     const skills = (Array.isArray(a[10]) ? a[10] : []).map((t) => { const m = /^(\d+)\.([0-5])(h?)$/.exec(String(t)); return m ? { id: m[1], hint: +m[2], have: !!m[3] } : null; }).filter(Boolean);
     const mix = Array.isArray(a[13]) ? { Nige: a[13][0], Senkou: a[13][1], Sasi: a[13][2], Oikomi: a[13][3] } : null;
-    return clean({ cup: a[1], style: a[2], tid: a[3], stats, apt, mood: a[6], uniqueLv: a[7], sp: a[8], fast: !!a[9], skills, goal: a[11] ? "win" : "length", strength: a[12], mix, precise: !!a[14], spurtGoal: a[15] == null ? 95 : a[15], noFill: !!a[16] });
+    return clean({ cup: a[1], style: a[2], tid: a[3], stats, apt, mood: a[6], uniqueLv: a[7], sp: a[8], fast: !!a[9], skills, goal: a[11] ? "win" : "length", strength: a[12], mix, precise: !!a[14], spurtGoal: a[15] == null ? 95 : a[15], noFill: !!a[16], adv: Array.isArray(a[17]) ? { mode: a[17][0], k: a[17][1], alpha: a[17][2], mid: a[17][3], beam: a[17][4], off: !!a[17][5] } : null });
   }
 
   // Skill names as typed or copied: case, spacing and punctuation don't matter; "O"/"OO" (or
@@ -127,7 +135,8 @@
     const learned = o.skills.filter((x) => x.have).map((x) => x.id), available = o.skills.filter((x) => !x.have).map((x) => x.id);
     const hints = Object.fromEntries(o.skills.map((x) => [x.id, x.hint]));
     const budget = B.create({ learned, available, skills: o.values, fastLearner: o.fast, metadata: o.metadata });
-    const plan = budget.solve(hints, o.sp);
+    // o.solve: another solver with the same inputs (skill-spec.js's beam search); else the exact knapsack.
+    const plan = o.solve ? o.solve({ learned, available, hints, sp: o.sp, fast: o.fast, values: o.values, metadata: o.metadata }) : budget.solve(hints, o.sp);
     const prices = {};
     budget.options(hints).flat().forEach((x) => { prices[x.id] = x.cost; });
     return Object.assign(plan, { prices, hints, learned, available });
@@ -198,7 +207,7 @@
     return JSON.parse(await new Response(stream).text());
   }
 
-  const api = { STATS, clean, encode, decode, parsePaste, norm, withLower, quickPlan, price, fillRest, maxHP, activation, healOrder, umalatorLink, readUmalatorLink, UMALATOR, HP_COEF };
+  const api = { cleanAdv, STATS, clean, encode, decode, parsePaste, norm, withLower, quickPlan, price, fillRest, maxHP, activation, healOrder, umalatorLink, readUmalatorLink, UMALATOR, HP_COEF };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaSkillOpt = api;
 })(typeof window !== "undefined" ? window : globalThis);
