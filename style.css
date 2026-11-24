@@ -1085,3 +1085,21 @@ details.deck-adv > summary .mini b { color: var(--warn); font-weight: 600; }
 .mk-rest > summary { font-weight: 600; }
 .run-bar-status { font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .mk-table td.num, .mk-table td .btn { white-space: nowrap; }
+
+/* Top bar between phone and wide desktop: nothing shrinks into its neighbour; labels go first,
+   then the Settings word, then the title (the logo stays). */
+#newCareer { white-space: nowrap; }
+.topbar .controls > * { flex: none; }
+.topbar #scenario, .topbar #build { text-overflow: ellipsis; }
+@media (min-width: 901px) and (max-width: 1279px) {
+  .topbar .top-field > span { display: none; }
+  .topbar #scenario { max-width: 200px; }
+  .topbar #build { max-width: 165px; }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+  .topbar .settings summary .hide-sm { display: none; }
+  .topbar .settings summary { width: 36px; padding: 0; justify-content: center; }
+}
+@media (min-width: 901px) and (max-width: 1040px) {
+  .topbar h1 { display: none; }
+}
