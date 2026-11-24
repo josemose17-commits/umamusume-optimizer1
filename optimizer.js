@@ -40,6 +40,24 @@
   const RACE_REWARD = { stats: 8, sp: 40 }; // per race; scaled by the deck's Race Bonus
   const EVENT_STATS = 120; // stats per stat from random events over a career, about the same for any deck
 
+  // Inheritance, from her family's blue sparks (family.js's rules): each member's spark gives
+  // +5/+12/+21 (1-3 stars) at the start, and at each inspiration (Classic and Senior, early
+  // April: turns 31 and 55) fires at 70/80/90% x (1 + that member's affinity / 100), for 1 to
+  // 10/16/28 points. members: [{ blue: [stat index, stars], aff, scale }] (scale: 1, grandparents
+  // too). Pink sparks change aptitudes, not training, so they don't enter the career.
+  const INSPIRATION_TURNS = [31, 55];
+  const START_BLUE = [5, 12, 21], BLUE_P = [0.7, 0.8, 0.9], BLUE_MOST = [10, 16, 28];
+  function inheritFrom(members) {
+    const start = [0, 0, 0, 0, 0], sparks = [];
+    (members || []).forEach((m) => {
+      const b = m && m.blue, st = b ? Math.max(0, Math.min(3, +b[1] || 0)) : 0;
+      if (!st || !(b[0] >= 0 && b[0] < 5)) return;
+      start[b[0]] += START_BLUE[st - 1];
+      sparks.push({ i: +b[0], p: Math.min(1, BLUE_P[st - 1] * (1 + Math.max(0, +m.aff || 0) / 100) * (m.scale == null ? 1 : m.scale)), most: BLUE_MOST[st - 1] });
+    });
+    return sparks.length ? { start, sparks } : null;
+  }
+
   function rng(seed) {
     let s = seed >>> 0 || 1;
     return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
@@ -86,6 +104,9 @@
       sc, w: b.w, target, caps, turns, camp, boost, calendar,
       growth: t ? t.g : [0, 0, 0, 0, 0],
       start: t && t.b ? t.b.slice(0, 5) : [100, 100, 100, 100, 100],
+      // Her parents' blue sparks (inheritFrom): start stats, and per inspiration each spark's
+      // chance to fire and the most it gives (1 to max points, at random).
+      inherit: opts.inherit || null,
       skills: opts.skills || {}, // skill id -> median L on the chosen course and style
       costs: opts.costs || {}, // skill id -> skill point cost, for skills deck.js doesn't know
       raceShare: opts.raceShare != null ? opts.raceShare : (RACE_SHARE_BY_SCENARIO[sc.id] != null ? RACE_SHARE_BY_SCENARIO[sc.id] : RACE_SHARE),
@@ -351,7 +372,8 @@
         dst[id] = Math.min(5, (dst[id] || 0) + lv); runLevels[id] = Math.min(5, (runLevels[id] || 0) + lv);
       };
       const rand = rng(ctx.seed + run * 7919);
-      const x = ctx.start.map((v, i) => Math.min(ctx.caps[STATS[i]], v + initial[i]));
+      const inh = ctx.inherit, inhRand = inh ? rng(((ctx.seed + run * 7919) ^ 0x5a17c3) >>> 0) : null, inhDone = new Set();
+      const x = ctx.start.map((v, i) => Math.min(ctx.caps[STATS[i]], v + initial[i] + (inh ? inh.start[i] || 0 : 0)));
       let sp = 120 + initialSp;
       let energy = 100;
       let maxEnergy = 100;
@@ -445,6 +467,13 @@
       });
       for (let ti = 0; ti < ctx.turns.length; ti++) {
         const turn = ctx.turns[ti];
+        // Inheritance's two inspirations (Classic and Senior, early April): each blue spark fires
+        // at its chance and gives 1 to its most points (inheritFrom).
+        if (inh) INSPIRATION_TURNS.forEach((at) => {
+          if (turn < at || inhDone.has(at)) return;
+          inhDone.add(at);
+          inh.sparks.forEach((b) => { if (inhRand() < b.p) x[b.i] = Math.min(ctx.caps[STATS[b.i]], x[b.i] + 1 + Math.floor(inhRand() * b.most)); });
+        });
         gmUsed = false; gmDrop = 0;
         if (gmS) {
           // A full table: obtain its Wisdom at the start of the turn, in the color the goddess plan
@@ -1364,7 +1393,7 @@
     };
   }
 
-  const api = { makeupList, makeupKey, makeupSweep, fitScorer, MAKEUP_MAX, SWEEP_FINALISTS, grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, stepL, onCurve, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { inheritFrom, INSPIRATION_TURNS, makeupList, makeupKey, makeupSweep, fitScorer, MAKEUP_MAX, SWEEP_FINALISTS, grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, stepL, onCurve, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
