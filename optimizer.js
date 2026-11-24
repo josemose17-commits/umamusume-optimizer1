@@ -107,6 +107,9 @@
       // Her parents' blue sparks (inheritFrom): start stats, and per inspiration each spark's
       // chance to fire and the most it gives (1 to max points, at random).
       inherit: opts.inherit || null,
+      // A per-career skill purchase to use instead of the exact knapsack (the finalists' recheck:
+      // the Skill optimizer's spec scoring): (ctx, hint levels, sp) -> a solve()-shaped plan.
+      specPurchase: opts.specPurchase || null,
       skills: opts.skills || {}, // skill id -> median L on the chosen course and style
       costs: opts.costs || {}, // skill id -> skill point cost, for skills deck.js doesn't know
       raceShare: opts.raceShare != null ? opts.raceShare : (RACE_SHARE_BY_SCENARIO[sc.id] != null ? RACE_SHARE_BY_SCENARIO[sc.id] : RACE_SHARE),
@@ -765,7 +768,7 @@
           model.fallback.forEach((id) => { if (event() < model.completion) add(id, 1, d.card.id); });
         }
       });
-      const plan = purchase.solve(levels, career.sp);
+      const plan = ctx.specPurchase && !(ctx.must && ctx.must.length) ? ctx.specPurchase(ctx, levels, career.sp) || purchase.solve(levels, career.sp) : purchase.solve(levels, career.sp);
       plan.hintLevels = levels;
       plan.eventTrace = career.eventTrace;
       plan.career = run + 1;
@@ -996,13 +999,15 @@
   // the rank goal first when there is one. targetSearch and makeupSweep share it, so a makeup is
   // scored exactly as one search scores a deck. ctxOf(runs, seed) makes careers to score on.
   // The q-quantile of xs (linear between neighbours).
+  const HEAL_RELIABLE = 0.6;
   function percentile(xs, q) {
     const s = xs.slice().sort((a, b) => a - b), at = (s.length - 1) * q, lo = Math.floor(at), hi = Math.ceil(at);
     return s[lo] + (s[hi] - s[lo]) * (at - lo);
   }
   function fitScorer(opts, sim) {
     const Tr = root.UmaTiers || (typeof require !== "undefined" ? require("./tiers.js") : null);
-    const ctxOf = (runs, seed) => buildCtx(Object.assign({}, sim, seed != null ? { seed } : {}, { runs, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
+    // final: the finalists' recheck, where each career's purchases may use sim.specPurchase.
+    const ctxOf = (runs, seed, final) => buildCtx(Object.assign({}, sim, seed != null ? { seed } : {}, { runs, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent, specPurchase: final ? sim.specPurchase || null : null }));
     // Parent decks: the skills are the point, so a swap may cost at most a share of the start
     // deck's skill score, set by "Stats still count" (A little 4%, Some 10%, Half 20%, Fully
     // 40%); within that, the closest stats win. skillWeight is the racing slider.
@@ -1013,10 +1018,33 @@
     const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
     const Ra = ss ? root.UmaRating || (typeof require !== "undefined" ? require("./rating.js") : null) : null;
     let floor = -Infinity;
+    // sim.healNeeds: { gold heal id: the stamina she needs with it equipped }. A deck that offers
+    // one with at least HEAL_RELIABLE chance is scored against need = p x that + (1 - p) x the
+    // usual need (the best such heal).
+    // The cut is p x (the usual need - the need with it), off the race scoring's stamina line, or
+    // off the Stamina target when the deck is scored on targets (a need past her cap).
+    const healNeed = (c, sk) => {
+      const hn = sim.healNeeds, base = sim.raceValues && sim.raceValues.staminaTarget;
+      if (!hn || !(base > 0)) return null;
+      let best = null;
+      (sk.list || []).forEach((x) => {
+        const n = hn[x.id];
+        if (n == null || !(x.p >= HEAL_RELIABLE) || !(n < base)) return;
+        const cut = x.p * (base - n);
+        if (!best || cut > best.cut) best = { id: x.id, p: x.p, cut, need: base - cut };
+      });
+      return best;
+    };
+    const withHeal = (c, heal) => {
+      if (!heal) return c;
+      if (c.race && c.race.staminaTarget > 0) return Object.assign({}, c, { race: Object.assign({}, c.race, { staminaTarget: c.race.staminaTarget - heal.cut }) });
+      return Object.assign({}, c, { target: Object.assign({}, c.target, { stamina: Math.max(0, c.target.stamina - heal.cut) }) });
+    };
     const evaluate = (deck, c) => {
       const s = simulate(c, deck.map((x) => ({ card: D.card(x.id), lb: x.lb })));
-      const fit = deckFit(c, s);
       const sk = Tr.deckSkills(opts, deck);
+      const heal = healNeed(c, sk);
+      const fit = deckFit(withHeal(c, heal), s);
       const over = sk.value < floor - 1e-9 ? 1e9 : 0;
       // Race scoring counts skills as the SP-limited purchases of each simulated career (lengths, like
       // the stats), as Grand Concert does; the tier list's skill score otherwise.
@@ -1030,7 +1058,7 @@
         ssShare = s.finals.filter((f) => Ra.statsScore(f.stats) + Math.round(f.sp * ss.spRating) + ss.unique >= ss.ss).length / s.finals.length;
         value += 1e6 * ssShare - 10 * Math.max(0, ss.ss - rating);
       }
-      return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating, ssShare, scoring: fit.scoring, raceL: fit.L, fitCareers: fit.careers });
+      return Object.assign({}, s, { value, short: fit.short, skill: skillScore, rating, ssShare, scoring: fit.scoring, raceL: fit.L, fitCareers: fit.careers, heal });
     };
     const better = (a, b) => ss && a.ssShare !== b.ssShare ? a.ssShare > b.ssShare : a.value > b.value + 1e-6;
     // Parent decks: the floor comes from the deck the search starts from.
@@ -1145,7 +1173,7 @@
       const keyOf = (d) => d.map((x) => x.id + ":" + x.lb).sort().join(",");
       const top = ranked.slice(0, HELD_OUT_DECKS);
       if (!top.some((x) => keyOf(x.cards) === startKey)) top.push(ranked.find((x) => keyOf(x.cards) === startKey));
-      const held = sc.ctxOf(HELD_OUT_RUNS, ((sim.seed || 12345) ^ 0x5bd1e995) >>> 0);
+      const held = sc.ctxOf(HELD_OUT_RUNS, ((sim.seed || 12345) ^ 0x5bd1e995) >>> 0, true);
       const checked = top.filter(Boolean).map((x) => ({ cards: x.cards, r: evaluate(x.cards, held) }));
       checked.sort((a, b) => (better(a.r, b.r) ? -1 : better(b.r, a.r) ? 1 : 0));
       const winner = checked[0].cards;
@@ -1265,7 +1293,7 @@
       return `Best deck for makeup ${Math.min(fi + 1, fin.length)} of ${fin.length}`;
     }
     function result() {
-      const fresh = sc.ctxOf(HELD_OUT_RUNS, ((sim.seed || 12345) ^ 0x2c1b3c6d) >>> 0);
+      const fresh = sc.ctxOf(HELD_OUT_RUNS, ((sim.seed || 12345) ^ 0x2c1b3c6d) >>> 0, true);
       const checked = fin.filter((f) => f.fit).map((f) => ({ f, r: sc.evaluate(f.fit.cards, fresh) }));
       checked.sort((a, b) => (sc.better(a.r, b.r) ? -1 : sc.better(b.r, a.r) ? 1 : 0));
       const win = checked[0];

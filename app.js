@@ -2999,7 +2999,14 @@
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
         if (ss && !tg && !staminaTrainingTarget(stamina)) ss.ignoreFit = true;
-        const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        // The stamina she needs with each of the 3 strongest gold heals your cards can hint (a deck
+        // that reliably offers one is scored against less), and the finalists' per-career skill
+        // purchases by the Skill optimizer's spec scoring.
+        const healNeeds = host === "cm" && c.goal === "race" && rv && rv.staminaTarget ? await deckHealNeeds(p, c, tid, pool, bp, j) : null;
+        const specPurchase = host === "cm" && c.goal === "race" ? deckSpecPurchase(p, c) : null;
+        // The heals need a value to be tracked in the deck's offers: a token one where they have none.
+        if (healNeeds) { opts.skills = Object.assign({}, opts.skills); Object.keys(healNeeds).forEach((id) => { if (!(opts.skills[id] > 0)) opts.skills[id] = 0.001; }); }
+        const sim = { healNeeds, specPurchase, scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         // Compare every deck makeup: Euophrys' pick in each makeup your cards can fill, the full
         // search for the best few, then the best makeup (optimizer.js makeupSweep).
         // Your guide's makeups: the scenario the cup trains in, her distance (or the guide's nearest),
@@ -3481,6 +3488,48 @@
     if (c.careerScore === "p85" || c.careerScore === "mean") return c.careerScore;
     const p = presetById(c.preset);
     return p && p.kind === "loh" ? "mean" : "p85";
+  }
+  // Gold heals your cards can hint, strongest first (recovery effect, rarity 2), and the stamina
+  // she needs with each equipped (the stamina check, cached).
+  const healNeedCache = new Map();
+  async function deckHealNeeds(p, c, tid, pool, bp, j) {
+    const RS = window.UmaRaceSkills, eng = RS.engine(p, SV.meta.sims), catalog = await RS.load(eng.catalog);
+    const hp = (id) => { const sk = catalog.skills[id]; return sk && sk.rarity === 2 ? Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9).map((e) => e.modifier))) : 0; };
+    const offered = new Set(pool.concat(bp || []).flatMap((x) => { const cd = D.card(x.id); return cd ? (cd.hs || []).concat(cd.es || []).map(String) : []; }));
+    const heals = [...offered].filter((id) => hp(id) > 0).sort((a, b) => hp(b) - hp(a)).slice(0, 3);
+    if (!heals.length) return null;
+    const setup = linkedStamina(p, c), input = staminaInput(p, c, tid, setup), out = {};
+    if (setup) return null; // a linked Umalator setup brings its own skills
+    for (let i = 0; i < heals.length; i++) {
+      const id = heals[i], key = JSON.stringify([p.id, input, staminaOpts(c), id]);
+      if (j.optRun) { j.optRun.text = `Stamina with a gold heal ${i + 1} of ${heals.length}`; const t = deckElement("cm", "#cmProgText"); if (t) t.textContent = j.optRun.text; }
+      if (!healNeedCache.has(key)) {
+        const worker = RS.runner(eng.sim);
+        try { healNeedCache.set(key, await RS.staminaTarget(p, input, catalog, worker.run, null, Object.assign({}, staminaOpts(c), { skills: [id] }))); }
+        catch (e) { healNeedCache.set(key, null); }
+        finally { worker.close(); }
+      }
+      const r = healNeedCache.get(key), need = r && staminaTrainingTarget(r);
+      if (need > 0) out[id] = need;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+  // The finalists' per-career purchases: the Skill optimizer's spec scoring (reliability,
+  // early/mid and current-speed bonuses, acceleration decay, Groundwork; mean + k x spread where
+  // the cup has spreads), solved by its beam search. null until the race data has loaded.
+  function deckSpecPurchase(p, c) {
+    const SS = window.UmaSkillSpec, cat = raceCatalog(p);
+    if (!SS || !cat) return null;
+    const k = SS.kFor(p.kind === "loh" ? "loh" : "cm"), rows = new Map(skillRows(p.id, c.style).map((r) => [String(r.id), r]));
+    const info = {};
+    return (ctx, levels, sp) => {
+      const values = {};
+      Object.keys(ctx.skills).forEach((id) => { const r = rows.get(String(id)), v = ctx.skills[id]; values[id] = r && r.sd != null && r.mean != null && r.L > 0 ? (r.mean + k * r.sd) * (v / r.L) : v; });
+      const ids = [...new Set((ctx.learned || []).concat(ctx.available || [], Object.keys(levels)))];
+      ids.forEach((id) => { if (!(id in info)) info[id] = SS.traits(cat.skills[id]); });
+      const plan = SS.solve({ learned: ctx.learned || [], available: ctx.available || [], hints: levels, sp, fast: false, values, info });
+      return Object.assign(plan, { value: plan.spec.value * OPT.L_VALUE, L: plan.spec.value });
+    };
   }
   // Inheritance's expected stats over a run: the start bonus and both inspirations' average.
   function inheritExpected(inh) {
@@ -4310,7 +4359,7 @@
       ${r.sweepNote ? `<p class="mini warn">${r.sweepNote}</p>` : ""}
       ${r.link ? `<p class="mini${r.link.lock ? "" : " warn"}">${r.link.lock ? `<b>${esc(r.link.name)}</b> is in${r.link.borrow ? " as the borrowed card" : ""}: uma.guide calls the scenario's link card mandatory for Independent Training.` : r.link.blocked ? `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but your deck makeup allows no Friend card.` : `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but you don't own her: mark her owned, or allow a borrowed card.`}</p>` : ""}
       ${r.goal === "race" ? `<p class="mini">Build-specific purchases: <button type="button" class="linkish" id="cmRaceShow">${deckJob("cm").raceRunning ? "comparing…" : "see the skill-set comparison above"}</button></p>` + mustResultHTML(r, c) : ""}
-      ${r.fit && r.fit.careerScore ? `<p class="mini">Decks scored by her <b>${r.fit.careerScore === "p85" ? "85th-percentile career (best runs: you train several and race your best)" : "average career"}</b>${r.fit.pivoted && r.fit.pivoted.length ? `; the borrow moved: ${r.fit.pivoted.map((x) => `borrow ${esc(D.card(x.to).n)}, use your ${esc(D.card(x.own).n)}`).join("; ")}` : ""}.</p>` : ""}
+      ${r.fit && r.fit.careerScore ? `<p class="mini">Decks scored by her <b>${r.fit.careerScore === "p85" ? "85th-percentile career (best runs: you train several and race your best)" : "average career"}</b>${r.fit.pivoted && r.fit.pivoted.length ? `; the borrow moved: ${r.fit.pivoted.map((x) => `borrow ${esc(D.card(x.to).n)}, use your ${esc(D.card(x.own).n)}`).join("; ")}` : ""}. The finalists' rechecked careers buy their skills by the Skill optimizer's spec scoring.${r.fit.after && r.fit.after.heal ? ` <b>Stamina need lowered:</b> this deck offers ${skillNameHTML(r.fit.after.heal.id)} in ${Math.round(r.fit.after.heal.p * 100)}% of careers, so its stamina need counts about ${Math.round(r.fit.after.heal.cut)} lower (${Math.round(r.fit.after.heal.need)} instead of ${Math.round(r.fit.after.heal.need + r.fit.after.heal.cut)}).` : ""}</p>` : ""}
       ${predictedHTML(r, host)}
       ${supportEventsHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>

@@ -110,7 +110,7 @@
     const effects = sprint ? [] : setup ? debuffer.skills : staminaDebuffs(preset, input.strategy, o.debuffs == null ? 2 : o.debuffs);
     if (setup || preset.kind !== "loh") racedef.orderRange = null; // Upstream CM stamina calculator.
     return { msg: "hpcalc", data: { nsamples: samples, course, racedef,
-      uma: staminaHorse(input, catalog, setup?.ace.skills), debufUma: staminaHorse(debuffer, catalog, effects),
+      uma: staminaHorse(input, catalog, setup?.ace.skills || o.skills), debufUma: staminaHorse(debuffer, catalog, effects),
       options: { ...options, ...setup?.options, forceFullSpurt: true } } };
   }
 
