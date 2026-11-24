@@ -380,7 +380,8 @@
     ctx.spWeight = 0.35;
     ctx.races = weightsFor(opts.scenario, "speed", ov.general, null, opts.independent).races.slice(0, 3).reduce((a, b) => a + b, 0);
     const sv = skillValue(deck, ctx);
-    return { value: sv.value, mustValue: sv.mustValue, must: sv.must };
+    // list: each skill the deck can offer, with p (the chance it does): read by the deck search's heal check.
+    return { value: sv.value, mustValue: sv.mustValue, must: sv.must, list: sv.list };
   }
 
   // Target skills for a parent deck, as { skill id: weight in lengths }. A spark is always a
