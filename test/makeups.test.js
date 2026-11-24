@@ -85,3 +85,26 @@ test("makeup sweep: a guide makeup's scenario card stays in its deck", () => {
   out.finals.forEach((f) => assert.ok(f.cards.some((c) => c.id === card.id), "the locked card is in every finalist's deck"));
   assert.deepStrictEqual(out.locked, [card.id]);
 });
+
+test("Grand Masters guide makeups: 15 post-Guides (30137) and 42 pre-Guides (Group/Pal + 6 stat cards)", () => {
+  const S = require("../data/scenario-decks.js");
+  const gm = S.eras["5"];
+  assert.strictEqual(gm.guide, "Grand Masters");
+  assert.strictEqual(gm.required, 30137);
+  const post = gm.decks.filter((d) => d.phase === "post");
+  const pre = gm.decks.filter((d) => d.phase === "pre");
+  assert.strictEqual(post.length, 15);
+  assert.strictEqual(pre.length, 42);
+  post.forEach((d) => {
+    assert.strictEqual(Object.values(d.comp).reduce((a, b) => a + b, 0), 6);
+    assert.strictEqual(d.comp["card:30137"], 1);
+  });
+  assert.strictEqual(pre.filter((d) => d.comp.group === 1).length, 14);
+  assert.strictEqual(pre.filter((d) => d.comp.friend === 1).length, 14);
+  assert.strictEqual(pre.filter((d) => !d.comp.group && !d.comp.friend).length, 14);
+  pre.forEach((d) => {
+    assert.strictEqual(Object.values(d.comp).reduce((a, b) => a + b, 0), 6);
+    assert.strictEqual(d.comp["card:30137"], undefined);
+  });
+});
+

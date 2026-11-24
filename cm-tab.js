@@ -504,28 +504,29 @@
       const r = a ? found.get(keyOf(c, a)) : null;
       const prog = job ? `<div class="row-wrap" role="status"><span class="progress"><i style="width:${Math.round(job.f * 100)}%"></i></span><span class="mini">${esc(job.stage)}</span></div>` : "";
       const panel = (key, title, html) => `<section class="panel cmp-step" id="cm-${key}"><h3>${title}</h3>${html}</section>`;
-      // Parents are planned for your full team's track (Medium & Long); a meta-uma track gets a
-      // note unless you ask to plan this cup anyway.
+      // Parents are planned for your full team's track (Medium & Long); a meta-uma track still
+      // shows the spark guide and stepper with a non-blocking note.
       if (!c.parentsAnyway) c.parentsAnyway = {};
       const planned = !ctx.parentsPlanned || ctx.parentsPlanned(p) || c.parentsAnyway[p.id];
-      const skipped = !planned ? `<section class="panel cmp-step"><p class="mini">Parents are planned for your Medium &amp; Long team only: ${esc(ctx.trackLabel ? ctx.trackLabel(p) : "this track")} races one meta uma (Pull planner, Your future teams). <button type="button" class="linkish" data-cmp-anyway="${esc(p.id)}">Plan this cup's parents anyway</button></p></section>` : "";
+      const skipped = !planned ? `<p class="mini">Note: Pull planner treats ${esc(ctx.trackLabel ? ctx.trackLabel(p) : "this track")} as one meta uma, so parent planning is optional — you can still use the spark guide and steps below.</p>` : "";
       // The six steps as a stepper: one showing; the ones that need Parent 1 first are locked
       // until she's found (their reason on the chip). Every step is drawn, so links into one work.
-      const STEPS = [["gaps", "Her gaps", () => gapsHTML(c, a, d, r)], ["p1", "Make Parent 1", () => p1HTML(c, a, d, r) + prog],
+      const STEPS = [["gaps", "Her gaps & sparks", () => gapsHTML(c, a, d, r)], ["p1", "Make Parent 1", () => p1HTML(c, a, d, r) + prog],
         ["training", "Train her", () => trainHTML(c, a, d, r), "Find Parent 1 first"], ["p2", "Parent 2", () => p2HTML(c, a, d, r), "Find Parent 1 first"],
         ["check", "Her family", () => checkHTML(r), "Find Parent 1 first"], ["vets", "Your veterans", () => vetsHTML(r)]];
       const locked = (s) => !!(s[3] && !(r && r.p1));
       const LOCK = (root.UmaUI && root.UmaUI.ICON.lock) || "&#128274;";
       const saved = ctx.parentsStep && ctx.parentsStep(), on = STEPS.find((s) => s[0] === saved && !locked(s)) ? saved : "gaps";
-      const steps = a && planned ? `<nav class="stepper" aria-label="Parent steps">${STEPS.map((s, i) => `<button type="button" class="step${locked(s) ? " locked" : ""}" data-step-go="${s[0]}" aria-current="${s[0] === on ? "step" : "false"}"${locked(s) ? ` aria-disabled="true" data-tip="${s[3]}" aria-label="${s[1]}: ${s[3].toLowerCase()}"` : ""}><span class="step-n">${i + 1}</span><span class="step-l">${s[1]}</span>${locked(s) ? `<span class="step-lock">${LOCK}</span>` : ""}</button>`).join("")}</nav>`
+      const steps = a ? `<nav class="stepper" aria-label="Parent steps">${STEPS.map((s, i) => `<button type="button" class="step${locked(s) ? " locked" : ""}" data-step-go="${s[0]}" aria-current="${s[0] === on ? "step" : "false"}"${locked(s) ? ` aria-disabled="true" data-tip="${s[3]}" aria-label="${s[1]}: ${s[3].toLowerCase()}"` : ""}><span class="step-n">${i + 1}</span><span class="step-l">${s[1]}</span>${locked(s) ? `<span class="step-lock">${LOCK}</span>` : ""}</button>`).join("")}</nav>`
         + STEPS.map((s, i) => `<section class="panel cmp-step" id="cm-${s[0]}" data-step-pane="${s[0]}"${s[0] === on ? "" : " hidden"}><h3>${i + 1} · ${s[1]}</h3>${locked(s) ? `<p class="mini">${s[3]}.</p>` : s[2]()}</section>`).join("") : "";
       body.innerHTML = `<div class="cm cmp">
         <section class="panel"><h2>Parents${a ? " for " + esc(tName(trainee(a.tid))) : ""}</h2>
           <p class="mini">${esc(p.name)} · ${a ? STYLE_LABEL[styleOf(a)] : "no ace yet"}. Fill her gaps with blue sparks, make Parent 1 with a borrowed grandparent, borrow Parent 2, reach ${MIN_AFFINITY}+ affinity.</p>
           <p class="mini">${r && r.x.skillPlan ? `White targets follow the ace's source-checked purchases · ${r.x.skillPlan.model}${r.jointPasses ? ` · ${r.jointPasses} planning passes` : ""}. ${r.jointConverged===false ? "Targets shifted in the final check; find them again to compare another pass." : ""}` : "Find parents checks the ace's skill sources, then plans the white hints her purchases need."}</p>
+          ${skipped}
           <div class="row-wrap cmp-chips" aria-label="Your team">${aces(c).filter((x) => trainee(x.tid)).map((x) => `<button type="button" class="chip${a && x.tid === a.tid ? " active" : ""}" data-cmp-sel="${x.tid}" aria-pressed="${!!a && x.tid === a.tid}">${esc(tName(trainee(x.tid)))}</button>`).join("")}<button type="button" class="linkish" data-goto-tab="cm">${a ? "Team and decks in CM & decks" : "Pick your team in CM & decks"} →</button></div>
         </section>
-        ${steps}${skipped}
+        ${steps}
         ${ctx.generalHTML ? ctx.generalHTML() : ""}
         <details class="panel" id="cm-family" data-cmp-open="family-tools"${opened["family-tools"] ? " open" : ""}><summary><b>Family table</b> · enter and compare a family by hand</summary>${ctx.familyHTML()}</details>
         ${howHTML()}
@@ -545,7 +546,8 @@
     // once you enter her, Parent 1 once she's trained), and the blue still to find.
     function gapsHTML(c, a, d, r) {
       const pred = d.predicted;
-      if (!pred) return `<p class="mini">CM &amp; decks hasn't predicted her deck yet. <button type="button" class="btn small" data-goto-tab="cm">Build her deck in CM &amp; decks</button></p>`;
+      const guide = sparksGuideHTML(c, a, d, r);
+      if (!pred) return `${guide}<p class="mini">CM &amp; decks hasn't predicted her deck yet — build it to see exact stat gaps and filter out white skills your deck already gives. <button type="button" class="btn small" data-goto-tab="cm">Build her deck in CM &amp; decks</button></p>`;
       const gaps = gapsOf(d), give = r && r.p1 && r.p1.s ? r.p1.s.blueStats || null : null;
       const left = gaps.map((g, i) => Math.max(0, Math.round(g - (give ? give[i] || 0 : 0))));
       const plan = bluePlan(r, left), after = plan.after;
@@ -556,21 +558,82 @@
       const who = r && r.p1 ? familyWho(r) : "";
       const bonus = ctx.courseBonus ? ctx.courseBonus(cup(c), styleOf(a), Object.fromEntries(F.STAT_LABELS.map((l, i) => [["speed", "stamina", "power", "guts", "wit"][i], pred.target[i]]))) : "";
       return (ctx.staminaSummary ? staminaLine() : "") + bonus + `<div class="table-wrap"><table class="plan cmp-gaps"><thead><tr><th>Stat</th><th class="num">Target</th><th class="num">Predicted</th><th class="num">Gap</th>${give ? '<th class="num">Her family gives</th>' : ""}<th>Blue you can still pick</th><th class="num">Still short</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <p class="mini">${plan.picks.length ? `<b>${plan.exact ? "✓ These close every gap" : plan.closed ? "✓ These close every gap (≈: within one inspiration roll)" : "Closes the most it can"}:</b> ${plan.text}.${plan.closed ? "" : ` Still short after them: ${after.map((v, i) => v > ROLL ? F.STAT_LABELS[i] + " −" + v : "").filter(Boolean).join(", ")}; a stronger deck in CM &amp; decks or lower targets would close the rest.`}` : gaps.some(Boolean) && after.some((v) => v > ROLL) ? "<b>No blue left to pick</b>: every borrowed slot is filled." : gaps.some(Boolean) ? "<b>✓ Her family closes every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}Only the umas you borrow have a blue you choose (one each); the parent you train gets a random stat.</p>${whitesSplitHTML(r)}`;
+        <p class="mini">${plan.picks.length ? `<b>${plan.exact ? "✓ These close every gap" : plan.closed ? "✓ These close every gap (≈: within one inspiration roll)" : "Closes the most it can"}:</b> ${plan.text}.${plan.closed ? "" : ` Still short after them: ${after.map((v, i) => v > ROLL ? F.STAT_LABELS[i] + " −" + v : "").filter(Boolean).join(", ")}; a stronger deck in CM &amp; decks or lower targets would close the rest.`}` : gaps.some(Boolean) && after.some((v) => v > ROLL) ? "<b>No blue left to pick</b>: every borrowed slot is filled." : gaps.some(Boolean) ? "<b>✓ Her family closes every gap.</b>" : "<b>No gaps</b>: blues go to her key stats."} ${give ? `Her family: ${esc(who)}. ` : "Find Parent 1 to see what her family covers. "}Only the umas you borrow have a blue you choose (one each); the parent you train gets a random stat.</p>${guide}`;
     }
-    // The whites that matter for her here (CP.want: each family's value, by the chance her deck
-    // doesn't give it): the ones her ace deck covers (it hints or gives them in most careers) and
-    // the ones her parents should carry as white sparks.
-    function whitesSplitHTML(r) {
-      if (!r || !r.x) return "";
-      const W = CP.want(r.x).white.filter((w) => w.L >= 0.05);
-      if (!W.length) return "";
-      const covered = W.filter((w) => w.deck != null && w.deck >= 0.5).sort((a, b) => b.L - a.L).slice(0, 8);
-      const carry = W.filter((w) => !(w.deck != null && w.deck >= 0.5)).sort((a, b) => b.priority - a.priority).slice(0, 8);
-      const item = (w) => `${esc(ctx.skillName(w.id))} <span class="mini">(${w.L.toFixed(2)} L${w.deck != null ? `, her deck ${Math.round(w.deck * 100)}%` : ""})</span>`;
-      // Her purchase plan's values come from its solo race check; without one, Parents' values.
-      const field = r.x.skillPlan ? " Values from her purchase plan's race check." : ctx.fieldValues && ctx.fieldValues(cup(st()).id, r.style) ? " Values from full-field races." : "";
-      return `<p class="mini cmp-whites"><b>Her whites here.</b> Her ace deck covers: ${covered.map(item).join(", ") || "none of the valuable ones"}. Her parents should carry: ${carry.map(item).join(", ") || "nothing else"}.${field}</p>`;
+    let skillFetchCup = null;
+    function aceSparkContext(c, a, d, r) {
+      if (r && r.x) return r.x;
+      const p = cup(c), t = trainee(a.tid), style = styleOf(a);
+      if (!p || !t) return null;
+      const rel = ctx.aceSkills ? ctx.aceSkills({ preset: p, style }) : null;
+      if (!rel) {
+        if (ctx.ensureSkills && skillFetchCup !== p.id) {
+          skillFetchCup = p.id;
+          ctx.ensureSkills([p.id]).then(() => { if (skillFetchCup === p.id) ctx.rerender(); }, () => {});
+        }
+        return null;
+      }
+      const v = view(c, a);
+      return CP.context({
+        ace: { cid: t.cid, tid: t.id, apt: t.apt },
+        race: { preset: p, style },
+        rel,
+        offers: v ? v.offers : null,
+        build: ctx.build(p),
+        gaps: gapsOf(d),
+        stats: d && d.predicted && d.predicted.stats || null,
+        skillPlan: ctx.skillPlan ? ctx.skillPlan() : null,
+      });
+    }
+    // Clear spark targets for the ace in this CM (Blue, Pink, Green, White), available immediately
+    // before Find Parent 1 or even before her racing deck is built.
+    function sparksGuideHTML(c, a, d, r) {
+      const p = cup(c), t = trainee(a.tid), style = styleOf(a);
+      if (!p || !t) return "";
+      const x = aceSparkContext(c, a, d, r);
+      const w = x ? CP.want(x) : null;
+      const gaps = gapsOf(d);
+      const plan = r && r.p1 ? planFor(r) : null;
+      let blueText;
+      if (plan && plan.picks.length) {
+        blueText = `<b>Borrow ${esc(plan.text)}</b>${plan.closed ? " (covers her gaps)" : ""}. The parent you train gets a random stat (1 in 5), so aim for <b>600+</b> (55% 2★+) or <b>1100+</b> (80% 2★+, 10% 3★).`;
+      } else if (gaps && gaps.some(Boolean)) {
+        const top = gaps.map((g, i) => [g, i]).filter(([g]) => g > 0).sort((a, b) => b[0] - a[0]).map(([g, i]) => `<b>${F.STAT_LABELS[i]}</b> (−${g})`);
+        blueText = `Borrow blues for her gaps: ${top.join(", ")}. On a parent you train, the stat rolls randomly (1 in 5) — push stats to <b>600+</b> / <b>1100+</b> for 2★–3★ odds.`;
+      } else if (w && w.blue.length) {
+        blueText = `<b>${w.blue.map((b) => esc(b.label)).join(" or ")}</b> (her build's key stats${d.predicted ? ", no stat gaps left" : "; build her racing deck in CM & decks for exact gaps"}). A trained parent's blue stat rolls randomly (1 in 5).`;
+      } else {
+        blueText = `Build her racing deck in CM &amp; decks to see exact stat gaps; trained parents roll a random stat (aim for <b>600+</b> / <b>1100+</b> for 2★–3★).`;
+      }
+      const apt = t.apt || [];
+      const pinks = w ? w.pink : F.aptTargets(p.course, style).filter((n) => apt[n.i] && "GFEDCBAS".indexOf(apt[n.i]) < "GFEDCBAS".indexOf(n.target)).map((n) => Object.assign(n, { label: F.APT_LABELS[n.i], grade: apt[n.i] }));
+      const pinkText = pinks.length
+        ? pinks.map((pk) => `<b>${esc(pk.label)}</b> (${pk.grade} → ${pk.target}${pk.target === "A" ? ": lifts at start with 1–9★" : ": needs inspiration proc, more ★ helps"})`).join("; ")
+        : "none needed (her surface, distance and running style are already A/S).";
+      let greenText = "Loading race skill values…";
+      let whiteText = "Loading race skill values…";
+      if (w) {
+        const greens = (w.green || []).map((g) => Object.assign({}, g, { owners: g.owners.filter((u) => +u.cid !== +t.cid && (!ctx.today || (u.en && u.en <= ctx.today))) })).filter((g) => g.owners.length).slice(0, 4);
+        greenText = greens.length
+          ? greens.map((g) => `<b>${esc(ctx.skillName(g.id))}</b> (+${g.L.toFixed(2)} L · ${esc([...new Set(g.owners.map((u) => u.n))].slice(0, 2).join(", "))})`).join("; ")
+          : "no inherited unique adds more than 0.10 L here.";
+        const whites = w.white.filter((q) => q.L >= 0.05 && (!ctx.outNow || ctx.outNow(q.id)));
+        const hasDeck = whites.some((q) => q.deck != null);
+        const carry = (hasDeck ? whites.filter((q) => !(q.deck >= 0.5)) : whites).sort((a, b) => b.priority - a.priority || b.L - a.L).slice(0, 8);
+        const covered = hasDeck ? whites.filter((q) => q.deck >= 0.5).sort((a, b) => b.L - a.L).slice(0, 6) : [];
+        const fmtW = (q) => `<b>${esc(ctx.skillName(q.id))}</b> <span class="mini">(${q.L.toFixed(2)} L${q.deck != null ? `, deck ${Math.round(q.deck * 100)}%` : ""})</span>`;
+        const field = x.skillPlan ? " Values from her purchase plan's race check." : ctx.fieldValues && ctx.fieldValues(p.id, style) ? " Values from full-field races." : "";
+        whiteText = (carry.length ? carry.map(fmtW).join(", ") : "none left outside her deck")
+          + (covered.length ? `<div class="mini">Already covered by her racing deck (hint discount only): ${covered.map(fmtW).join(", ")}.</div>` : "")
+          + (hasDeck ? "" : ` <span class="mini">(Build her deck in CM &amp; decks to filter out skills your cards already give.)</span>`)
+          + ` <span class="mini">Learn these on your parent (or their gold version: 40% vs 20% spark chance) and aim for SS rating (17,500+).${field}</span>`;
+      }
+      return `<div class="cmp-aim"><h4>Sparks to go for for ${esc(tName(t))} <span class="mini">· ${esc(p.name)} (${STYLE_LABEL[style]})</span></h4><ul class="mini">
+        <li><b>Blue (stats):</b> ${blueText}</li>
+        <li><b>Pink (aptitudes):</b> ${pinkText}</li>
+        <li><b>Green (inherited uniques):</b> ${greenText}</li>
+        <li><b>White (skills):</b> ${whiteText}</li>
+      </ul></div>`;
     }
     // The blue sparks you still choose, split to leave the least short: the grandparent's own
     // (if not borrowed yet), Parent 2's own, and her two parents', each in any gap stat at 2★ or
