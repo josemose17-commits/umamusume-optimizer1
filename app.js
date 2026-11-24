@@ -2925,7 +2925,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2955,12 +2955,12 @@
       if (!est) {
         try {
           const sv = skillMap(p.id, c.style);
-          const ctx = OPT.buildCtx({ scenario: hsc, build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, trainee: tid, caps: E.capsFor(state, hsc), raceShare, runs: 16, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
+          const ctx = OPT.buildCtx({ scenario: hsc, build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, trainee: tid, caps: deckCaps(host, hsc), inherit: deckInherit(host), raceShare, runs: 16, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
       if ((hsc.id === "grandlive" || est && est.scoring === "race") && c.goal === "race" && est) r.skills = est.skills;
-      const result = Object.assign(r, { key, sweepNote, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      const result = Object.assign(r, { key, sweepNote, inherit: host === "cm" ? deckInheritance(host) : null, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
       if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
@@ -2999,7 +2999,7 @@
         // Target stats (or Reach SS): start from Euophrys' pick and swap cards toward them, a slot
         // at a time so the page can show progress. Reach SS without targets ignores the build's.
         if (ss && !tg && !staminaTrainingTarget(stamina)) ss.ignoreFit = true;
-        const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: E.capsFor(state, scenFor(host)), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         // Compare every deck makeup: Euophrys' pick in each makeup your cards can fill, the full
         // search for the best few, then the best makeup (optimizer.js makeupSweep).
         // Your guide's makeups: the scenario the cup trains in, her distance (or the guide's nearest),
@@ -3279,7 +3279,7 @@
     if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
     const p = presetById(r.preset), sv = skillMap(p.id, c.style);
     const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-    const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenFor(host)), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+    const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
     const job = OPT.sensitivity(sim, candidates);
     j.sensitivityJob = job; renderCM();
     const tick = () => {
@@ -3325,7 +3325,7 @@
       });
       const sv = skillMap(p.id, c.style);
       const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-      const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: E.capsFor(state, scenFor(host)), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+      const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
       const token = {}; j.wishJob = token; j.wish = null; renderCM();
       const out = []; let at = 0;
       const tick = () => {
@@ -3434,12 +3434,52 @@
 
   // Her gaps: each stat's target (yours, else the race build's, within the caps) against the
   // predicted average. Parents fills what's short with blue sparks.
+  // Her gaps are before inheritance: they're what her parents' blue sparks fill (Parents), so
+  // with inheritance in the careers, its expected stats come off the prediction here.
   function raceGaps(r, c) {
     const p = presetById(r.preset), caps = E.capsFor(state, (cupScen(p) || {}).sc || scenario()), mine = cmTargets(c || {}) || {};
     const bt = p ? raceBuildTarget(p, r.stamina, r.style) : {};
     const target = E.STATS.map((s) => Math.min(caps[s] != null ? caps[s] : Infinity, r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
-    const stats = r.est.stats.slice();
-    return { target, stats, short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
+    const exp = r.inherit ? inheritExpected(r.inherit.inherit) : null;
+    const withInh = r.est.stats.slice(), stats = exp ? withInh.map((v, i) => Math.round(v - exp[i])) : withInh;
+    return { target, stats, withInh: exp ? withInh : null, exp, short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
+  }
+  // Inheritance in CM & decks' careers: the family planned in Parents for this ace (its members'
+  // blue sparks and own affinity), else the blue sparks typed in the coach (affinity unknown:
+  // counted as 0), else none. { inherit (optimizer.inheritFrom), uncap: { stat: points }, source }.
+  function deckInheritance(host) {
+    if (host !== "cm") return null;
+    const tid = deckTrainee("cm"), F = window.UmaFamily, A = window.UmaAffinity, pp = parents();
+    const f = pp && pp.st && pp.st().family;
+    const SU = [0, 4, 9, 16], uncap = {}, add = (i, stars) => { const k = E.STATS[i]; uncap[k] = (uncap[k] || 0) + (SU[stars] || 0); };
+    if (F && A && f && f.ace && tid && +f.ace.tid === +tid && F.SLOTS.some((k) => f[k] && f[k].cid)) {
+      const L = { trainee: f.ace.cid }, wins = {};
+      F.SLOTS.forEach((k) => { L[k] = f[k] && f[k].cid; if (f[k] && f[k].cid) wins[k] = f[k].wins || []; });
+      const own = A.individual(L, wins), members = F.SLOTS.filter((k) => f[k] && f[k].cid && f[k].blue && f[k].blue[1]).map((k) => ({ blue: f[k].blue, aff: own[k] || 0 }));
+      members.forEach((m) => add(m.blue[0], m.blue[1]));
+      const inh = OPT.inheritFrom(members);
+      if (inh) return { inherit: inh, uncap, source: "her family in Parents" };
+    }
+    const sp = state.sparks || {}, members = [];
+    E.STATS.forEach((s, i) => String(sp[s] || "").split(/[^0-9]+/).filter(Boolean).forEach((x) => { if (+x >= 1 && +x <= 3) members.push({ blue: [i, +x], aff: 0 }); }));
+    const inh = OPT.inheritFrom(members);
+    return inh ? { inherit: inh, uncap: null, source: "the blue sparks typed in the coach (affinity unknown, counted as 0)" } : null;
+  }
+  const deckInherit = (host) => { const h = deckInheritance(host); return h ? h.inherit : null; };
+  // Caps for CM & decks' careers: with her family, the scenario's caps plus its blue sparks'
+  // uncaps (instead of the coach's typed sparks); your typed caps still win.
+  function deckCaps(host, sc) {
+    const h = deckInheritance(host);
+    if (!h || !h.uncap) return E.capsFor(state, sc);
+    const base = E.capsFor(Object.assign({}, state, { sparks: {} }), sc), user = state.caps || {};
+    E.STATS.forEach((s) => { if (!(user[s] > 0)) base[s] += h.uncap[s] || 0; });
+    return base;
+  }
+  // Inheritance's expected stats over a run: the start bonus and both inspirations' average.
+  function inheritExpected(inh) {
+    const out = inh.start.slice();
+    inh.sparks.forEach((b) => { out[b.i] += OPT.INSPIRATION_TURNS.length * b.p * (b.most + 1) / 2; });
+    return out;
   }
 
   function cmOptimizer(p, c, host = deckHost()) {
@@ -4342,10 +4382,10 @@
     if (!parent) {
       const g = raceGaps(r, cm(host)), short = g.short.map((v, i) => v > 0 ? E.STAT_LABELS[E.STATS[i]] + " −" + v : "").filter(Boolean);
       const gapTable = `<div class="predicted">
-      <b>Predicted stats and her gaps</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers, before inheritance)</span>
+      <b>Predicted stats and her gaps</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers, ${g.withInh ? `with inheritance from ${esc(r.inherit.source)}` : "before inheritance: plan her family in Parents, or type her blue sparks in the coach, to count it"})</span>
       <div class="table-wrap"><table class="pred cm-gaps"><thead><tr><th></th>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
         <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
-        <tr><th>Predicted</th>${g.stats.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr>
+        ${g.withInh ? `<tr><th>Predicted</th>${g.withInh.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr><tr><th>Before inheritance</th>${g.stats.map((v) => `<td class="num">${v}</td>`).join("")}</tr>` : `<tr><th>Predicted</th>${g.stats.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr>`}
         <tr><th>Short</th>${g.short.map((v, i) => `<td class="num ${v > 0 ? "short" : "over"}">${v > 0 ? "−" + v : "+" + (g.stats[i] - g.target[i])}</td>`).join("")}</tr></tbody></table></div>
       <p class="mini">${short.length ? `<b>Her gaps: ${short.join(" · ")}.</b> Parents turns them into the blue sparks to look for.` : "<b>No gaps:</b> every target is reached."} ${host === "cm" ? `<button type="button" class="linkish" data-goto-tab="parents" data-goto-section="gaps">Fill them in Parents →</button>` : ""}</p>`;
       return gapTable + powerLineHTML(presetById(r.preset), r.style, g.stats[2]) + (rushedLine(g.stats[4], 0, false) ? `<p class="mini">${rushedLine(g.stats[4], 0, false).trim()}</p>` : "") + `<p class="mini">Skill points: about ${r.est.sp}.</p>
