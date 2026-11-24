@@ -2925,7 +2925,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, careerScoreOf(c), JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, c.guidePhase || "auto", careerScoreOf(c), JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -3024,8 +3024,8 @@
             sweep = false;
           } else {
             makeups = list;
-            finalists = list.length;
-            meta = { mode: "guide", guide: g.e.guide, dist: g.dist, exact: g.exact };
+            finalists = Math.min(list.length, 6);
+            meta = { mode: "guide", guide: g.e.guide, dist: g.dist, exact: g.exact, phase: g.phase };
           }
         }
         if (sweep && mode === "all") {
@@ -3697,13 +3697,28 @@
   // The scenario master guides' deck makeups (data/scenario-decks.js) for the coach scenario and
   // this cup's distance (the guide's nearest distance when it skips one), as one-tap choices.
   const GUIDE_ERA = { grandlive: 4, grandmasters: 5, larc: 6, uaf: 7, cooking: 8, mecha: 9, legends: 10, island: 11, onsen: 12 };
+  function guidePhaseInfo(c, e, p) {
+    const hasPhases = !!(e && e.required && e.decks.some((x) => x.phase));
+    if (!hasPhases) return { hasPhases: false, activePhase: null };
+    const reqCard = D.card(e.required);
+    const releasedByCup = !!(reqCard && CARD_RELEASE.available(reqCard, p));
+    const usable = releasedByCup && (!c.ownedOnly || owned[e.required] != null || c.borrow !== false);
+    const choice = c.guidePhase || "auto";
+    let activePhase = usable ? "post" : "pre";
+    if (choice === "pre") activePhase = "pre";
+    else if (choice === "post") activePhase = usable ? "post" : "pre";
+    else if (choice === "all") activePhase = usable ? "all" : "pre";
+    return { hasPhases: true, reqCard, releasedByCup, usable, choice, activePhase };
+  }
   function guideMakeups(c) {
     const hs = hostScen("cm"), SD = window.UmaScenarioDecks, e = SD && SD.eras[String(hs.era ? hs.era.id : GUIDE_ERA[state.scenario])], p = presetById(c.preset);
     if (!e || !p) return null;
+    const info = guidePhaseInfo(c, e, p);
+    const decks = info.activePhase === "pre" || info.activePhase === "post" ? e.decks.filter((x) => x.phase === info.activePhase) : e.decks;
     const DISTS = ["Sprint", "Mile", "Medium", "Long"], i = DISTS.indexOf(p.course.dist);
     for (let k = 0; k < DISTS.length; k++) for (const j of [i - k, i + k]) {
-      const list = e.decks.filter((x) => x.dist.indexOf(DISTS[j]) !== -1);
-      if (list.length) return { e, list, dist: DISTS[j], exact: k === 0 };
+      const list = decks.filter((x) => x.dist.indexOf(DISTS[j]) !== -1);
+      if (list.length) return { e, list, dist: DISTS[j], exact: k === 0, phase: info.activePhase, phaseInfo: info };
     }
     return null;
   }
@@ -3716,8 +3731,25 @@
     const g = guideMakeups(c);
     if (!g) return "";
     const label = (m) => { const { comp, cards } = makeupComp(m); return COMP_TYPES.filter(([k]) => comp[k]).map(([k, l]) => comp[k] + " " + l.toLowerCase()).join(" + ") + (cards.length ? " · " + cards.map((id) => D.card(id).n).join(", ") : "") + (m.note ? " (" + m.note + ")" : ""); };
-    return `<p class="mini"><b>${esc(g.e.guide)} guide's makeups</b> for ${esc(g.dist.toLowerCase())}${g.exact ? "" : " (its nearest distance)"}: tap one to use it${g.e.required ? `; it also adds ${esc(D.card(g.e.required).n)} to Must include` : ""}.</p>
-      <div class="row-wrap">${g.list.map((m, i) => `<button type="button" class="btn ghost small" data-cm-makeup="${i}">${esc(label(m))}</button>`).join("")}</div>`;
+    const pi = g.phaseInfo;
+    let phaseControl = "";
+    if (pi && pi.hasPhases && pi.reqCard) {
+      const rn = pi.reqCard.n, rInfo = CARD_RELEASE.info(pi.reqCard);
+      const autoLabel = pi.usable ? `Auto (Post-Guides: with ${rn})` : pi.releasedByCup ? `Auto (Pre-Guides: ${rn} not owned/borrowed)` : `Auto (Pre-Guides: ${rn} ~${fmtDate(rInfo.date)})`;
+      phaseControl = `<div class="row-wrap"><label class="field"><span>${esc(rn)} comps</span><select data-cm="guidePhase">
+        <option value="auto"${pi.choice === "auto" ? " selected" : ""}>${esc(autoLabel)}</option>
+        <option value="pre"${pi.choice === "pre" ? " selected" : ""}>Pre-Guides (no ${esc(rn)})</option>
+        <option value="post"${pi.choice === "post" ? " selected" : ""}${pi.usable ? "" : " disabled"}>Post-Guides (with ${esc(rn)})${pi.releasedByCup ? (pi.usable ? "" : " · mark owned or allow borrow") : " · releases ~" + esc(fmtDate(rInfo.date))}</option>
+        ${pi.usable ? `<option value="all"${pi.choice === "all" ? " selected" : ""}>All (Pre + Post)</option>` : ""}
+      </select></label></div>`;
+    }
+    const buttons = `<div class="row-wrap">${g.list.map((m, i) => `<button type="button" class="btn ghost small" data-cm-makeup="${i}">${esc(label(m))}</button>`).join("")}</div>`;
+    const reqNote = g.e.required && g.phase !== "pre" ? `; ${g.phase === "all" ? "post-Guides comps also add " : "it also adds "}${esc(D.card(g.e.required).n)} to Must include` : "";
+    const phaseName = g.phase === "pre" ? " (pre-Guides)" : g.phase === "post" ? " (post-Guides)" : "";
+    const picker = g.list.length > 16
+      ? `<details class="pred-help"><summary class="mini">Tap to pick a ${esc(g.e.guide)} makeup (${g.list.length} comps${phaseName})</summary>${buttons}</details>`
+      : buttons;
+    return `${phaseControl}<p class="mini"><b>${esc(g.e.guide)} guide's makeups${phaseName}</b> for ${esc(g.dist.toLowerCase())}${g.exact ? "" : " (its nearest distance)"}: ${g.list.length > 16 ? `${g.list.length} comps available` : "tap one to use it"}${reqNote}.</p>${picker}`;
   }
   function compHTML(c) {
     const fixed = COMP_TYPES.reduce((a, [k]) => a + (c.comp[k] != null ? c.comp[k] : 0), 0);
@@ -4321,7 +4353,7 @@
     return `<div class="makeups">
       <h4>${byGuide ? `${esc(m.meta.guide)} guide's makeups compared` : "Deck makeups compared"} <span class="mini">· ${m.filled} makeup${m.filled === 1 ? "" : "s"}${byGuide ? ` for ${esc(m.meta.dist.toLowerCase())}${m.meta.exact ? "" : " (the guide's nearest distance)"}` : ""}</span></h4>
       ${m.unfilled && m.unfilled.length ? `<p class="mini warn">Your cards can't fill ${m.unfilled.length === 1 ? "this makeup" : "these makeups"}: ${m.unfilled.map(esc).join("; ")}. Mark more owned cards, or allow a borrowed card.</p>` : ""}
-      <p class="mini">${byGuide ? `Every makeup in the ${esc(m.meta.guide)} guide (with its scenario card, when it has one) got the full search with the makeup held` : `Every makeup your cards can fill got Euophrys' pick and a quick check on ${m.runs.quick} simulated careers. The best ${m.finalists} got the full search with their makeup held`}, then their decks were raced again on ${m.runs.final} fresh careers: the best of those is the deck above. ${race ? "Gaps are in lengths on this course (skills included)" : "Gaps are in target-fit points"}; stats are Speed / Stamina / Power / Guts / Wit.</p>
+      <p class="mini">${byGuide && m.finalists >= m.filled ? `Every makeup in the ${esc(m.meta.guide)} guide (with its scenario card, when it has one) got the full search with the makeup held` : byGuide ? `Every makeup in the ${esc(m.meta.guide)} guide got Euophrys' pick and a quick check on ${m.runs.quick} simulated careers. The best ${m.finalists} got the full search with the makeup held` : `Every makeup your cards can fill got Euophrys' pick and a quick check on ${m.runs.quick} simulated careers. The best ${m.finalists} got the full search with their makeup held`}, then their decks were raced again on ${m.runs.final} fresh careers: the best of those is the deck above. ${race ? "Gaps are in lengths on this course (skills included)" : "Gaps are in target-fit points"}; stats are Speed / Stamina / Power / Guts / Wit.</p>
       <div class="table-wrap"><table class="plan mk-table"><thead><tr><th>#</th><th>Makeup</th><th>Its best deck</th><th class="num">vs best</th><th class="num">Stats</th><th></th></tr></thead><tbody>
         ${fin.map((x, k) => `<tr class="${deckKeyOf(x.cards) === cur ? "cur" : ""}"><td class="num">${k + 1}</td><td><div class="mk-row">${makeupLabel(x.comp)}</div>${tag(x)}</td><td class="mini">${names(x.cards)}</td><td class="num">${gap(x.gap)}${share(x.check)}</td><td class="num mini">${stats(x.check)}</td>
           <td>${deckKeyOf(x.cards) === cur ? '<span class="mini">In use</span>' : `<button type="button" class="btn ghost small" data-cm-makeup-use="${x.finalist}">Use this deck</button>`}</td></tr>`).join("")}
@@ -5054,9 +5086,10 @@
       if (m) {
         const { comp, cards } = makeupComp(m);
         c.comp = comp;
+        if (g.e.required && !cards.includes(g.e.required)) c.locked = c.locked.filter((id) => id !== g.e.required);
         cards.filter((id) => id === g.e.required && c.locked.indexOf(id) === -1).forEach((id) => c.locked.push(id));
         save(); renderCM();
-        flash("Deck makeup set from the " + g.e.guide + " guide." + (g.e.required ? " " + D.card(g.e.required).n + " is a must-include." : ""));
+        flash("Deck makeup set from the " + g.e.guide + " guide." + (g.e.required && cards.includes(g.e.required) ? " " + D.card(g.e.required).n + " is a must-include." : ""));
       }
       return true;
     }
