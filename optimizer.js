@@ -989,11 +989,17 @@
   const FIT_RUNS = 6;
   const HELD_OUT_DECKS = 5, HELD_OUT_RUNS = 32;
   const FIT_PER_TYPE = { friend: 2, group: 2 };
+  const SKILL_EXTRA = 2; // per type, the cards whose skill hints are worth the most on the course
   const FIT_TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
   // How Find my best deck scores a deck on simulated careers: how close she ends to the targets
   // (or her lengths on the course), the deck's skills and must-haves, and the share reaching
   // the rank goal first when there is one. targetSearch and makeupSweep share it, so a makeup is
   // scored exactly as one search scores a deck. ctxOf(runs, seed) makes careers to score on.
+  // The q-quantile of xs (linear between neighbours).
+  function percentile(xs, q) {
+    const s = xs.slice().sort((a, b) => a - b), at = (s.length - 1) * q, lo = Math.floor(at), hi = Math.ceil(at);
+    return s[lo] + (s[hi] - s[lo]) * (at - lo);
+  }
   function fitScorer(opts, sim) {
     const Tr = root.UmaTiers || (typeof require !== "undefined" ? require("./tiers.js") : null);
     const ctxOf = (runs, seed) => buildCtx(Object.assign({}, sim, seed != null ? { seed } : {}, { runs, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
@@ -1015,7 +1021,10 @@
       // Race scoring counts skills as the SP-limited purchases of each simulated career (lengths, like
       // the stats), as Grand Concert does; the tier list's skill score otherwise.
       const skillScore = (c.sc.id === "grandlive" || fit.scoring === "race") && !opts.parent ? s.skillValue : sk.value;
-      let value = (ss && ss.ignoreFit ? 0 : fit.value) + sw * skillScore + sk.mustValue - over, rating = null, ssShare = null;
+      // opts.careerScore "p85": the stat part is her 85th-percentile career (CM: you train several
+      // and race your best), else the average career (LoH: steady).
+      const statPart = opts.careerScore === "p85" && fit.careers && fit.careers.length > 1 ? percentile(fit.careers, 0.85) : fit.value;
+      let value = (ss && ss.ignoreFit ? 0 : statPart) + sw * skillScore + sk.mustValue - over, rating = null, ssShare = null;
       if (ss) {
         rating = Ra.statsScore(s.stats) + Math.round(s.sp * ss.spRating) + ss.unique;
         ssShare = s.finals.filter((f) => Ra.statsScore(f.stats) + Math.round(f.sp * ss.spRating) + ss.unique >= ss.ss).length / s.finals.length;
@@ -1061,8 +1070,39 @@
     const most = { friend: comp.friend != null ? comp.friend : Math.max(cap, nOf(deck, "friend")), group: comp.group != null ? comp.group : Math.max(cap, nOf(deck, "group")) };
     const slots = deck.map((_, i) => i).filter((i) => !locked.has(deck[i].id));
     const swaps = [];
-    let step = 0, pass = 0, changed = false;
+    let step = 0, pass = 0, changed = false, pivots = null;
+    const pivoted = [];
+    // Borrow pivot, after the swaps: the borrow moves to another slot (the best friend's card of
+    // that slot's type), and the old borrow slot takes one of your 3 best owned cards of its type.
+    // Kept when the careers score better. Types stay, so the makeup does.
+    function pivotJobs() {
+      const b = deck.findIndex((x) => x.borrowed);
+      if (b < 0 || locked.has(deck[b].id) || !borrowPool.length) return [];
+      return deck.map((_, j) => j).filter((j) => j !== b && !locked.has(deck[j].id));
+    }
+    function pivot(j) {
+      const b = deck.findIndex((x) => x.borrowed);
+      if (b < 0 || j === b) return;
+      const tj = D.card(deck[j].id).ty, tb = D.card(deck[b].id).ty;
+      const restJ = deck.filter((_, k) => k !== j && k !== b);
+      const lend = Tr.rank(opts, tj, restJ, borrowPool.filter((x) => D.card(x.id).ty === tj && !restJ.some((y) => y.id === x.id)))[0];
+      if (!lend) return;
+      const withLend = restJ.concat([{ id: lend.id, lb: lend.lb, borrowed: true }]);
+      Tr.rank(opts, tb, withLend, pool.filter((x) => D.card(x.id).ty === tb && !withLend.some((y) => y.id === x.id))).slice(0, 3).forEach((own) => {
+        const cand = deck.slice();
+        cand[j] = { id: lend.id, lb: lend.lb, borrowed: true };
+        cand[b] = { id: own.id, lb: own.lb, borrowed: false };
+        if (new Set(cand.map((x) => D.card(x.id).cid)).size < cand.length) return;
+        const v = score(cand);
+        if (better(v, cur)) { pivoted.push({ from: deck[b].id, to: lend.id, own: own.id }); swaps.push({ out: deck[j].id, in: lend.id, inLb: lend.lb }, { out: deck[b].id, in: own.id, inLb: own.lb }); deck = cand; cur = v; }
+      });
+    }
     function next() {
+      if ((pass >= 2 || !slots.length) && opts.borrowPivot !== false) {
+        if (!pivots) pivots = pivotJobs();
+        if (pivots.length) { pivot(pivots.shift()); return true; }
+        return false;
+      }
       if (pass >= 2 || !slots.length) return false;
       const i = slots[step % slots.length];
       const c = deck[i];
@@ -1074,7 +1114,10 @@
       FIT_TYPES.filter((t) => (t === u || (comp[u] == null && comp[t] == null)) && !(most[t] != null && nOf(rest, t) >= most[t])).forEach((t) => {
         const cands = from.filter((x) => x.id !== c.id && D.card(x.id).ty === t);
         if (!cands.length) return;
-        Tr.rank(opts, t, rest, cands).slice(0, FIT_PER_TYPE[t] || 4).forEach((r) => {
+        // Euophrys' best few, plus the 2 whose skill hints are worth the most on this course.
+        const ranked = Tr.rank(opts, t, rest, cands), top = ranked.slice(0, FIT_PER_TYPE[t] || 4);
+        ranked.slice(top.length).sort((a, b) => b.skill - a.skill).slice(0, SKILL_EXTRA).forEach((r) => { if (r.skill > 0) top.push(r); });
+        top.forEach((r) => {
           const cand = deck.slice();
           cand[i] = { id: r.id, lb: r.lb, borrowed: c.borrowed };
           const v = score(cand);
@@ -1084,7 +1127,7 @@
       if (best) { swaps.push({ out: c.id, in: best.in.id, inLb: best.in.lb }); deck = best.cand; cur = best.v; changed = true; }
       step++;
       if (step % slots.length === 0) { pass = changed ? pass + 1 : 2; changed = false; }
-      return pass < 2;
+      return pass < 2 || opts.borrowPivot !== false;
     }
     // The start and final decks, rescored with more careers for the readout.
     function result() {
@@ -1117,7 +1160,7 @@
       const removed = start.filter(x => !winner.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
       const added = winner.filter(x => !start.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
       removed.forEach((x, i) => { if (added[i]) finalSwaps.push({out:x.id, in:added[i].id, inLb:added[i].lb}); });
-      return { cards: winner, startCards: start.map((x) => Object.assign({}, x)), swaps: finalSwaps, before, after, target: ctx.target, caps: ctx.caps,
+      return { cards: winner, startCards: start.map((x) => Object.assign({}, x)), swaps: finalSwaps, pivoted, careerScore: opts.careerScore || "mean", before, after, target: ctx.target, caps: ctx.caps,
         scoring: after.scoring, close,
         validation: { runs:16, candidates:finalists.size, heldOut: { runs: HELD_OUT_RUNS, decks: checked.length }, method:"rescore-all-tested, best few on held-out careers" } };
     }
