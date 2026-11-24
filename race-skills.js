@@ -252,7 +252,10 @@
       const v = { selected: selected.slice(), spent, required, result };
       cache.set(key, v); calls++; if (o.progress) o.progress(Math.min(0.9, calls / goal)); return v;
     };
-    const better = (a, b) => a && (!b || a.required > b.required || a.required === b.required && (a.result.mean > b.result.mean + 1e-6 || Math.abs(a.result.mean - b.result.mean) <= 1e-6 && a.spent < b.spent));
+    // o.k: the objective's spread weight (the spec: mean + k x the race-to-race spread of her
+    // gain; CM k > 0 favours upside, LoH k < 0 steadiness). 0: the mean, as before.
+    const K = Number.isFinite(+o.k) ? +o.k : 0, obj = r => r.mean + K * (r.sd || 0);
+    const better = (a, b) => a && (!b || a.required > b.required || a.required === b.required && (obj(a.result) > obj(b.result) + 1e-6 || Math.abs(obj(a.result) - obj(b.result)) <= 1e-6 && a.spent < b.spent));
     // A small shop: race every full affordable combination (one tier per skill family; full: no
     // other skill still fits the SP), so the answer is the best set under the simulator, not the
     // best one a bounded search reached. A skill that clearly loses lengths on its own is left
@@ -331,7 +334,7 @@
       }
     }
     // Report on a separate seed and a larger sample; a noisy search win can lose this check.
-    const finalists = [...cache.values()].filter(Boolean).sort((a, b) => b.required - a.required || b.result.mean - a.result.mean || a.spent - b.spent).slice(0, 3);
+    const finalists = [...cache.values()].filter(Boolean).sort((a, b) => b.required - a.required || obj(b.result) - obj(a.result) || a.spent - b.spent).slice(0, 3);
     if (!finalists.includes(cache.get(ids(seed.selected.map(s=>s.id)).join(".")))) finalists.push(cache.get(ids(seed.selected.map(s=>s.id)).join(".")));
     best = null;
     const checked = [];
@@ -342,14 +345,17 @@
     // Head-to-head: the best finalist against the runner-up (same must-haves met), paired on
     // fresh races. Within the 95% interval it's a tie; a clear loss swaps them.
     const setOf = x => ids(learned.concat(x.selected.map(s=>s.id)));
-    const runner = checked.filter(v => v !== best && v.required === best.required && setOf(v).join() !== setOf(best).join()).sort((a,b) => b.result.mean - a.result.mean)[0];
+    const runner = checked.filter(v => v !== best && v.required === best.required && setOf(v).join() !== setOf(best).join()).sort((a,b) => obj(b.result) - obj(a.result))[0];
     let duel = null;
     if (runner) {
       try {
         const raw = await o.compare(setOf(runner), setOf(best), DUEL_RACES, DUEL_SEED);
         const d = Object.assign({}, raw), shift = cut(runner.selected) - cut(best.selected);
         ["mean","median","low","min","max"].forEach(k => { d[k] += shift; });
-        let verdict = Math.abs(d.mean) <= d.ci95 ? "tie" : d.mean > 0 ? "best" : "swapped";
+        // With a spread weight, the paired gap in means plus k times the gap in their spreads.
+        const gap = d.mean + K * ((best.result.sd || 0) - (runner.result.sd || 0));
+        let verdict = Math.abs(gap) <= d.ci95 ? "tie" : gap > 0 ? "best" : "swapped";
+        if (K) d.objective = gap;
         // No clear difference: the set with more recommended skills (o.prefer), then the one that
         // spends less SP, is kept (an interval containing zero shows no clear advantage, not that
         // the two are equal).
@@ -373,7 +379,9 @@
         const without = best.selected.filter(s => s !== x);
         const raw = await o.compare(setOf({ selected: without }), setOf(best), DUEL_RACES, PRUNE_SEED);
         const d = adjust(raw, [x]);
-        if (prefer.has(String(x.id)) ? d.mean <= 0 : d.mean <= d.ci95) { if (!weakest || d.mean < weakest.d.mean) weakest = { x, d }; }
+        // A purchase's worth here: its paired gain plus k times that gain's spread.
+        const worth = d.mean + K * (d.sd || 0);
+        if (prefer.has(String(x.id)) ? worth <= 0 : worth <= d.ci95) { if (!weakest || worth < weakest.worth) weakest = { x, d, worth }; }
       }
       if (!weakest) break;
       pruned.push({ id: weakest.x.id, cost: weakest.x.cost, diff: weakest.d });
@@ -403,7 +411,7 @@
       .sort((a, b) => b.required - a.required || b.result.mean - a.result.mean).slice(0, 12).map(x => x.selected));
     return { selected: rows, ranking, shortlist, spent: best.spent, budget: o.sp, unspent: o.sp - best.spent, result: best.result, excluded,
       unmetMust: (o.must || []).map(String).filter(id => !learned.includes(id) && !best.selected.some(x=>x.required.includes(id))),
-      evaluations: calls, failedSets, method, learned, duel, pruned, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
+      evaluations: calls, failedSets, method, learned, duel, pruned, k: K, offPosition, scaled: Object.keys(scale).filter(id => scale[id] > 0 && scale[id] < 1) };
   }
   const api = { summary, supported, engine, horse, request, runner, load, staminaDebuffs, staminaRequest, staminaEstimate, staminaTarget, readStaminaLink, optimize };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.UmaRaceSkills = api;
