@@ -2378,7 +2378,7 @@
     // Parents are trained in Independent Training here, so its race count always applies.
     if (host === "parents") { c.independent = true; c.reachSS = state.cmp.parentRank; }
     if (host === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, makeupMode: "guide", skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, makeupMode: "guide", careerScore: "auto", skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     if (c.makeupMode == null && c.compareMakeups === false) c.makeupMode = "off";
     delete c.compareMakeups;
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
@@ -2925,7 +2925,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, careerScoreOf(c), JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2989,7 +2989,7 @@
         link = itLink(c, pool, bp);
         if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
         if (link && link.borrow) bp = [link.borrow];
-        const opts = Object.assign(euOpts(c, p, tid), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp) });
+        const opts = Object.assign(euOpts(c, p, tid), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp), careerScore: host === "cm" && c.goal === "race" ? careerScoreOf(c) : "mean" });
         const r = T.buildDeck(opts, pool, bp);
         const ss = (opts.parent && opts.parent.reachSS) || opts.rankGoal;
         const rv = c.goal === "race" ? raceValues(p, c.style, stamina) : null;
@@ -3475,6 +3475,13 @@
     E.STATS.forEach((s) => { if (!(user[s] > 0)) base[s] += h.uncap[s] || 0; });
     return base;
   }
+  // How CM & decks scores a deck's careers: "p85" (her 85th-percentile career: CM, where you train
+  // several and race your best) or "mean" (LoH: steady); auto follows the cup.
+  function careerScoreOf(c) {
+    if (c.careerScore === "p85" || c.careerScore === "mean") return c.careerScore;
+    const p = presetById(c.preset);
+    return p && p.kind === "loh" ? "mean" : "p85";
+  }
   // Inheritance's expected stats over a run: the start bonus and both inspirations' average.
   function inheritExpected(inh) {
     const out = inh.start.slice();
@@ -3542,6 +3549,7 @@
       <datalist id="cmCardList">${available.filter(x => T.entry(x.id, owned[x.id] != null ? +owned[x.id] : 4)).sort((a, b) => b.r - a.r || a.n.localeCompare(b.n)).map(card => { const r = CARD_RELEASE.info(card); return `<option value="${esc(D.label(card))}"${r.estimated ? ` label="Expected ~${esc(fmtDate(r.date))}"` : ""}></option>`; }).join("")}</datalist>
       ${c.locked.length ? `<div class="row-wrap">${c.locked.map((id) => `<span class="chip lockchip">${esc(D.card(id).n)}${cardReleaseHTML(D.card(id))} <button type="button" class="linkish" data-cm-unlock="${id}" aria-label="Remove ${esc(D.card(id).n)}">✕</button></span>`).join("")}</div>` : ""}
       ${mustHTML(c)}
+      ${host === "cm" && goal === "race" ? `<label class="field" title="CM: you train several careers and race your best, so a deck is scored by her 85th-percentile career. LoH: by her average career (steady)."><span>Score a deck's careers by</span><select data-cm="careerScore">${opt([["auto", `Auto (${presetById(c.preset) && presetById(c.preset).kind === "loh" ? "LoH: average" : "CM: best runs, 85th percentile"})`], ["p85", "Best runs (85th percentile)"], ["mean", "Average career"]], c.careerScore || "auto")}</select></label>` : ""}
       ${euSettingsHTML("speed", host)}
       </details>
       <div class="run-bar">
@@ -4302,6 +4310,7 @@
       ${r.sweepNote ? `<p class="mini warn">${r.sweepNote}</p>` : ""}
       ${r.link ? `<p class="mini${r.link.lock ? "" : " warn"}">${r.link.lock ? `<b>${esc(r.link.name)}</b> is in${r.link.borrow ? " as the borrowed card" : ""}: uma.guide calls the scenario's link card mandatory for Independent Training.` : r.link.blocked ? `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but your deck makeup allows no Friend card.` : `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but you don't own her: mark her owned, or allow a borrowed card.`}</p>` : ""}
       ${r.goal === "race" ? `<p class="mini">Build-specific purchases: <button type="button" class="linkish" id="cmRaceShow">${deckJob("cm").raceRunning ? "comparing…" : "see the skill-set comparison above"}</button></p>` + mustResultHTML(r, c) : ""}
+      ${r.fit && r.fit.careerScore ? `<p class="mini">Decks scored by her <b>${r.fit.careerScore === "p85" ? "85th-percentile career (best runs: you train several and race your best)" : "average career"}</b>${r.fit.pivoted && r.fit.pivoted.length ? `; the borrow moved: ${r.fit.pivoted.map((x) => `borrow ${esc(D.card(x.to).n)}, use your ${esc(D.card(x.own).n)}`).join("; ")}` : ""}.</p>` : ""}
       ${predictedHTML(r, host)}
       ${supportEventsHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
