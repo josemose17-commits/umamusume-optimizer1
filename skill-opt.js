@@ -16,7 +16,7 @@
       tid: b.tid ? String(b.tid).replace(/\D/g, "").slice(0, 8) : "", stats: {}, apt: {}, mood: MOODS.includes(String(b.mood)) ? String(b.mood) : "0",
       uniqueLv: String(clampInt(b.uniqueLv, 1, 6, 1)), sp: b.sp === "" || b.sp == null ? "" : String(clampInt(b.sp, 0, 20000, 0)),
       fast: !!b.fast, skills: [], goal: b.goal === "win" ? "win" : "length",
-      precise: !!b.precise, strength: ["top-strong", "top-typical", "weaker", "equal", "stronger"].includes(b.strength) ? b.strength : "top-strong", mix: null, team: [] };
+      precise: !!b.precise, spurtGoal: [90, 95, 100].includes(+b.spurtGoal) ? +b.spurtGoal : 95, noFill: !!b.noFill, strength: ["top-strong", "top-typical", "weaker", "equal", "stronger"].includes(b.strength) ? b.strength : "top-strong", mix: null, team: [] };
     // Rivals by running style for the full-field check (null: the cup's default spread).
     if (b.mix && typeof b.mix === "object") {
       const mix = {}; let n = 0;
@@ -53,7 +53,7 @@
     const b = clean(build);
     return b64(JSON.stringify([1, b.cup, b.style, b.tid, STATS.map((s) => b.stats[s] || ""), [b.apt.distanceAptitude || "", b.apt.surfaceAptitude || "", b.apt.strategyAptitude || ""],
       b.mood, b.uniqueLv, b.sp, b.fast ? 1 : 0, b.skills.map((x) => x.id + "." + x.hint + (x.have ? "h" : "")),
-      b.goal === "win" ? 1 : 0, b.strength, b.mix ? ["Nige", "Senkou", "Sasi", "Oikomi"].map((k) => b.mix[k]) : 0, b.precise ? 1 : 0]));
+      b.goal === "win" ? 1 : 0, b.strength, b.mix ? ["Nige", "Senkou", "Sasi", "Oikomi"].map((k) => b.mix[k]) : 0, b.precise ? 1 : 0, b.spurtGoal, b.noFill ? 1 : 0]));
   }
   function decode(code) {
     let a;
@@ -64,7 +64,7 @@
     ["distanceAptitude", "surfaceAptitude", "strategyAptitude"].forEach((k, i) => { if (a[5] && a[5][i]) apt[k] = a[5][i]; });
     const skills = (Array.isArray(a[10]) ? a[10] : []).map((t) => { const m = /^(\d+)\.([0-5])(h?)$/.exec(String(t)); return m ? { id: m[1], hint: +m[2], have: !!m[3] } : null; }).filter(Boolean);
     const mix = Array.isArray(a[13]) ? { Nige: a[13][0], Senkou: a[13][1], Sasi: a[13][2], Oikomi: a[13][3] } : null;
-    return clean({ cup: a[1], style: a[2], tid: a[3], stats, apt, mood: a[6], uniqueLv: a[7], sp: a[8], fast: !!a[9], skills, goal: a[11] ? "win" : "length", strength: a[12], mix, precise: !!a[14] });
+    return clean({ cup: a[1], style: a[2], tid: a[3], stats, apt, mood: a[6], uniqueLv: a[7], sp: a[8], fast: !!a[9], skills, goal: a[11] ? "win" : "length", strength: a[12], mix, precise: !!a[14], spurtGoal: a[15] == null ? 95 : a[15], noFill: !!a[16] });
   }
 
   // Skill names as typed or copied: case, spacing and punctuation don't matter; "O"/"OO" (or
@@ -138,7 +138,67 @@
     return m && Number.isFinite(m[1]) && m[1] >= 0 ? B.discounted(m[1], hint, fast) : null;
   }
 
-  const api = { STATS, clean, encode, decode, parsePaste, norm, withLower, quickPlan, price };
+  // Spend all the SP: after the best set, the SP left buys the best other skills that still fit
+  // (each family once, its lower tiers included), by o.score (lengths; missing counts 0), cheaper
+  // first on a tie. A skill clearly costing lengths (score below o.floor, default -0.05) is never
+  // bought. o: { learned, bought (ids bought, lower tiers included), available, hints, sp, spent,
+  // fast, score: { id: L }, metadata }. Returns { added: [{ id, cost, tiers, score }], spent, left }.
+  function fillRest(o) {
+    const own = new Set((o.learned || []).concat(o.bought || []).map(String));
+    const avail = (o.available || []).map(String).filter((id) => !own.has(id));
+    const score = {};
+    avail.forEach((id) => { const v = o.score && o.score[id]; score[id] = Number.isFinite(v) ? v : 0; });
+    const budget = B.create({ learned: [...own], available: avail, skills: score, fastLearner: o.fast, metadata: o.metadata, includeZero: true });
+    const floor = o.floor == null ? -0.05 : o.floor;
+    const opts = budget.options(o.hints || {}).flat().filter((x) => x.L >= floor || (x.L === 0 && score[x.id] >= floor));
+    let left = Math.max(0, (+o.sp || 0) - (+o.spent || 0));
+    const used = new Set(), added = [];
+    opts.map((x) => Object.assign({}, x, { score: score[x.id] }))
+      .sort((a, b) => b.score - a.score || a.cost - b.cost)
+      .forEach((x) => {
+        if (used.has(x.family) || x.cost > left || x.score < floor) return;
+        used.add(x.family); added.push({ id: x.id, cost: x.cost, tiers: x.tiers.map((t) => t.id), score: x.score }); left -= x.cost;
+      });
+    return { added, spent: (+o.sp || 0) - left, left };
+  }
+
+  // Race formulas (the CM & LoH skill optimizer spec): max HP, and a Wit check's chance to fire.
+  const HP_COEF = { Oonige: 0.86, Nige: 0.95, Senkou: 0.89, Sasi: 1.0, Oikomi: 0.995 };
+  const maxHP = (stamina, style, distance) => 0.8 * (HP_COEF[style] || 1) * (+stamina || 0) + (+distance || 0);
+  const activation = (wiz) => (+wiz > 0 ? Math.max(100 - 9000 / +wiz, 20) / 100 : 0.2);
+  // Heals for the stamina gate, most HP per SP first: hp is the share of max HP it restores.
+  // o.heals: [{ id, cost, hp }]; chance: the Wit check's (the same for every heal).
+  function healOrder(heals, chance) {
+    return (heals || []).filter((h) => h.cost > 0 && h.hp > 0)
+      .map((h) => Object.assign({}, h, { expected: h.hp * (chance == null ? 1 : chance), per100: h.hp * (chance == null ? 1 : chance) * 100 / h.cost }))
+      .sort((a, b) => b.per100 - a.per100 || a.cost - b.cost);
+  }
+
+  // A link that opens alpha123's Global Umalator filled in (its own share format: gzipped JSON
+  // in the URL fragment, base64, URI-encoded). o: { courseId, racedef: { ground, weather, season,
+  // time }, uma1, uma2 (stats, aptitudes, strategy, mood, uniqueLv, outfitId, skills: [ids]),
+  // hints: { id: level }, samples, seed }. Async (CompressionStream).
+  const UMALATOR = "https://alpha123.github.io/uma-tools/umalator-global/";
+  const UMA_DEFAULT = { outfitId: "", starCount: 3, strategy: "Senkou", distanceAptitude: "A", surfaceAptitude: "A", strategyAptitude: "A", aptitudes: Array(10).fill("A"), uniqueLv: 1, mood: 2, popularity: 1 };
+  async function umalatorLink(o) {
+    const uma = (u) => { const x = Object.assign({}, UMA_DEFAULT, u); x.skills = [...new Set((u.skills || []).map(String))]; delete x.samplePolicies; return x; };
+    const rd = o.racedef || {};
+    const data = { courseId: +o.courseId, nsamples: o.samples || 500, seed: o.seed || 2615953739, usePosKeep: true, useCompeteTop: true, useIntChecks: false,
+      racedef: { ground: rd.ground, weather: rd.weather, season: rd.season, time: rd.time, grade: 100 },
+      hintLevels: Object.fromEntries(Object.entries(o.hints || {}).filter(([, v]) => v > 0)), uma1: uma(o.uma1), uma2: uma(o.uma2 || o.uma1) };
+    const stream = new Blob([JSON.stringify(data)]).stream().pipeThrough(new CompressionStream("gzip"));
+    const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    let bin = ""; bytes.forEach((c) => { bin += String.fromCharCode(c); });
+    return UMALATOR + "#" + encodeURIComponent(typeof btoa !== "undefined" ? btoa(bin) : Buffer.from(bin, "binary").toString("base64"));
+  }
+  async function readUmalatorLink(url) {
+    const hash = decodeURIComponent(String(url).split("#")[1] || "");
+    const bin = typeof atob !== "undefined" ? atob(hash) : Buffer.from(hash, "base64").toString("binary");
+    const stream = new Blob([Uint8Array.from(bin, (c) => c.charCodeAt(0))]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return JSON.parse(await new Response(stream).text());
+  }
+
+  const api = { STATS, clean, encode, decode, parsePaste, norm, withLower, quickPlan, price, fillRest, maxHP, activation, healOrder, umalatorLink, readUmalatorLink, UMALATOR, HP_COEF };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaSkillOpt = api;
 })(typeof window !== "undefined" ? window : globalThis);
