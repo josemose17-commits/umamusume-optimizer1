@@ -83,7 +83,8 @@
   // corner when it has none), so a page leads with its controls and numbers. Hover or focus
   // shows it, a click or tap keeps it open; Escape or a click elsewhere closes it. Only plain
   // explanatory paragraphs move: p.mini of 120+ characters (or any p.explain), with no action
-  // buttons or fields, nothing the app updates by id, no warning or bold status line.
+  // buttons or fields (a link to another page is fine), nothing the app updates by id, no warning
+  // or bold status line, and never the only thing in its card (a card is never left empty).
   // Neighbouring ones, and every one under the same heading, share one (?).
   const FOLD_MIN = 120;
   const isLong = (text) => String(text || "").trim().length >= FOLD_MIN;
@@ -92,7 +93,7 @@
     if (!p || p.tagName !== "P") return false;
     const explain = p.classList.contains("explain");
     if (!explain && !(p.classList.length === 1 && p.classList.contains("mini"))) return false;
-    if (p.id || p.querySelector("[id], input, select, textarea, label, button:not(.linkish)")) return false;
+    if (p.id || p.querySelector("[id], input, select, textarea, label, button:not([data-goto-tab])")) return false;
     if ((!explain && !isLong(p.textContent)) || p.closest(NOT_IN)) return false;
     if (explain) return true;
     let first = p.firstChild;
@@ -157,6 +158,9 @@
       for (let x = p.nextElementSibling; x && foldable(x); x = x.nextElementSibling) group.push(x);
       group.forEach((x) => done.add(x));
       const { box, heading } = headingFor(p, scope);
+      // Without a heading to sit by, it stays unless the card has something else to show.
+      const other = [...box.children].some((x) => !group.includes(x) && !x.matches(".help-btn, .help-pop") && (x.textContent.trim() || x.querySelector("input, select, button, img, svg, table")));
+      if (!heading && !other) return;
       const pop = helpFor(heading, box);
       group.forEach((x) => pop.appendChild(x));
       n++;
