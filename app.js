@@ -2928,14 +2928,24 @@
     ramen: [30305],
     festival: [30323, 10149],
   };
-  function ownScenarioCard(scenId, pool, c) {
+  function ownScenarioCard(scenId, pool, c, exclude) {
     if (c && c.useOwnScenarioCard === false) return null;
     const ids = SCENARIO_PAL_GROUP[scenId];
     if (!ids || !ids.length) return null;
-    return ids.find((id) => owned[id] != null && pool.some((p) => p.id === id)) || null;
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if ((exclude && exclude.has(id)) || owned[id] == null || D.isHidden(id)) continue;
+      const cd = D.card(id);
+      if (!cd) continue;
+      const lb = !c || c.ownedOnly !== false || cd.r < 2 ? +owned[id] : 4;
+      if (!T.entry(id, lb)) continue;
+      if (pool && !pool.some((p) => p.id === id)) pool.push({ id, lb });
+      return id;
+    }
+    return null;
   }
-  function applyOwnScenarioCard(scenId, c, pool, bp, locked, comp) {
-    const ownId = ownScenarioCard(scenId, pool, c);
+  function applyOwnScenarioCard(scenId, c, pool, bp, locked, comp, exclude) {
+    const ownId = ownScenarioCard(scenId, pool, c, exclude);
     if (!ownId) return { bp, locked, ownCard: null };
     const card = D.card(ownId), ty = card && card.ty;
     const nextBp = (bp || []).filter((x) => { const xc = D.card(x.id); return !xc || xc.cid !== card.cid; });
@@ -3073,7 +3083,7 @@
             const ownSameChar = !!(ownScenCard && reqCard && D.card(ownScenCard) && D.card(ownScenCard).cid === reqCard.cid);
             if (reqId && T.entry(reqId, 4)) {
               if (!c.ownedOnly && !pool.some((x) => x.id === reqId)) pool.push({ id: reqId, lb: 4 });
-              if (c.borrow !== false && !ownSameChar && !bp.some((x) => x.id === reqId)) bp.push({ id: reqId, lb: 4 });
+              if (c.borrow !== false && !ownSameChar && !pool.some((x) => x.id === reqId) && !bp.some((x) => x.id === reqId)) bp.push({ id: reqId, lb: 4 });
             }
             makeups = list.map((x) => ({ comp: x.comp, locked: applyOwnScenarioCard(hsc.id, c, pool, bp, x.locked, x.comp).locked }));
             finalists = Math.min(list.length, 6);
@@ -3858,14 +3868,14 @@
     const pool = optPool(c).filter((x) => !out.has(x.id));
     let bp = c.borrow ? borrowPool(c).filter((x) => !out.has(x.id)) : [];
     let locked = ((s && s.locked) || []).filter((id) => pool.some((x) => x.id === id));
-    if (!(s && s.friend)) {
-      const ownApplied = applyOwnScenarioCard(scenFor(parent ? "parents" : "cm").id, c, pool, bp, locked, c.comp);
-      bp = ownApplied.bp; locked = ownApplied.locked;
-    }
+    const ownApplied = applyOwnScenarioCard(scenFor(parent ? "parents" : "cm").id, c, pool, bp, locked, c.comp, out);
+    bp = ownApplied.bp; locked = ownApplied.locked;
+    const ownCid = ownApplied.ownCard && D.card(ownApplied.ownCard) ? D.card(ownApplied.ownCard).cid : null;
     const link = itLink(c, pool, bp);
     if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
     if (link && link.borrow) bp = [link.borrow];
-    if (s && s.friend && c.borrow && cardAvailable(D.card(s.friend), c) && T.entry(s.friend, 4)) bp = [{ id: s.friend, lb: 4 }];
+    const friendCard = s && s.friend ? D.card(s.friend) : null;
+    if (friendCard && (!ownCid || friendCard.cid !== ownCid) && c.borrow && cardAvailable(friendCard, c) && T.entry(s.friend, 4)) bp = [{ id: s.friend, lb: 4 }];
     const opts = Object.assign(euOpts(c, p, tid), { borrow: c.borrow, locked, comp: c.comp, trainee: tid || null });
     if (opts.parent) delete opts.parent.reachSS;
     if (!parent && s && s.rankGoal) opts.rankGoal = raceRankGoal(p, style, tid, s.rankGoal);
