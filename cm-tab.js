@@ -1057,6 +1057,19 @@
           + (list.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Blue · pink</th><th class="num">Whites for her</th><th class="num">On her parents</th></tr></thead><tbody>${list.slice(0, 8).map((e) => `<tr><td>${esc(vetName(e.v))}</td><td>${stat(e.blue[0])} ${e.blue[1]}★ · ${apt(e.pink[0])} ${e.pink[1]}★${e.green ? ` · green ${e.green}★` : ""}</td><td class="num">${e.whites}</td><td class="num">${e.lineWhites}</td></tr>`).join("")}</tbody></table></div>`
             : `<p class="mini">None yet: no veteran has both. Your next loop run that rolls one is the exit point.</p>`);
       }
+      // Each veteran as a parent for this ace: Keep / Usable / Retrain (vet-plan.js grade).
+      if (r && r.x && VP.grade) {
+        const w = CP.want(r.x), ace = r.x.ace && r.x.ace.cid;
+        const o = { blue: w.blue.map((b) => b.i), pinks: w.pink.map((n) => n.i), whites: w.white.map((x) => x.family), family };
+        const rows = vets.filter((v) => +v.cid !== +ace).map((v) => ({ v, g: VP.grade(v, o) }));
+        const order = { keep: 0, usable: 1, retrain: 2 }, label = { keep: "Keep", usable: "Usable", retrain: "Retrain" }, cls = { keep: "good", usable: "warn", retrain: "bad" };
+        rows.sort((a, b) => order[a.g.mark] - order[b.g.mark] || vetName(a.v).localeCompare(vetName(b.v)));
+        const n = (k) => rows.filter((x) => x.g.mark === k).length;
+        exits = `<h4>Your veterans as her parent</h4>
+          <p class="mini">Graded for this ace: <b>Keep</b> 3★ blue in her biggest gap (${esc(w.blue[0] ? w.blue[0].label : "–")}), 2★+ pink in ${w.pink.length ? w.pink.map((x) => esc(x.label)).join(" or ") : "no aptitude (none needed)"}, and 2+ of her top white targets; <b>Usable</b> 2★+ blue in a gap stat (${w.blue.map((b) => esc(b.label)).join(", ")}) and the right pink; <b>Retrain</b> otherwise. The family should also reach ${MIN_AFFINITY} affinity.</p>
+          <p class="mini">${n("keep")} keep · ${n("usable")} usable · ${n("retrain")} retrain</p>
+          <div class="table-wrap"><table class="plan"><thead><tr><th>Veteran</th><th>Sparks</th><th>Grade</th><th>Why</th></tr></thead><tbody>${rows.map(({ v, g }) => `<tr><td>${esc(vetName(v))}</td><td class="mini">${esc(sparks(v.self) || "")}</td><td><span class="pill ${cls[g.mark]}">${label[g.mark]}</span></td><td class="mini">${g.why.length ? esc(g.why.join("; ")) : g.mark === "keep" ? `${g.whites.length} target white${g.whites.length === 1 ? "" : "s"}` : ""}</td></tr>`).join("")}</tbody></table></div>` + exits;
+      }
       const GP = root.UmaGeneralParents;
       const marks = VP.cleanout(vets, { family, aptName: apt, whiteName: (f) => ctx.skillName(f), general: GP ? (v, style) => GP.vetFit(v, style, family).score : null, generalStyles: ctx.parentStyles ? ctx.parentStyles() : null, styleName: (st) => GP ? GP.STYLE_LABEL[st] : st });
       const keep = vets.filter((v) => marks.get(v.id).keep), go = vets.filter((v) => !marks.get(v.id).keep);

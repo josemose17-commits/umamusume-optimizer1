@@ -834,6 +834,7 @@
         renderTab(); return;
       }
       if (e.target.closest("#unhideAll")) { state.hidden = { cards: [], trainees: [], halloween: false, keep: { cards: [], trainees: [] } }; D.setHidden(state.hidden); save(); renderTab(); return; }
+      if (e.target.closest("#predCheck")) { if (!predRun) runPredCheck(); return; }
       if (e.target.closest("#ownExport")) {
         const code = ownedCode();
         const box = $("#ownCodeOut");
@@ -892,6 +893,7 @@
       save(); renderTab();
     });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && gp() && gp().change(e)) e.stopImmediatePropagation(); });
+    $("#tabBody").addEventListener("change", (e) => { if (e.target.id === "predScale") { state.predScale = e.target.checked; save(); flash(state.predScale ? "CM & decks' predictions now scale to your runs" : "CM & decks' predictions are the simulator's again"); } });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "parents" && parents()) parents().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "pulls" && pulls()) pulls().change(e); });
     $("#tabBody").addEventListener("change", (e) => { if (state.tab === "skillopt") soChange(e); });
@@ -1819,7 +1821,53 @@
         </div>
         <textarea id="ownCodeOut" class="codebox" readonly hidden aria-label="Backup code"></textarea>
       </section>
+      ${predCheckHTML()}
     </div>`;
+  }
+  // Predictions vs your runs: each imported veteran's deck simulated in her scenario (8 careers,
+  // her parents' blue sparks in), next to her real final stats, averaged per scenario. With the
+  // switch on, CM & decks scales its predicted stats by your runs' ratio for that scenario.
+  let predRun = null;
+  function predCheckHTML() {
+    const vets = vetsInfo().list, withDeck = vets.filter((v) => v.deck && v.deck.length === 6 && v.scenario);
+    const pc = state.predCheck, scen = (id) => (SCENARIOS.find((x) => x.id === id) || { name: id }).name;
+    const pctTxt = (r) => { const d = Math.round((r - 1) * 100); return (d > 0 ? "+" : d < 0 ? "−" : "±") + Math.abs(d) + "%"; };
+    const rows = pc && pc.by ? Object.entries(pc.by).sort((a, b) => b[1].n - a[1].n) : [];
+    return `<section class="panel" id="data-predcheck">
+      <h3>Predictions vs your runs</h3>
+      <p class="mini">Each of your veterans' decks is simulated in the scenario she trained in (8 careers, her parents' blue sparks counted), next to her real final stats. If the simulator is consistently low or high for a scenario, the switch scales CM &amp; decks' predicted stats to your runs.</p>
+      ${withDeck.length ? `<div class="row-wrap"><button type="button" class="btn small" id="predCheck"${predRun ? " disabled" : ""}>${predRun ? `Comparing… ${predRun.done} / ${predRun.total}` : `Compare ${withDeck.length} veteran${withDeck.length === 1 ? "" : "s"}`}</button>
+        <label class="chip-toggle"><input type="checkbox" id="predScale"${state.predScale ? " checked" : ""}${rows.length ? "" : " disabled"}> Scale CM &amp; decks' predictions to my runs</label></div>`
+        : `<p class="mini warn">${vets.length ? "Your import has no decks per veteran yet: import your umaextractor export again (decks are read from now on)." : "Import your umaextractor export above first."}</p>`}
+      ${rows.length ? `<div class="table-wrap"><table class="plan"><thead><tr><th>Scenario</th><th class="num">Runs</th>${E.STATS.map((s) => `<th class="num">${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead><tbody>${rows.map(([id, g]) => `<tr><td>${esc(scen(id))}</td><td class="num">${g.n}</td>${g.actual.map((a, i) => `<td class="num">${a}<div class="mini">sim ${g.predicted[i]} · <span class="${Math.abs(g.ratio[i] - 1) > 0.05 ? "warn" : ""}">${pctTxt(g.ratio[i])}</span></div></td>`).join("")}</tr>`).join("")}</tbody></table></div>
+        <p class="mini">Each cell: your runs' average final stat, then the simulator's average for the same decks and its gap (+: you got more than it predicts). Checked ${esc(pc.at || "")}. Fewer than 3 runs in a scenario aren't used for scaling.</p>` : ""}
+    </section>`;
+  }
+  function runPredCheck() {
+    const vets = vetsInfo().list.filter((v) => v.deck && v.deck.length === 6 && v.scenario), scenarios = Object.fromEntries(SCENARIOS.map((x) => [x.id, x]));
+    const buildOf = (v) => { const d = ["sprint", "mile", "medium", "long"], g = "GFEDCBAS"; let best = 2; (v.apt || []).slice(2, 6).forEach((a, i) => { if (g.indexOf(a) > g.indexOf((v.apt || [])[best + 2])) best = i; }); return d[best] || "medium"; };
+    const inheritOf = (v) => OPT.inheritFrom((v.parents || []).filter(Boolean).map((m) => ({ blue: m.blue, aff: 0 })));
+    predRun = { done: 0, total: vets.length, rows: [] };
+    renderTab();
+    const step = (i) => {
+      const batch = vets.slice(i, i + 5);
+      predRun.rows.push(...OPT.checkRuns(batch, { scenarios, buildOf, inheritOf, runs: 8 }).rows);
+      predRun.done = Math.min(vets.length, i + 5);
+      const btn = document.getElementById("predCheck"); if (btn) btn.textContent = `Comparing… ${predRun.done} / ${predRun.total}`;
+      if (i + 5 < vets.length) { setTimeout(() => step(i + 5), 0); return; }
+      const by = {};
+      predRun.rows.forEach((r) => { const g = by[r.scenario] || (by[r.scenario] = { n: 0, actual: [0, 0, 0, 0, 0], predicted: [0, 0, 0, 0, 0] }); g.n++; for (let k = 0; k < 5; k++) { g.actual[k] += r.actual[k]; g.predicted[k] += r.predicted[k]; } });
+      Object.values(by).forEach((g) => { g.actual = g.actual.map((x) => Math.round(x / g.n)); g.predicted = g.predicted.map((x) => Math.round(x / g.n)); g.ratio = g.actual.map((a, k) => (g.predicted[k] > 0 ? a / g.predicted[k] : 1)); });
+      state.predCheck = { at: TODAY, by };
+      predRun = null; save(); renderTab();
+      flash(Object.keys(by).length ? "Compared your runs with the simulator." : "No veteran could be compared (decks or scenarios missing).");
+    };
+    setTimeout(() => step(0), 30);
+  }
+  // CM & decks' predicted stats scaled to your runs for a scenario (switch on, 3+ runs), or null.
+  function predRatio(scId) {
+    const g = state.predScale && state.predCheck && state.predCheck.by && state.predCheck.by[scId];
+    return g && g.n >= 3 ? g.ratio : null;
   }
   function collectionPanel() {
     return `<details class="panel collection" id="collPanel" ${ownedIds().length ? "" : "open"}>
@@ -3506,12 +3554,23 @@
   // Her gaps are before inheritance: they're what her parents' blue sparks fill (Parents), so
   // with inheritance in the careers, its expected stats come off the prediction here.
   function raceGaps(r, c) {
-    const p = presetById(r.preset), caps = E.capsFor(state, (cupScen(p) || {}).sc || scenario()), mine = cmTargets(c || {}) || {};
+    const p = presetById(r.preset), sc = (cupScen(p) || {}).sc || scenario(), caps = r.inherit && r.inherit.uncap ? deckCaps("cm", sc) : E.capsFor(state, sc), mine = cmTargets(c || {}) || {};
     const bt = p ? raceBuildTarget(p, r.stamina, r.style) : {};
-    const target = E.STATS.map((s) => Math.min(caps[s] != null ? caps[s] : Infinity, r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
+    // A target past the scenario's cap (with her blue sparks' uncaps) can't be reached by anyone:
+    // it's clipped to the cap and flagged.
+    const raw = E.STATS.map((s) => (r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
+    const target = raw.map((t, i) => Math.min(caps[E.STATS[i]] != null ? caps[E.STATS[i]] : Infinity, t));
+    const overCap = raw.map((t, i) => (t > target[i] ? { asked: Math.round(t), cap: target[i] } : null));
     const exp = r.inherit ? inheritExpected(r.inherit.inherit) : null;
-    const withInh = r.est.stats.slice(), stats = exp ? withInh.map((v, i) => Math.round(v - exp[i])) : withInh;
-    return { target, stats, withInh: exp ? withInh : null, exp, short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
+    // Scaled to your runs in this scenario (Import & backup's check), when that's on.
+    const ratio = predRatio(sc.id), k = (v, i) => (ratio ? Math.round(v * ratio[i]) : v);
+    const withInh = r.est.stats.map(k), stats = exp ? withInh.map((v, i) => Math.round(v - exp[i])) : withInh;
+    // Her best runs: each stat's 85th percentile over the simulated careers (you train several and
+    // keep the best), next to the average.
+    const finals = (r.est.finals || []).map((f) => f.stats);
+    const pct = (xs, q) => { const a = xs.slice().sort((x, y) => x - y), at = (a.length - 1) * q, lo = Math.floor(at); return Math.round(a[lo] + (a[Math.ceil(at)] - a[lo]) * (at - lo)); };
+    const best = finals.length > 3 ? E.STATS.map((_, i) => k(pct(finals.map((f) => f[i]), 0.85), i)) : null;
+    return { ratio, scenarioName: sc.name, target, stats, withInh: exp ? withInh : null, exp, best, overCap, caps: E.STATS.map((s) => caps[s]), short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
   }
   // Inheritance in CM & decks' careers: the family planned in Parents for this ace (its members'
   // blue sparks and own affinity), else the blue sparks typed in the coach (affinity unknown:
@@ -4509,11 +4568,14 @@
     if (!parent) {
       const g = raceGaps(r, cm(host)), short = g.short.map((v, i) => v > 0 ? E.STAT_LABELS[E.STATS[i]] + " −" + v : "").filter(Boolean);
       const gapTable = `<div class="predicted">
-      <b>Predicted stats and her gaps</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers, ${g.withInh ? `with inheritance from ${esc(r.inherit.source)}` : "before inheritance: plan her family in Parents, or type her blue sparks in the coach, to count it"})</span>
+      <b>Predicted stats and her gaps</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers${g.ratio ? `, scaled to your ${esc(g.scenarioName)} runs (${E.STATS.map((s, i) => `${E.STAT_LABELS[s]} ×${g.ratio[i].toFixed(2)}`).join(", ")})` : ""}, ${g.withInh ? `with inheritance from ${esc(r.inherit.source)}` : "before inheritance: plan her family in Parents, or type her blue sparks in the coach, to count it"})</span>
       <div class="table-wrap"><table class="pred cm-gaps"><thead><tr><th></th>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
-        <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
+        <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${g.overCap[i] ? `<div class="mini warn" title="Asked ${g.overCap[i].asked}: past this scenario's cap, so no run reaches it">cap (asked ${g.overCap[i].asked})</div>` : g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
         ${g.withInh ? `<tr><th>Predicted</th>${g.withInh.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr><tr><th>Before inheritance</th>${g.stats.map((v) => `<td class="num">${v}</td>`).join("")}</tr>` : `<tr><th>Predicted</th>${g.stats.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr>`}
+        ${g.best ? `<tr><th title="Each stat's 85th percentile over the simulated careers: what a good run reaches">Best runs (85%)</th>${g.best.map((v) => `<td class="num">${v}</td>`).join("")}</tr>` : ""}
         <tr><th>Short</th>${g.short.map((v, i) => `<td class="num ${v > 0 ? "short" : "over"}">${v > 0 ? "−" + v : "+" + (g.stats[i] - g.target[i])}</td>`).join("")}</tr></tbody></table></div>
+      ${g.overCap.some(Boolean) ? `<p class="mini warn"><b>Past the cap:</b> ${g.overCap.map((o, i) => (o ? `${E.STAT_LABELS[E.STATS[i]]} ${o.asked} (this scenario's cap with her sparks: ${o.cap})` : "")).filter(Boolean).join(" · ")}. No run reaches those; the target is the cap.</p>` : ""}
+      <p class="mini">Caps here: ${E.STATS.map((s, i) => `${E.STAT_LABELS[s]} ${g.caps[i]}`).join(" · ")} (the scenario's base caps plus her blue sparks; training past 1200 gives half). Predicted is the average career; <b>Best runs</b> is what about 1 run in 7 reaches or beats, stat by stat.</p>
       <p class="mini">${short.length ? `<b>Her gaps: ${short.join(" · ")}.</b> Parents turns them into the blue sparks to look for.` : "<b>No gaps:</b> every target is reached."} ${host === "cm" ? `<button type="button" class="linkish" data-goto-tab="parents" data-goto-section="gaps">Fill them in Parents →</button>` : ""}</p>`;
       return gapTable + powerLineHTML(presetById(r.preset), r.style, g.stats[2]) + (rushedLine(g.stats[4], 0, false) ? `<p class="mini">${rushedLine(g.stats[4], 0, false).trim()}</p>` : "") + `<p class="mini">Skill points: about ${r.est.sp}.</p>
       ${fitNoteHTML(r)}

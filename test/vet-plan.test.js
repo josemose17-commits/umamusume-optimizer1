@@ -50,3 +50,17 @@ test("grandparent rule check: own affinity vs half the parent's", () => {
   assert.ok(Math.abs(g.app - F.twice(F.WHITE, 3, 10, F.GRAND)) < 1e-9);
   assert.ok(Math.abs(g.video - F.twice(F.WHITE, 3, 20, F.GRAND)) < 1e-9);
 });
+
+test("grade: a veteran as a parent for one ace (Keep / Usable / Retrain)", () => {
+  const VP = require("../vet-plan.js");
+  const o = { blue: [1, 2], pinks: [5], whites: ["fa", "fb", "fc", "fd", "fe"], family: (id) => id };
+  const v = (blue, pink, white) => ({ self: { blue, pink, white } });
+  assert.strictEqual(VP.grade(v([1, 3], [5, 2], [["fa", 2], ["fc", 1]]), o).mark, "keep");
+  assert.strictEqual(VP.grade(v([1, 3], [5, 2], [["fa", 2], ["fe", 3]]), o).mark, "usable", "fe isn't a top-4 target");
+  assert.strictEqual(VP.grade(v([2, 2], [5, 1], []), o).mark, "usable");
+  const wrong = VP.grade(v([0, 3], [5, 3], [["fa", 3], ["fb", 3]]), o);
+  assert.strictEqual(wrong.mark, "retrain");
+  assert.ok(wrong.why.some((w) => /stat she isn't short/.test(w)));
+  assert.strictEqual(VP.grade(v([1, 3], [4, 3], []), o).mark, "retrain", "no pink for a needed aptitude");
+  assert.strictEqual(VP.grade(v([1, 3], [0, 0], [["fa", 1], ["fb", 1]]), Object.assign({}, o, { pinks: [] })).mark, "keep", "no pink needed");
+});
