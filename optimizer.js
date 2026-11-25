@@ -1026,12 +1026,17 @@
     const healNeed = (c, sk) => {
       const hn = sim.healNeeds, base = sim.raceValues && sim.raceValues.staminaTarget;
       if (!hn || !(base > 0)) return null;
+      // Her chance of getting each heal: the deck offers it (sk.list), or she can buy it anyway
+      // (sim.healExtra: her own innate/awakening heals, her family's white sparks).
+      const chance = {}, extra = sim.healExtra || {};
+      (sk.list || []).forEach((x) => { if (hn[x.id] != null) chance[x.id] = x.p; });
+      Object.keys(extra).forEach((id) => { chance[id] = 1 - (1 - (chance[id] || 0)) * (1 - extra[id]); });
       let best = null;
-      (sk.list || []).forEach((x) => {
-        const n = hn[x.id];
-        if (n == null || !(x.p >= HEAL_RELIABLE) || !(n < base)) return;
-        const cut = x.p * (base - n);
-        if (!best || cut > best.cut) best = { id: x.id, p: x.p, cut, need: base - cut };
+      Object.keys(chance).forEach((id) => {
+        const n = hn[id], p = chance[id];
+        if (n == null || !(p >= HEAL_RELIABLE) || !(n < base)) return;
+        const cut = p * (base - n);
+        if (!best || cut > best.cut) best = { id, p, cut, need: base - cut, own: extra[id] === 1 };
       });
       return best;
     };

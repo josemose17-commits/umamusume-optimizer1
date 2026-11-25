@@ -2642,7 +2642,7 @@
       const r = Object.assign({}, rv, { steps: [] }), L = (x) => OPT.raceL({ race: r }, [1000, x, 1000, 1000, 1000]);
       const field = fieldOf(pid, style);
       Object.entries(cat.skills).forEach(([id, sk]) => {
-        const pct = Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9).map((e) => e.modifier))) / 10000;
+        const pct = Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9 && (e.target == null || e.target === 1)).map((e) => e.modifier))) / 10000;
         if (!(pct > 0)) return;
         const hp = p.course.distance + 0.8 * f * her, stamina = pct * hp / (0.8 * f);
         const gain = L(her + stamina) - L(her), fire = field && field.skills[id] && field.skills[id][2] > 0 ? field.skills[id][2] : 0.85;
@@ -3102,11 +3102,12 @@
         // The stamina she needs with each of the 3 strongest gold heals your cards can hint (a deck
         // that reliably offers one is scored against less), and the finalists' per-career skill
         // purchases by the Skill optimizer's spec scoring.
-        const healNeeds = host === "cm" && c.goal === "race" && rv && rv.staminaTarget ? await deckHealNeeds(p, c, tid, pool, bp, j) : null;
+        const heals = host === "cm" && c.goal === "race" && rv && rv.staminaTarget ? await deckHealNeeds(p, c, tid, pool, bp, j) : null;
+        const healNeeds = heals ? heals.needs : null, healExtra = heals ? heals.extra : null;
         const specPurchase = host === "cm" && c.goal === "race" ? deckSpecPurchase(p, c) : null;
         // The heals need a value to be tracked in the deck's offers: a token one where they have none.
         if (healNeeds) { opts.skills = Object.assign({}, opts.skills); Object.keys(healNeeds).forEach((id) => { if (!(opts.skills[id] > 0)) opts.skills[id] = 0.001; }); }
-        const sim = { healNeeds, specPurchase, scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        const sim = { healNeeds, healExtra, specPurchase, scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         // Compare every deck makeup: Euophrys' pick in each makeup your cards can fill, the full
         // search for the best few, then the best makeup (optimizer.js makeupSweep).
         // Your guide's makeups: the scenario the cup trains in, her distance (or the guide's nearest),
@@ -3247,12 +3248,14 @@
   const staminaOpts = (c) => ({ debuffs: c.staminaDebuffs === "0" ? 0 : c.staminaDebuffs === "4" ? 4 : 2, goal: c.staminaGoal === "1" ? 1 : 0.95 });
   // The stamina check's result for this ace if it's worked out already (no new simulation).
   function staminaPeek(p, c, tid = deckTrainee("cm")) {
-    const setup = linkedStamina(p, c), key = JSON.stringify([p.id, staminaInput(p, c, tid, setup), setup, staminaOpts(c)]);
+    const setup = linkedStamina(p, c), key = JSON.stringify([p.id, staminaInput(p, c, tid, setup), setup, Object.assign(staminaOpts(c), setup ? {} : { own: ownSkills(tid) })]);
     const e = staminaCache.get(key);
     return e && e.result && !e.result.unavailable ? e.result : null;
   }
+  // Her own unique goes into the stamina check (she always has it: a unique heal lowers the need).
+  const ownSkills = (tid) => { const t = tid && D.trainee(tid); return t ? (t.us || []).map(String) : []; };
   function staminaEntry(p, c, tid = deckTrainee("cm")) {
-    const setup = linkedStamina(p, c), input = staminaInput(p, c, tid, setup), opts = staminaOpts(c), key = JSON.stringify([p.id, input, setup, opts]);
+    const setup = linkedStamina(p, c), input = staminaInput(p, c, tid, setup), opts = Object.assign(staminaOpts(c), setup ? {} : { own: ownSkills(tid) }), key = JSON.stringify([p.id, input, setup, opts]);
     if (staminaCache.has(key)) return staminaCache.get(key);
     const entry = { key };
     staminaCache.set(key, entry);
@@ -3263,7 +3266,7 @@
       const reason = RS.supported(p, setup ? null : { ...simVariant(p), inBrowser: !!engine.sim }, catalog);
       if (reason) throw new Error(reason);
       const worker = RS.runner(engine.sim);
-      try { return await RS.staminaTarget(p, input, catalog, worker.run, setup, opts); }
+      try { return await RS.staminaTarget(p, input, catalog, worker.run, setup, Object.assign({}, opts, { skills: (opts.own || []).filter((id) => catalog.skills[id] && catalog.meta[id]) })); }
       finally { worker.close(); }
     })().catch(error => ({ unavailable: error.message || "Stamina simulation failed." })).then(result => (entry.result = result));
     return entry;
@@ -3610,30 +3613,57 @@
     const p = presetById(c.preset);
     return p && p.kind === "loh" ? "mean" : "p85";
   }
-  // Gold heals your cards can hint, strongest first (recovery effect, rarity 2), and the stamina
-  // she needs with each equipped (the stamina check, cached).
+  // Heals she may get, and the stamina she needs with each equipped (the stamina check, with her
+  // unique, cached): the 3 strongest gold and 2 strongest white heals your cards can hint (their
+  // chance: the deck's offers, in the search), her own innate and awakening heals (she can buy
+  // them: chance 1), and heals her family's white sparks hint (each spark's chance to fire, by
+  // that member's affinity). At most 6. Returns { needs: { id: stamina }, extra: { id: chance } }.
   const healNeedCache = new Map();
   async function deckHealNeeds(p, c, tid, pool, bp, j) {
     const RS = window.UmaRaceSkills, eng = RS.engine(p, SV.meta.sims), catalog = await RS.load(eng.catalog);
-    const hp = (id) => { const sk = catalog.skills[id]; return sk && sk.rarity === 2 ? Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9).map((e) => e.modifier))) : 0; };
-    const offered = new Set(pool.concat(bp || []).flatMap((x) => { const cd = D.card(x.id); return cd ? (cd.hs || []).concat(cd.es || []).map(String) : []; }));
-    const heals = [...offered].filter((id) => hp(id) > 0).sort((a, b) => hp(b) - hp(a)).slice(0, 3);
-    if (!heals.length) return null;
-    const setup = linkedStamina(p, c), input = staminaInput(p, c, tid, setup), out = {};
+    const hp = (id) => { const sk = catalog.skills[id]; return sk ? Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9 && (e.target == null || e.target === 1)).map((e) => e.modifier))) : 0; };
+    const rar = (id) => (catalog.skills[id] || {}).rarity;
+    const setup = linkedStamina(p, c);
     if (setup) return null; // a linked Umalator setup brings its own skills
+    const offered = new Set(pool.concat(bp || []).flatMap((x) => { const cd = D.card(x.id); return cd ? (cd.hs || []).concat(cd.es || []).map(String) : []; }));
+    const byHp = (a, b) => hp(b) - hp(a);
+    const fromCards = [...offered].filter((id) => hp(id) > 0 && rar(id) === 2).sort(byHp).slice(0, 3)
+      .concat([...offered].filter((id) => hp(id) > 0 && rar(id) === 1).sort(byHp).slice(0, 2));
+    const extra = {}, add = (id, pr) => { id = String(id); if (hp(id) > 0) extra[id] = 1 - (1 - (extra[id] || 0)) * (1 - pr); };
+    const t = tid && D.trainee(tid);
+    if (t) (t.is || []).concat(t.as || []).forEach((id) => add(id, 1));
+    const fam = deckFamilyHeals(tid);
+    Object.entries(fam).forEach(([id, pr]) => add(id, pr));
+    const heals = [...new Set(fromCards.concat(Object.keys(extra).sort(byHp)))].slice(0, 6);
+    if (!heals.length) return null;
+    const input = staminaInput(p, c, tid, setup), own = ownSkills(tid).filter((id) => catalog.skills[id] && catalog.meta[id]), needs = {};
     for (let i = 0; i < heals.length; i++) {
-      const id = heals[i], key = JSON.stringify([p.id, input, staminaOpts(c), id]);
-      if (j.optRun) { j.optRun.text = `Stamina with a gold heal ${i + 1} of ${heals.length}`; const t = deckElement("cm", "#cmProgText"); if (t) t.textContent = j.optRun.text; }
+      const id = heals[i], key = JSON.stringify([p.id, input, staminaOpts(c), own, id]);
+      if (j.optRun) { j.optRun.text = `Stamina with a heal ${i + 1} of ${heals.length}`; const el = deckElement("cm", "#cmProgText"); if (el) el.textContent = j.optRun.text; }
       if (!healNeedCache.has(key)) {
         const worker = RS.runner(eng.sim);
-        try { healNeedCache.set(key, await RS.staminaTarget(p, input, catalog, worker.run, null, Object.assign({}, staminaOpts(c), { skills: [id] }))); }
+        try { healNeedCache.set(key, await RS.staminaTarget(p, input, catalog, worker.run, null, Object.assign({}, staminaOpts(c), { skills: own.concat([id]) }))); }
         catch (e) { healNeedCache.set(key, null); }
         finally { worker.close(); }
       }
       const r = healNeedCache.get(key), need = r && staminaTrainingTarget(r);
-      if (need > 0) out[id] = need;
+      if (need > 0) needs[id] = need;
     }
-    return Object.keys(out).length ? out : null;
+    Object.keys(extra).forEach((id) => { if (!needs[id]) delete extra[id]; });
+    return Object.keys(needs).length ? { needs, extra } : null;
+  }
+  // Heals her family's white sparks hint (Parents' family for this ace): { id: chance it fires }.
+  function deckFamilyHeals(tid) {
+    const F = window.UmaFamily, A = window.UmaAffinity, pp = parents(), f = pp && pp.st && pp.st().family, out = {};
+    if (!F || !A || !f || !f.ace || !tid || +f.ace.tid !== +tid) return out;
+    const L = { trainee: f.ace.cid }, wins = {};
+    F.SLOTS.forEach((k) => { L[k] = f[k] && f[k].cid; if (f[k] && f[k].cid) wins[k] = f[k].wins || []; });
+    const own = A.individual(L, wins);
+    F.SLOTS.forEach((k) => (f[k] && f[k].cid ? f[k].white || [] : []).forEach(([id, stars]) => {
+      const pr = F.twice(F.WHITE, stars, own[k] || 0, F.slotScale(k));
+      out[id] = 1 - (1 - (out[id] || 0)) * (1 - pr);
+    }));
+    return out;
   }
   // The finalists' per-career purchases: the Skill optimizer's spec scoring (reliability,
   // early/mid and current-speed bonuses, acceleration decay, Groundwork; mean + k x spread where
@@ -4487,7 +4517,7 @@
       ${r.sweepNote ? `<p class="mini warn">${r.sweepNote}</p>` : ""}
       ${r.link ? `<p class="mini${r.link.lock ? "" : " warn"}">${r.link.lock ? `<b>${esc(r.link.name)}</b> is in${r.link.borrow ? " as the borrowed card" : ""}: uma.guide calls the scenario's link card mandatory for Independent Training.` : r.link.blocked ? `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but your deck makeup allows no Friend card.` : `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but you don't own her: mark her owned, or allow a borrowed card.`}</p>` : ""}
       ${r.goal === "race" ? `<p class="mini">Build-specific purchases: <button type="button" class="linkish" id="cmRaceShow">${deckJob("cm").raceRunning ? "comparing…" : "see the skill-set comparison above"}</button></p>` + mustResultHTML(r, c) : ""}
-      ${r.fit && r.fit.careerScore ? `<p class="mini">Decks scored by her <b>${r.fit.careerScore === "p85" ? "85th-percentile career (best runs: you train several and race your best)" : "average career"}</b>${r.fit.pivoted && r.fit.pivoted.length ? `; the borrow moved: ${r.fit.pivoted.map((x) => `borrow ${esc(D.card(x.to).n)}, use your ${esc(D.card(x.own).n)}`).join("; ")}` : ""}. The finalists' rechecked careers buy their skills by the Skill optimizer's spec scoring.${r.fit.after && r.fit.after.heal ? ` <b>Stamina need lowered:</b> this deck offers ${skillNameHTML(r.fit.after.heal.id)} in ${Math.round(r.fit.after.heal.p * 100)}% of careers, so its stamina need counts about ${Math.round(r.fit.after.heal.cut)} lower (${Math.round(r.fit.after.heal.need)} instead of ${Math.round(r.fit.after.heal.need + r.fit.after.heal.cut)}).` : ""}</p>` : ""}
+      ${r.fit && r.fit.careerScore ? `<p class="mini">Decks scored by her <b>${r.fit.careerScore === "p85" ? "85th-percentile career (best runs: you train several and race your best)" : "average career"}</b>${r.fit.pivoted && r.fit.pivoted.length ? `; the borrow moved: ${r.fit.pivoted.map((x) => `borrow ${esc(D.card(x.to).n)}, use your ${esc(D.card(x.own).n)}`).join("; ")}` : ""}. The finalists' rechecked careers buy their skills by the Skill optimizer's spec scoring.${r.fit.after && r.fit.after.heal ? ` <b>Stamina need lowered:</b> ${r.fit.after.heal.own ? `she can buy ${skillNameHTML(r.fit.after.heal.id)} (her own skill)` : `she gets ${skillNameHTML(r.fit.after.heal.id)} in about ${Math.round(r.fit.after.heal.p * 100)}% of careers (the deck's hints, her family's sparks)`}, so its stamina need counts about ${Math.round(r.fit.after.heal.cut)} lower (${Math.round(r.fit.after.heal.need)} instead of ${Math.round(r.fit.after.heal.need + r.fit.after.heal.cut)}).` : ""}</p>` : ""}
       ${predictedHTML(r, host)}
       ${supportEventsHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
@@ -5898,7 +5928,7 @@
       let gate = null, learnedAll = learned, availableAll = available, spLeft = +b.sp;
       if (!unsupported) {
         const goal = (+b.spurtGoal || 95) / 100, seed = 909091, base = await compare(learned, learned, 96, seed);
-        const hpOf = (id) => { const sk = catalog.skills[id]; return sk ? Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9).map((e) => e.modifier))) / 10000 : 0; };
+        const hpOf = (id) => { const sk = catalog.skills[id]; return sk ? Math.max(0, ...(sk.alternatives || []).flatMap((a) => (a.effects || []).filter((e) => e.type === 9 && (e.target == null || e.target === 1)).map((e) => e.modifier))) / 10000 : 0; };
         const chainCost = (id) => (window.UmaSkillBudget.create().chain(id) || [id]).filter((x) => !learned.includes(x)).reduce((n, x) => n + (SO.price(x, hints[x] || 0, b.fast) || 0), 0);
         gate = { goal, before: base.fullSpurt, after: base.fullSpurt, locked: [], tried: [], cost: 0, maxHP: SO.maxHP(+b.stats.stamina, b.style, p.course.distance), chance: SO.activation(+b.stats.wisdom) };
         if (base.fullSpurt < goal) {
