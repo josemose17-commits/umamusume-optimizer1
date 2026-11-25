@@ -430,24 +430,70 @@
       });
       return { comp, locked };
     }
+    // Scenario Pal/Group cards (SSR preferred over R): when you own one, use yours instead of
+    // borrowing it.
+    const SCENARIO_PAL_GROUP = {
+      unity: [30036, 10060],
+      grandlive: [30052, 10083],
+      grandmasters: [30137],
+      larc: [30160, 10094],
+      uaf: [30188, 10104],
+      cooking: [30207, 10109],
+      legends: [30241],
+      island: [30257, 10128],
+      onsen: [30276, 10138],
+      dreams: [30290, 10141],
+      ramen: [30305],
+      festival: [30323, 10149],
+    };
+    function ownScenarioCard(pair, all) {
+      if (pair.opts.useOwnScenarioCard === false) return null;
+      const ids = pair.era && pair.era.coach && SCENARIO_PAL_GROUP[pair.era.coach];
+      if (!ids) return null;
+      for (let i = 0; i < ids.length; i++) {
+        const hit = all.find((x) => x.id === ids[i]);
+        if (hit) return hit;
+      }
+      return null;
+    }
+    function withOwnLocked(locked, ownCard, comp) {
+      const next = (locked || []).slice();
+      if (!ownCard) return next;
+      const cc = card(ownCard.id), ty = cc && cc.ty;
+      if (!ty) return next;
+      if (next.some((id) => { const lc = card(id); return lc && lc.cid === cc.cid; })) return next;
+      const tyCounts = {};
+      next.forEach((id) => { const lc = card(id); if (lc) tyCounts[lc.ty] = (tyCounts[lc.ty] || 0) + 1; });
+      const tyCount = tyCounts[ty] || 0;
+      const cap = comp && comp[ty] != null ? comp[ty] : null;
+      let claimed = next.length;
+      if (comp) Object.keys(comp).forEach((t) => { claimed += Math.max(0, (comp[t] || 0) - (tyCounts[t] || 0)); });
+      if (cap == null ? (tyCount < 1 && claimed < 6) : tyCount < cap) next.push(ownCard.id);
+      return next;
+    }
+
     // The deck for a pair: in each of its scenario guide's makeups (the best total kept), else in
     // CM & decks' makeup. The scenario's card joins the shortlists so it can be locked in.
     function deckFor(pair) {
       const all = poolFor(pair), mk = makeupsFor(pair);
-      const pool = shortlist(pair.opts, all), bp = pair.borrowShort.slice();
+      const pool = shortlist(pair.opts, all);
+      const ownCard = ownScenarioCard(pair, all), ownCid = ownCard && card(ownCard.id) ? card(ownCard.id).cid : null;
+      if (ownCard && !pool.some((x) => x.id === ownCard.id)) pool.push(ownCard);
+      const bp = ownCid ? pair.borrowShort.filter((x) => { const xc = card(x.id); return !xc || xc.cid !== ownCid; }) : pair.borrowShort.slice();
       if (mk) {
         const named = new Set([mk.required].concat(mk.prefer).filter(Boolean).map(Number));
         named.forEach((id) => {
           const own = all.find((x) => x.id === id);
           if (own && !pool.some((x) => x.id === id)) pool.push(own);
-          if (!own && !bp.some((x) => x.id === id)) { const b = borrowFor(pair).find((x) => x.id === id); if (b) bp.push(b); }
+          if (!own && !(ownCid && card(id) && card(id).cid === ownCid) && !bp.some((x) => x.id === id)) { const b = borrowFor(pair).find((x) => x.id === id); if (b) bp.push(b); }
         });
         let best = null;
         // Every makeup the guide lists for this distance: a new card can move the deck to another.
         pair.makeups = mk.list.map((m) => ({ m, comp: asComp(m, pool, bp).comp }));
         mk.list.forEach((m) => {
           const { comp, locked } = asComp(m, pool, bp);
-          const opts = Object.assign({}, pair.opts, { comp, locked: (pair.opts.locked || []).concat(locked) });
+          const mergedLocked = withOwnLocked((pair.opts.locked || []).concat(locked), ownCard, comp);
+          const opts = Object.assign({}, pair.opts, { comp, locked: mergedLocked });
           try {
             const r = T.buildDeck(opts, pool, bp), total = r.cards.reduce((a, c) => a + (c.score || 0), 0);
             if (!best || total > best.total) best = { r, opts, total, m };
@@ -457,6 +503,8 @@
       }
       pair.makeup = null;
       pair.makeups = null;
+      const fallbackLocked = withOwnLocked(pair.opts.locked, ownCard, pair.opts.comp);
+      if (fallbackLocked.length !== (pair.opts.locked || []).length) pair.opts = Object.assign({}, pair.opts, { locked: fallbackLocked });
       return T.buildDeck(pair.opts, pool, bp);
     }
     function buildPair(pair) {

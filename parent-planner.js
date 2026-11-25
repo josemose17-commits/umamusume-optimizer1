@@ -170,6 +170,32 @@
       return `<input data-pp-char="${key}" list="ppChars" value="${esc(charName(value))}" placeholder="${esc(placeholder || "Character")}" autocomplete="off">`;
     }
 
+    function parentSparksHTML(p) {
+      const pcm = (ctx.state && ctx.state().pcm) || {};
+      if (pcm.general) return "";
+      const tr = trainee(p.selfTrainee), a = apt(p);
+      if (!tr || !a) return "";
+      const race = ctx.aceRace ? ctx.aceRace() : null;
+      const rel = ctx.relevant ? ctx.relevant() : null;
+      const F = root.UmaFamily;
+      const tops = APT_LABELS.filter((_, i) => a[i] === "A" || a[i] === "S");
+      const targets = F && race && race.preset && race.preset.course ? F.aptTargets(race.preset.course, race.style).map((n) => APT_LABELS[n.i]) : [];
+      const matching = targets.filter((lbl) => tops.includes(lbl));
+      const pinkNote = tops.length
+        ? `lands randomly on one of her A/S aptitudes (${tops.join(", ")}; 1 in ${tops.length})${matching.length ? ` — matches CM target: <b>${matching.join(", ")}</b>` : targets.length ? ` (none match ${targets.join("/")}; rely on Parent 2 or grandparent for those)` : ""}.`
+        : "no A/S aptitudes on this parent.";
+      const mustIds = (ctx.cmMust ? ctx.cmMust() : []).map(String);
+      const topWhites = rel ? Object.keys(rel.targets).sort((aId, bId) => (mustIds.includes(bId) - mustIds.includes(aId)) || rel.targets[bId] - rel.targets[aId]).slice(0, 8) : [];
+      const uId = tr.us && tr.us.length ? "9" + String(tr.us[0]).slice(1) : null;
+      const uRel = uId && rel && rel.targets[uId] ? rel.targets[uId] : null;
+      return `<div class="cmp-aim"><h4>Sparks to aim for on ${esc(tr.n)}${race && race.preset ? ` <span class="mini">· for ${esc(race.preset.name)}</span>` : ""}</h4><ul class="mini">
+        <li><b>Blue:</b> stat rolls randomly (1 in 5) — push stats to <b>600+</b> (55% 2★+) or <b>1100+</b> (80% 2★+, 10% 3★).</li>
+        <li><b>Pink:</b> ${pinkNote}</li>
+        ${uId ? `<li><b>Green (her unique):</b> <b>${esc(ctx.skillName(uId))}</b>${uRel ? ` (${uRel.toFixed(2)} L here — worth raising unique level)` : " (check Her gaps & sparks above for inherited unique value here)"}.</li>` : ""}
+        <li><b>Whites:</b> ${topWhites.length ? `${topWhites.map((id) => `<b>${esc(ctx.skillName(id))}</b>`).join(", ")} — learn (or gold version for 40% vs 20% spark rate) and reach SS (17,500+).` : "pick a CM race in CM & decks to list top white sparks."}</li>
+      </ul></div>`;
+    }
+
     // ① The parent: the uma you're training now, her version and aptitudes.
     function whoHTML(p) {
       const vers = p.self ? versions(p.self) : [];
@@ -178,7 +204,7 @@
           <label class="field"><span>The parent you're training</span>${charInput("self", p.self, "Your trainee")}</label>
           ${vers.length > 1 ? `<label class="field"><span>Version</span><select data-pp="selfTrainee">${vers.map((v) => `<option value="${v.id}"${v.id === +p.selfTrainee ? " selected" : ""}>${esc(v.t)}</option>`).join("")}</select></label>` : ""}
         </div>
-        ${a ? `<div class="pp-apt"><span class="mini">${esc(charName(p.self))}'s aptitudes (change one if a spark raised it):</span> ${[0, 1, 2, 3, 4, 5].map((i) => `<label class="pp-aptf"><span>${APT_LABELS[i]}</span><select data-pp-apt="${i}">${GRADES.map((g) => `<option${a[i] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("")}${p.apt ? ' <button type="button" class="btn ghost small" data-pp-act="aptReset">Use her base aptitudes</button>' : ""}</div>` : ""}`;
+        ${a ? `<div class="pp-apt"><span class="mini">${esc(charName(p.self))}'s aptitudes (change one if a spark raised it):</span> ${[0, 1, 2, 3, 4, 5].map((i) => `<label class="pp-aptf"><span>${APT_LABELS[i]}</span><select data-pp-apt="${i}">${GRADES.map((g) => `<option${a[i] === g ? " selected" : ""}>${g}</option>`).join("")}</select></label>`).join("")}${p.apt ? ' <button type="button" class="btn ghost small" data-pp-act="aptReset">Use her base aptitudes</button>' : ""}</div>` : ""}${parentSparksHTML(p)}`;
     }
 
     // ② Races: the G1s she'll run, where they go, and what they cost in stats and rating.
