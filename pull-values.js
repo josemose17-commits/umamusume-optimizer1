@@ -407,15 +407,13 @@
     // makeups for its distance, else the guide's nearest distance (a guide skips distances its
     // scenario isn't for). null for a scenario without a guide.
     const SD = o.scenarioDecks || null, DISTS = ["Sprint", "Mile", "Medium", "Long"];
-    function makeupsFor(pair, reqAvail) {
+    function makeupsFor(pair) {
       const e = SD && SD.eras && pair.era && SD.eras[String(pair.era.id)];
       if (!e || !e.decks.length) return null;
-      const hasPhases = !!(e.required && e.decks.some((x) => x.phase));
-      const decks = hasPhases ? e.decks.filter((x) => x.phase === (reqAvail ? "post" : "pre")) : e.decks;
       const i = DISTS.indexOf(pair.cup.course.dist);
       for (let k = 0; k < DISTS.length; k++) for (const j of [i - k, i + k]) {
-        const list = decks.filter((x) => x.dist.indexOf(DISTS[j]) !== -1);
-        if (list.length) return { guide: e.guide, required: !hasPhases || reqAvail ? e.required : null, prefer: (e.prefer || {})[pair.cup.course.dist] || [], list };
+        const list = e.decks.filter((x) => x.dist.indexOf(DISTS[j]) !== -1);
+        if (list.length) return { guide: e.guide, required: e.required, prefer: (e.prefer || {})[pair.cup.course.dist] || [], list };
       }
       return null;
     }
@@ -435,18 +433,14 @@
     // The deck for a pair: in each of its scenario guide's makeups (the best total kept), else in
     // CM & decks' makeup. The scenario's card joins the shortlists so it can be locked in.
     function deckFor(pair) {
-      const all = poolFor(pair), borrowAll = borrowFor(pair);
-      const e = SD && SD.eras && pair.era && SD.eras[String(pair.era.id)];
-      const reqId = e && e.required ? +e.required : null;
-      const reqAvail = !reqId || all.some((x) => x.id === reqId) || borrowAll.some((x) => x.id === reqId);
-      const mk = makeupsFor(pair, reqAvail);
+      const all = poolFor(pair), mk = makeupsFor(pair);
       const pool = shortlist(pair.opts, all), bp = pair.borrowShort.slice();
       if (mk) {
         const named = new Set([mk.required].concat(mk.prefer).filter(Boolean).map(Number));
         named.forEach((id) => {
           const own = all.find((x) => x.id === id);
           if (own && !pool.some((x) => x.id === id)) pool.push(own);
-          if (!own && !bp.some((x) => x.id === id)) { const b = borrowAll.find((x) => x.id === id); if (b) bp.push(b); }
+          if (!own && !bp.some((x) => x.id === id)) { const b = borrowFor(pair).find((x) => x.id === id); if (b) bp.push(b); }
         });
         let best = null;
         // Every makeup the guide lists for this distance: a new card can move the deck to another.
