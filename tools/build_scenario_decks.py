@@ -31,9 +31,8 @@ PREFER = {9: {"Medium": [30226], "Long": [30226]}}  # Mecha: Air Shakur (stamina
 # for every distance. "Pal" is Global's name for a Friend card: any Friend card, no named one.
 ALL = ["Sprint", "Mile", "Medium", "Long"]
 
-# Grand Masters (Era 5) has both post-Guides (Ancestors & Guides, 30137) and pre-Guides
-# (before 30137 releases on Global: Group/Pal substitutes and 6-stat-card decks).
-GM_WITH_SLOT = [
+# Grand Masters (Era 5) guide deck comps (every comp includes Ancestors & Guides, 30137).
+GM_COMPS = [
     {"speed": 2, "stamina": 1, "wit": 2},
     {"speed": 2, "power": 1, "wit": 2},
     {"speed": 2, "guts": 1, "wit": 2},
@@ -48,39 +47,12 @@ GM_WITH_SLOT = [
     {"speed": 1, "stamina": 1, "guts": 2, "wit": 1},
     {"speed": 1, "power": 1, "guts": 2, "wit": 1},
     {"speed": 4, "wit": 1},
-]
-GM_POST_ONLY = [
     {"speed": 1, "stamina": 1, "power": 1, "wit": 2},
-]
-GM_PRE_STAT_ONLY = [
-    {"speed": 3, "stamina": 1, "wit": 2},
-    {"speed": 3, "power": 1, "wit": 2},
-    {"speed": 3, "guts": 1, "wit": 2},
-    {"speed": 2, "stamina": 1, "wit": 3},
-    {"speed": 2, "power": 1, "wit": 3},
-    {"speed": 2, "guts": 1, "wit": 3},
-    {"speed": 2, "guts": 2, "wit": 2},
-    {"speed": 2, "stamina": 2, "wit": 2},
-    {"speed": 2, "stamina": 1, "power": 1, "wit": 2},
-    {"speed": 2, "power": 1, "guts": 1, "wit": 2},
-    {"speed": 3, "wit": 3},
-    {"speed": 1, "guts": 2, "wit": 3},
-    {"speed": 1, "guts": 3, "wit": 2},
-    {"speed": 4, "wit": 2},
 ]
 
 
 def grand_masters_decks():
-    decks = []
-    for comp in GM_WITH_SLOT + GM_POST_ONLY:
-        decks.append({"dist": ALL, "comp": dict(comp, **{"card:30137": 1}), "note": "", "phase": "post"})
-    for comp in GM_WITH_SLOT:
-        decks.append({"dist": ALL, "comp": dict(comp, group=1), "note": "pre-Guides (Group)", "phase": "pre"})
-    for comp in GM_WITH_SLOT:
-        decks.append({"dist": ALL, "comp": dict(comp, friend=1), "note": "pre-Guides (Pal)", "phase": "pre"})
-    for comp in GM_PRE_STAT_ONLY:
-        decks.append({"dist": ALL, "comp": dict(comp), "note": "pre-Guides (6 stat cards)", "phase": "pre"})
-    return decks
+    return [{"dist": ALL, "comp": dict(comp, **{"card:30137": 1}), "note": ""} for comp in GM_COMPS]
 
 
 MANUAL = {
