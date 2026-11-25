@@ -3,6 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const D = require("../deck.js");
+const T = require("../tiers.js");
 const O = require("../optimizer.js");
 const { SCENARIOS } = require("../scenarios.js");
 
@@ -103,9 +104,9 @@ test("owned scenario Pal/Group card locked from pool uses yours and leaves borro
   const S = require("../data/scenario-decks.js");
   const lightHello = 30052;
   const lhCard = D.card(lightHello);
-  const owned = ssr.filter((c) => D.card(c.id).cid !== lhCard.cid).slice(0, 35).concat([{ id: lightHello, lb: 0 }]);
-  const borrowPool = ssr.filter((c) => D.card(c.id).cid !== lhCard.cid).slice(0, 35).map((c) => ({ id: c.id, lb: 4 }));
-  const picked = T.pickDeck({ scenario: "GL", build: "medium", borrow: true, comp: { speed: 2, stamina: 1, wit: 2, friend: 1 }, locked: [lightHello] }, owned, borrowPool);
+  const owned = ssr.filter((c) => D.card(c.id).cid !== lhCard.cid).concat([{ id: lightHello, lb: 0 }]);
+  const borrowPool = ssr.filter((c) => D.card(c.id).cid !== lhCard.cid).map((c) => ({ id: c.id, lb: 4 }));
+  const picked = T.buildDeck({ scenario: "GL", build: "medium", borrow: true, comp: { speed: 2, stamina: 1, wit: 2, friend: 1 }, locked: [lightHello] }, owned, borrowPool);
   const lhEntry = picked.cards.find((c) => c.id === lightHello);
   assert.ok(lhEntry, "owned scenario Pal card is in the deck");
   assert.strictEqual(lhEntry.lb, 0, "uses owned LB instead of borrowing LB4");
@@ -115,8 +116,8 @@ test("owned scenario Pal/Group card locked from pool uses yours and leaves borro
   const gm = S.eras["5"];
   const gmScenario = SCENARIOS.find((s) => s.id === "grandmasters");
   const godCard = D.card(30137);
-  const gmOwned = ssr.filter((c) => D.card(c.id).cid !== godCard.cid).slice(0, 35).concat([{ id: 30137, lb: 1 }]);
-  const gmBorrow = ssr.filter((c) => D.card(c.id).cid !== godCard.cid).slice(0, 35).map((c) => ({ id: c.id, lb: 4 }));
+  const gmOwned = ssr.filter((c) => D.card(c.id).cid !== godCard.cid).concat([{ id: 30137, lb: 1 }]);
+  const gmBorrow = ssr.filter((c) => D.card(c.id).cid !== godCard.cid).map((c) => ({ id: c.id, lb: 4 }));
   const gmMakeups = gm.decks.slice(0, 3).map((d) => {
     const comp = {};
     Object.entries(d.comp).forEach(([k, n]) => { const t = k.indexOf("card:") === 0 ? D.card(+k.slice(5)).ty : k; comp[t] = (comp[t] || 0) + n; });
