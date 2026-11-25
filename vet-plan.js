@@ -65,7 +65,36 @@
     return out;
   }
 
-  const api = { exitPoints, cleanout, grandCheck };
+  // A veteran as a parent for one ace: Keep, Usable or Retrain, with why. o: { blue: stat indices
+  // in order of the ace's gaps (first = biggest), pinks: aptitude indices the race needs that she
+  // isn't at yet (empty: none needed), whites: target skill families (most valuable first),
+  // family(id) -> skill family }.
+  //   Keep: 3★ blue in her biggest gap, 2★+ pink in a needed aptitude (if any), 2+ target whites.
+  //   Usable: 2★+ blue in one of her gap stats, 1★+ pink in a needed aptitude (if any).
+  //   Retrain: blue in the wrong stat (or none), or no pink for a needed aptitude.
+  function grade(v, o) {
+    const self = (v && v.self) || {}, b = self.blue || [0, 0], p = self.pink || [0, 0];
+    const top = (o.blue || [])[0], gapStats = new Set(o.blue || []), need = new Set(o.pinks || []);
+    const tw = new Set((o.whites || []).slice(0, 4).map(String));
+    const whites = (self.white || []).filter(([id, st]) => st >= 1 && tw.has(String(o.family ? o.family(id) : id)));
+    const pinkOk = (min) => !need.size || (need.has(p[0]) && p[1] >= min);
+    const why = [];
+    if (!b[1]) why.push("no blue spark");
+    else if (!gapStats.has(b[0])) why.push("blue in a stat she isn't short in");
+    else if (b[1] < 2) why.push("only 1★ blue");
+    if (need.size && !(need.has(p[0]) && p[1] >= 1)) why.push("no pink for an aptitude she needs");
+    let mark = "retrain";
+    if (b[1] === 3 && b[0] === top && pinkOk(2) && whites.length >= 2) mark = "keep";
+    else if (b[1] >= 2 && gapStats.has(b[0]) && pinkOk(1)) mark = "usable";
+    if (mark !== "retrain") why.length = 0;
+    if (mark === "usable") {
+      if (b[1] < 3 || b[0] !== top) why.push(b[0] !== top ? "blue in her second gap, not the biggest" : "2★ blue, not 3★");
+      if (need.size && p[1] < 2) why.push("1★ pink");
+      if (whites.length < 2) why.push(whites.length ? "only 1 target white" : "no target whites");
+    }
+    return { mark, why, whites: whites.map(([id, st]) => [String(id), st]) };
+  }
+  const api = { exitPoints, cleanout, grandCheck, grade };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaVetPlan = api;
 })(typeof window !== "undefined" ? window : globalThis);
