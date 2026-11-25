@@ -3,6 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const D = require("../deck.js");
+const T = require("../tiers.js");
 const O = require("../optimizer.js");
 const { SCENARIOS } = require("../scenarios.js");
 
@@ -97,5 +98,37 @@ test("Grand Masters guide makeups: 15 comps, each 6 cards with Ancestors & Guide
     assert.strictEqual(d.comp["card:30137"], 1);
     assert.deepStrictEqual(d.dist, ["Sprint", "Mile", "Medium", "Long"]);
   });
+});
+
+test("owned scenario Pal/Group card locked from pool uses yours and leaves borrow free", () => {
+  const S = require("../data/scenario-decks.js");
+  const lightHello = 30052;
+  const lhCard = D.card(lightHello);
+  const owned = ssr.filter((c) => D.card(c.id).cid !== lhCard.cid).concat([{ id: lightHello, lb: 0 }]);
+  const borrowPool = ssr.filter((c) => D.card(c.id).cid !== lhCard.cid).map((c) => ({ id: c.id, lb: 4 }));
+  const picked = T.buildDeck({ scenario: "GL", build: "medium", borrow: true, comp: { speed: 2, stamina: 1, wit: 2, friend: 1 }, locked: [lightHello] }, owned, borrowPool);
+  const lhEntry = picked.cards.find((c) => c.id === lightHello);
+  assert.ok(lhEntry, "owned scenario Pal card is in the deck");
+  assert.strictEqual(lhEntry.lb, 0, "uses owned LB instead of borrowing LB4");
+  assert.strictEqual(!!lhEntry.borrowed, false, "owned scenario card is not borrowed");
+  assert.strictEqual(picked.cards.filter((c) => c.borrowed).length, 1, "borrow slot goes to another card");
+
+  const gm = S.eras["5"];
+  const gmScenario = SCENARIOS.find((s) => s.id === "grandmasters");
+  const godCard = D.card(30137);
+  const gmOwned = ssr.filter((c) => D.card(c.id).cid !== godCard.cid).concat([{ id: 30137, lb: 1 }]);
+  const gmBorrow = ssr.filter((c) => D.card(c.id).cid !== godCard.cid).map((c) => ({ id: c.id, lb: 4 }));
+  const gmMakeups = gm.decks.slice(0, 3).map((d) => {
+    const comp = {};
+    Object.entries(d.comp).forEach(([k, n]) => { const t = k.indexOf("card:") === 0 ? D.card(+k.slice(5)).ty : k; comp[t] = (comp[t] || 0) + n; });
+    return { comp, locked: [30137] };
+  });
+  const run = O.makeupSweep({ scenario: "GM", borrow: true }, { scenario: gmScenario, build: "medium", target: { speed: 1500, stamina: 800, power: 1000, guts: 600, wit: 1100 } }, gmOwned, gmBorrow, { makeups: gmMakeups, finalists: 1, meta: { mode: "guide", guide: gm.guide } });
+  while (run.next());
+  const out = run.result();
+  const gmCard = out.fit.cards.find((c) => c.id === 30137);
+  assert.ok(gmCard, "owned Grand Masters guide card is in the deck");
+  assert.strictEqual(gmCard.lb, 1);
+  assert.strictEqual(!!gmCard.borrowed, false);
 });
 

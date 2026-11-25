@@ -2378,7 +2378,7 @@
     // Parents are trained in Independent Training here, so its race count always applies.
     if (host === "parents") { c.independent = true; c.reachSS = state.cmp.parentRank; }
     if (host === "cm" && PARENT_GOALS.indexOf(c.goal) !== -1) c.goal = "race";
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, makeupMode: "guide", careerScore: "auto", skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, useOwnScenarioCard: true, makeupMode: "guide", careerScore: "auto", skillW: "1", runs: "10", locked: [], must: [], targets: {}, rankGoal: "", independent: false, itManual: "0.5", sq: "", sfilter: "all", globalSkills: true, reachSS: "SS", helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     if (c.makeupMode == null && c.compareMakeups === false) c.makeupMode = "off";
     delete c.compareMakeups;
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
@@ -2912,6 +2912,46 @@
     save();
   }
 
+  // Each scenario's Pal/Group card(s) (SSR preferred over R): when you own one, use yours
+  // instead of borrowing it.
+  const SCENARIO_PAL_GROUP = {
+    unity: [30036, 10060],
+    grandlive: [30052, 10083],
+    grandmasters: [30137],
+    larc: [30160, 10094],
+    uaf: [30188, 10104],
+    cooking: [30207, 10109],
+    legends: [30241],
+    island: [30257, 10128],
+    onsen: [30276, 10138],
+    dreams: [30290, 10141],
+    ramen: [30305],
+    festival: [30323, 10149],
+  };
+  function ownScenarioCard(scenId, pool, c) {
+    if (c && c.useOwnScenarioCard === false) return null;
+    const ids = SCENARIO_PAL_GROUP[scenId];
+    if (!ids || !ids.length) return null;
+    return ids.find((id) => owned[id] != null && pool.some((p) => p.id === id)) || null;
+  }
+  function applyOwnScenarioCard(scenId, c, pool, bp, locked, comp) {
+    const ownId = ownScenarioCard(scenId, pool, c);
+    if (!ownId) return { bp, locked, ownCard: null };
+    const card = D.card(ownId), ty = card && card.ty;
+    const nextBp = (bp || []).filter((x) => { const xc = D.card(x.id); return !xc || xc.cid !== card.cid; });
+    const nextLocked = locked.slice();
+    const hasSameChar = nextLocked.some((id) => { const lc = D.card(id); return lc && lc.cid === card.cid; });
+    const tyCounts = {};
+    nextLocked.forEach((id) => { const lc = D.card(id); if (lc) tyCounts[lc.ty] = (tyCounts[lc.ty] || 0) + 1; });
+    const tyCount = tyCounts[ty] || 0;
+    const compCap = comp && comp[ty] != null ? comp[ty] : null;
+    let claimed = nextLocked.length;
+    if (comp) Object.keys(comp).forEach((t) => { claimed += Math.max(0, (comp[t] || 0) - (tyCounts[t] || 0)); });
+    const allows = compCap == null ? (tyCount < 1 && claimed < 6) : tyCount < compCap;
+    if (ty && !hasSameChar && allows && nextLocked.indexOf(ownId) === -1) nextLocked.push(ownId);
+    return { bp: nextBp, locked: nextLocked, ownCard: ownId };
+  }
+
   // Cards you won't use (D.isHidden) never enter a deck search, upgrade or borrow.
   const cardAvailable = (card, c) => !D.isHidden(card.id) && CARD_RELEASE.available(card, presetById(c.preset));
   const cardPools = c => CARD_RELEASE.pools(D.DATA.supports.filter((x) => !D.isHidden(x.id)), owned, c, presetById(c.preset), (id, lb) => !!T.entry(id, lb));
@@ -2925,7 +2965,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.makeupMode, careerScoreOf(c), JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.useOwnScenarioCard !== false, c.makeupMode, careerScoreOf(c), JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -2960,7 +3000,7 @@
         } catch (err) { est = null; }
       }
       if ((hsc.id === "grandlive" || est && est.scoring === "race") && c.goal === "race" && est) r.skills = est.skills;
-      const result = Object.assign(r, { key, sweepNote, inherit: host === "cm" ? deckInheritance(host) : null, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      const result = Object.assign(r, { key, sweepNote, inherit: host === "cm" ? deckInheritance(host) : null, itRaces: c.itRaces, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills, skillsBy: skillsBy(p) } : null, general: !!c.general, goal: c.goal, preset: p.id, style: c.style, stamina, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, ownScenarioCard: ownScenCard, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       j.optRun = null;
       j.optResult = result;
       if (deckTrainee(host) === tid) saved.cards = r.cards.map(x => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed, locked: c.locked.includes(x.id) }));
@@ -2976,7 +3016,7 @@
       if (host === "cm" && c.goal === "race") runRaceSkills(true);
     };
     const fail = (err) => { flash(String(err.message || err)); j.optRun = null; renderCM(); };
-    let link = null;
+    let link = null, ownScenCard = null;
     setTimeout(async () => {
       try {
         if (host === "cm" && c.goal === "race") {
@@ -2985,7 +3025,9 @@
           key = optKey(host);
         }
         let bp = c.borrow ? borrowPool(c) : [];
-        const locked = c.locked.slice();
+        let locked = c.locked.slice();
+        const ownApplied = applyOwnScenarioCard(hsc.id, c, pool, bp, locked, c.comp);
+        bp = ownApplied.bp; locked = ownApplied.locked; ownScenCard = ownApplied.ownCard;
         link = itLink(c, pool, bp);
         if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
         if (link && link.borrow) bp = [link.borrow];
@@ -3024,13 +3066,16 @@
             sweep = false;
           } else {
             // If the scenario's own card (e.g. Ancestors & Guides) releases with the scenario
-            // despite a slightly later forecast date, allow it in the search pool/borrow.
+            // despite a slightly later forecast date, allow it in the search pool/borrow unless
+            // the player already owns it and prefers their own copy.
             const reqId = g.e.required ? +g.e.required : null;
+            const reqCard = reqId ? D.card(reqId) : null;
+            const ownSameChar = !!(ownScenCard && reqCard && D.card(ownScenCard) && D.card(ownScenCard).cid === reqCard.cid);
             if (reqId && T.entry(reqId, 4)) {
               if (!c.ownedOnly && !pool.some((x) => x.id === reqId)) pool.push({ id: reqId, lb: 4 });
-              if (c.borrow !== false && !bp.some((x) => x.id === reqId)) bp.push({ id: reqId, lb: 4 });
+              if (c.borrow !== false && !ownSameChar && !bp.some((x) => x.id === reqId)) bp.push({ id: reqId, lb: 4 });
             }
-            makeups = list;
+            makeups = list.map((x) => ({ comp: x.comp, locked: applyOwnScenarioCard(hsc.id, c, pool, bp, x.locked, x.comp).locked }));
             finalists = Math.min(list.length, 6);
             meta = { mode: "guide", guide: g.e.guide, dist: g.dist, exact: g.exact };
           }
@@ -3582,6 +3627,7 @@
       <div class="row-wrap">
         <label class="chip-toggle"><input type="checkbox" data-cm="ownedOnly" ${c.ownedOnly ? "checked" : ""}> Only cards I own (${n})</label>
         <label class="chip-toggle"><input type="checkbox" data-cm="borrow" ${c.borrow ? "checked" : ""}> Borrow 1 card from a friend</label>
+        ${c.borrow && SCENARIO_PAL_GROUP[scenFor(host).id] ? `<label class="chip-toggle" title="If you own this scenario's Pal or Group card, always use your copy instead of borrowing a friend's."><input type="checkbox" data-cm="useOwnScenarioCard" ${c.useOwnScenarioCard !== false ? "checked" : ""}> Use my own scenario card</label>` : ""}
         ${host === "cm" ? `<label class="chip-toggle" title="The 50-minute auto mode"><input type="checkbox" data-cm="independent" ${c.independent ? "checked" : ""}> Independent Training</label>` : ""}
         ${host === "cm" && goal === "race" ? `<label class="field" title="Your guide's: every makeup in the scenario guide for her distance gets the full search, and the best wins (under a minute). Every makeup: every split your cards can fill (a minute or two). Off: one search in your Deck makeup."><span>Compare makeups</span><select data-cm="makeupMode">${opt([["guide", "Your scenario guide's"], ["all", "Every makeup"], ["off", "Off: one search"]], c.makeupMode)}</select></label>` : ""}
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
@@ -3811,7 +3857,11 @@
     const out = new Set((s && s.exclude) || []);
     const pool = optPool(c).filter((x) => !out.has(x.id));
     let bp = c.borrow ? borrowPool(c).filter((x) => !out.has(x.id)) : [];
-    const locked = ((s && s.locked) || []).filter((id) => pool.some((x) => x.id === id));
+    let locked = ((s && s.locked) || []).filter((id) => pool.some((x) => x.id === id));
+    if (!(s && s.friend)) {
+      const ownApplied = applyOwnScenarioCard(scenFor(parent ? "parents" : "cm").id, c, pool, bp, locked, c.comp);
+      bp = ownApplied.bp; locked = ownApplied.locked;
+    }
     const link = itLink(c, pool, bp);
     if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
     if (link && link.borrow) bp = [link.borrow];
@@ -4357,7 +4407,7 @@
         return `<div class="opt-card ty-${card.ty}">
         <span class="tydot" aria-hidden="true"></span>
         <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>${cardReleaseHTML(card)}
-          <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""} · <button type="button" class="linkish" data-hide-card="${x.id}" title="Leave this card out of every deck search from now on (My cards lists it)">don't use</button>${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
+          <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""} · <button type="button" class="linkish" data-hide-card="${x.id}" title="Leave this card out of every deck search from now on (My cards lists it)">don't use</button>${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : r.ownScenarioCard === x.id ? " · your scenario card" : ""}</div>
           ${x.it ? `<div class="mini">${itPartsText(x.it)}</div>` : ""}
           ${r.goal === "race" && x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => skillNameHTML(id)).join(", ")}</div>` : ""}
           ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)}${cardReleaseHTML(D.card(x.alt.id))} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? (r.goal === "race" ? ", but no must-have" : ", lower modeled must-have coverage") : ""})</div>` : ""}</div>
