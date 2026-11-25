@@ -41,3 +41,14 @@ test("the finalists' recheck uses sim.specPurchase; the search careers don't", (
   assert.strictEqual(sc.ctxOf(4).specPurchase, null);
   assert.strictEqual(typeof sc.ctxOf(4, 99, true).specPurchase, "function");
 });
+
+test("a heal she can buy herself (chance 1) lowers the need even when the deck doesn't offer it", () => {
+  const deck = T.buildDeck({ scenario: "GL" }, pool, []).cards;
+  const opts = { scenario: "GL", skills: {} };
+  const sim = { scenario: gl, build: "long", target, raceValues: { staminaTarget: 1400 }, healNeeds: { "999001": 1250 }, healExtra: { "999001": 1 } };
+  const r = O.fitScorer(opts, sim).evaluate(deck, O.fitScorer(opts, sim).ctxOf(4));
+  assert.ok(r.heal && r.heal.id === "999001" && r.heal.own, "her own heal");
+  assert.ok(Math.abs(r.heal.cut - 150) < 1e-9);
+  const half = Object.assign({}, sim, { healExtra: { "999001": 0.5 } });
+  assert.strictEqual(O.fitScorer(opts, half).evaluate(deck, O.fitScorer(opts, half).ctxOf(4)).heal, null, "under 60%: not counted");
+});

@@ -32,7 +32,7 @@
     return {
       early: tags.has(301), mid: tags.has(302), late: tags.has(303),
       speed: [...types].some((t) => SPEED.has(t)), current: [...types].some((t) => CURRENT.has(t)),
-      accel, green: types.size > 0 && [...types].every((t) => STAT.has(t)), heal: types.has(9),
+      accel, green: types.size > 0 && [...types].every((t) => STAT.has(t)), heal: fx.some((e) => e.type === 9 && e.target === 1 && e.modifier > 0),
       needStart: need.length ? Math.max(...need) : 0, reliability: reliability(conditions),
     };
   }
