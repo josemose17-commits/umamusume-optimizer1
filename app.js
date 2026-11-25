@@ -3444,12 +3444,21 @@
   // Her gaps are before inheritance: they're what her parents' blue sparks fill (Parents), so
   // with inheritance in the careers, its expected stats come off the prediction here.
   function raceGaps(r, c) {
-    const p = presetById(r.preset), caps = E.capsFor(state, (cupScen(p) || {}).sc || scenario()), mine = cmTargets(c || {}) || {};
+    const p = presetById(r.preset), sc = (cupScen(p) || {}).sc || scenario(), caps = r.inherit && r.inherit.uncap ? deckCaps("cm", sc) : E.capsFor(state, sc), mine = cmTargets(c || {}) || {};
     const bt = p ? raceBuildTarget(p, r.stamina, r.style) : {};
-    const target = E.STATS.map((s) => Math.min(caps[s] != null ? caps[s] : Infinity, r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
+    // A target past the scenario's cap (with her blue sparks' uncaps) can't be reached by anyone:
+    // it's clipped to the cap and flagged.
+    const raw = E.STATS.map((s) => (r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
+    const target = raw.map((t, i) => Math.min(caps[E.STATS[i]] != null ? caps[E.STATS[i]] : Infinity, t));
+    const overCap = raw.map((t, i) => (t > target[i] ? { asked: Math.round(t), cap: target[i] } : null));
     const exp = r.inherit ? inheritExpected(r.inherit.inherit) : null;
     const withInh = r.est.stats.slice(), stats = exp ? withInh.map((v, i) => Math.round(v - exp[i])) : withInh;
-    return { target, stats, withInh: exp ? withInh : null, exp, short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
+    // Her best runs: each stat's 85th percentile over the simulated careers (you train several and
+    // keep the best), next to the average.
+    const finals = (r.est.finals || []).map((f) => f.stats);
+    const pct = (xs, q) => { const a = xs.slice().sort((x, y) => x - y), at = (a.length - 1) * q, lo = Math.floor(at); return Math.round(a[lo] + (a[Math.ceil(at)] - a[lo]) * (at - lo)); };
+    const best = finals.length > 3 ? E.STATS.map((_, i) => pct(finals.map((f) => f[i]), 0.85)) : null;
+    return { target, stats, withInh: exp ? withInh : null, exp, best, overCap, caps: E.STATS.map((s) => caps[s]), short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
   }
   // Inheritance in CM & decks' careers: the family planned in Parents for this ace (its members'
   // blue sparks and own affinity), else the blue sparks typed in the coach (affinity unknown:
@@ -4444,9 +4453,12 @@
       const gapTable = `<div class="predicted">
       <b>Predicted stats and her gaps</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers, ${g.withInh ? `with inheritance from ${esc(r.inherit.source)}` : "before inheritance: plan her family in Parents, or type her blue sparks in the coach, to count it"})</span>
       <div class="table-wrap"><table class="pred cm-gaps"><thead><tr><th></th>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
-        <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
+        <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${g.overCap[i] ? `<div class="mini warn" title="Asked ${g.overCap[i].asked}: past this scenario's cap, so no run reaches it">cap (asked ${g.overCap[i].asked})</div>` : g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
         ${g.withInh ? `<tr><th>Predicted</th>${g.withInh.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr><tr><th>Before inheritance</th>${g.stats.map((v) => `<td class="num">${v}</td>`).join("")}</tr>` : `<tr><th>Predicted</th>${g.stats.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr>`}
+        ${g.best ? `<tr><th title="Each stat's 85th percentile over the simulated careers: what a good run reaches">Best runs (85%)</th>${g.best.map((v) => `<td class="num">${v}</td>`).join("")}</tr>` : ""}
         <tr><th>Short</th>${g.short.map((v, i) => `<td class="num ${v > 0 ? "short" : "over"}">${v > 0 ? "−" + v : "+" + (g.stats[i] - g.target[i])}</td>`).join("")}</tr></tbody></table></div>
+      ${g.overCap.some(Boolean) ? `<p class="mini warn"><b>Past the cap:</b> ${g.overCap.map((o, i) => (o ? `${E.STAT_LABELS[E.STATS[i]]} ${o.asked} (this scenario's cap with her sparks: ${o.cap})` : "")).filter(Boolean).join(" · ")}. No run reaches those; the target is the cap.</p>` : ""}
+      <p class="mini">Caps here: ${E.STATS.map((s, i) => `${E.STAT_LABELS[s]} ${g.caps[i]}`).join(" · ")} (the scenario's base caps plus her blue sparks; training past 1200 gives half). Predicted is the average career; <b>Best runs</b> is what about 1 run in 7 reaches or beats, stat by stat.</p>
       <p class="mini">${short.length ? `<b>Her gaps: ${short.join(" · ")}.</b> Parents turns them into the blue sparks to look for.` : "<b>No gaps:</b> every target is reached."} ${host === "cm" ? `<button type="button" class="linkish" data-goto-tab="parents" data-goto-section="gaps">Fill them in Parents →</button>` : ""}</p>`;
       return gapTable + powerLineHTML(presetById(r.preset), r.style, g.stats[2]) + (rushedLine(g.stats[4], 0, false) ? `<p class="mini">${rushedLine(g.stats[4], 0, false).trim()}</p>` : "") + `<p class="mini">Skill points: about ${r.est.sp}.</p>
       ${fitNoteHTML(r)}
