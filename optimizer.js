@@ -1464,7 +1464,34 @@
     };
   }
 
-  const api = { inheritFrom, INSPIRATION_TURNS, makeupList, makeupKey, makeupSweep, fitScorer, MAKEUP_MAX, SWEEP_FINALISTS, grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, stepL, onCurve, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  // Predictions against your own runs: each veteran's deck simulated in her scenario (o.runs
+  // careers), next to her real final stats, averaged per scenario. o: { scenarios: { id: scenario },
+  // buildOf(v), inheritOf(v), runs }. Returns { [scenario id]: { n, actual[5], predicted[5],
+  // ratio[5] (actual / predicted) } } and the rows.
+  function checkRuns(vets, o) {
+    const rows = [], by = {};
+    (vets || []).forEach((v) => {
+      const sc = o.scenarios[v.scenario];
+      if (!sc || !v.deck || v.deck.length !== 6 || !v.stats || v.stats.some((x) => !(x > 0))) return;
+      const cards = v.deck.map((x) => ({ card: D.card(x.id), lb: x.lb })).filter((x) => x.card);
+      if (cards.length !== 6) return;
+      let s;
+      try { s = simulate(buildCtx({ scenario: sc, build: o.buildOf(v), trainee: v.tid, runs: o.runs || 8, inherit: o.inheritOf ? o.inheritOf(v) : null }), cards); }
+      catch (e) { return; }
+      rows.push({ id: v.id, scenario: v.scenario, actual: v.stats.slice(), predicted: s.stats.slice() });
+    });
+    rows.forEach((r) => {
+      const g = by[r.scenario] || (by[r.scenario] = { n: 0, actual: [0, 0, 0, 0, 0], predicted: [0, 0, 0, 0, 0] });
+      g.n++; for (let i = 0; i < 5; i++) { g.actual[i] += r.actual[i]; g.predicted[i] += r.predicted[i]; }
+    });
+    Object.values(by).forEach((g) => {
+      g.actual = g.actual.map((x) => Math.round(x / g.n)); g.predicted = g.predicted.map((x) => Math.round(x / g.n));
+      g.ratio = g.actual.map((a, i) => (g.predicted[i] > 0 ? a / g.predicted[i] : 1));
+    });
+    return { by, rows };
+  }
+
+  const api = { checkRuns, inheritFrom, INSPIRATION_TURNS, makeupList, makeupKey, makeupSweep, fitScorer, MAKEUP_MAX, SWEEP_FINALISTS, grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, applyFocus, FOCUS_LEAN, statsValue, targetFit, deckFit, raceL, stepL, onCurve, raceValuesFor, STAMINA_MARGIN, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

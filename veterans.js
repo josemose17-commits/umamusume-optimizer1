@@ -88,6 +88,9 @@
           // Her scenario (the app's id) and the races she ran before the finale's three: how
           // many races your parents can run and still reach SS.
           scenario: SCENARIO[v.scenario_id] || null, races: (v.race_result_list || []).filter((r) => r && r.turn <= 72).length,
+          // Her own deck (slot 6 the borrowed card), for checking predictions against her run.
+          deck: (v.support_card_list || []).filter((c) => c && +c.support_card_id && +c.limit_break_count >= 0 && +c.limit_break_count <= 4)
+            .map((c) => ({ id: +c.support_card_id, lb: +c.limit_break_count, borrowed: c.position === FRIEND_SLOT })),
         });
       });
       if (!list.length) throw new Error("No veterans found in that JSON.");
