@@ -73,9 +73,18 @@
       [0, 1, 2, 3].forEach((i) => { if (RANK.indexOf(t.apt[6 + i]) > RANK.indexOf(t.apt[6 + best])) best = i; });
       return STYLES[best][0];
     }
-    // This cup's aces: yours to pick (starting from your Pull planner team for its track).
+    // This cup's aces: yours to pick. A cup you haven't set starts from the team you set for the
+    // latest earlier cup of the same kind (CM or LoH) on the same track, else from your Pull
+    // planner team for its track; from then on each cup's team is its own.
     function aces(c) {
-      if (!c.byCup[c.cup]) c.byCup[c.cup] = ctx.pullTeam(cup(c)).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES);
+      if (!c.byCup[c.cup]) {
+        const p = cup(c), track = ctx.trackOf ? ctx.trackOf(p) : null, at = (q) => (q.global && q.global.start) || "";
+        const prev = track ? P.list.filter((q) => q.id !== p.id && q.kind === p.kind && at(q) && at(q) < at(p) && ctx.trackOf(q) === track && (c.byCup[q.id] || []).length)
+          .sort((x, y) => (at(y) > at(x) ? 1 : -1))[0] : null;
+        c.byCup[c.cup] = prev ? c.byCup[prev.id].map((a) => ({ tid: +a.tid, style: a.style })).filter((a) => ctx.myUmas().has(+a.tid)).slice(0, MAX_ACES)
+          : ctx.pullTeam(p).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES);
+        if (prev) c.teamFrom = Object.assign({}, c.teamFrom, { [c.cup]: prev.id });
+      }
       return c.byCup[c.cup];
     }
     // The ace you're working on.
@@ -429,7 +438,7 @@
         cup: `<select id="cmpCup" aria-label="Champions Meeting or League of Heroes">${cupOpts}</select>`,
         chips: `<div class="row-wrap cmp-chips" aria-label="Your team"><span class="cm-bar-label" title="Up to ${MAX_ACES}. Pick one: the deck, skills and parents are for her.">Team</span>${chips}${list.length < MAX_ACES ? `<button type="button" class="btn ghost small" id="cmpAddAce"${mine.length ? "" : " disabled"}>+ Add an ace</button>` : ""}${team.length ? `<button type="button" class="linkish" id="cmpTeam">Use my Pull planner team</button>` : ""}</div>`,
         editor,
-        extra: `${selected && ctx.staminaSummary ? staminaLine() : ""}
+        extra: `${c.teamFrom && c.teamFrom[c.cup] && P.list.find((q) => q.id === c.teamFrom[c.cup]) ? `<p class="mini">This cup's team started as ${esc(P.list.find((q) => q.id === c.teamFrom[c.cup]).name)}'s (the last cup on this track). Changes here stay with this cup.</p>` : ""}${selected && ctx.staminaSummary ? staminaLine() : ""}
         ${!mine.length ? `<p class="mini">Your team comes from My umas: tick them in the Trainees tab, or import your umaextractor export in <button type="button" class="linkish" data-goto-tab="data">Import &amp; backup</button>.</p>` : ""}`,
       };
     }
@@ -1188,7 +1197,7 @@
         ctx.flash(`${q.name}: your team is ${r.team.map((x) => tName(trainee(x.tid)) + " (" + STYLE_LABEL[x.style] + ")").join(", ")}.`);
         ctx.save(); ctx.rerender(); return true;
       }
-      if (t.closest("#cmpTeam")) { c.byCup[c.cup] = ctx.pullTeam(cup(c)).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES); editAce = null; ctx.save(); ctx.rerender(); return true; }
+      if (t.closest("#cmpTeam")) { if (c.teamFrom) delete c.teamFrom[c.cup]; c.byCup[c.cup] = ctx.pullTeam(cup(c)).filter((m) => ctx.myUmas().has(+m.tid)).slice(0, MAX_ACES); editAce = null; ctx.save(); ctx.rerender(); return true; }
       if (t.closest("#cmpAddAce")) { editAce = aces(c).length; ctx.rerender(); return true; }
       if (t.closest("#cmpAceDone")) { editAce = null; ctx.rerender(); return true; }
       let el;
