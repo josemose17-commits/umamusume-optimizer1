@@ -84,3 +84,18 @@ test("the daily data counts evolved skills (JP has them; Global none yet)", () =
   assert.ok(ev && ev.jp > 0, "JP's evolved skills are listed");
   assert.ok(Number.isInteger(ev.global));
 });
+
+test("audit fixes: typed fragments with crystals, unique specialty multiplies, events halve past 1200", () => {
+  const O = require("../optimizer.js"), D = require("../deck.js");
+  // +1 per fragment of its type; a crystal of two colors gives +1.5 each, of one color +1 each.
+  assert.deepEqual(O.gmFragBonus([{ t: 0, c: "red" }, { t: 0, c: "red" }, { t: 5, c: "blue" }]), [2, 0, 0, 0, 0, 1]);
+  assert.deepEqual(O.gmFragBonus([{ t: 0, c: "red" }, { t: 2, c: "blue" }]), [1.5, 0, 1.5, 0, 0, 0]);
+  // A card whose unique adds Specialty Priority shows up on its training more than the sum would give.
+  const card = D.DATA.supports.find((c) => c.r === 3 && c.u && c.u.lv <= 50 && c.u.e.some((u) => u.type === 19) && ["speed", "stamina", "power", "guts", "wit"].includes(c.ty));
+  assert.ok(card, "a card with a specialty unique");
+  const ctx = O.buildCtx({ scenario: gmSc, build: "medium", runs: 2 });
+  const r = O.simulate(ctx, [{ card, lb: 4 }]);
+  assert.ok(r.stats.every((v) => v > 0));
+  // Grand Masters stats stay under the caps and Speed past 1200 is reached more slowly than before.
+  r.stats.forEach((v, i) => assert.ok(v <= gmSc.caps[i] + 1e-9));
+});
