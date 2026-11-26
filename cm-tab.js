@@ -627,8 +627,10 @@
       let whiteText = "Loading race skill values…";
       if (w) {
         const greens = (w.green || []).map((g) => Object.assign({}, g, { owners: g.owners.filter((u) => +u.cid !== +t.cid && (!ctx.today || (u.en && u.en <= ctx.today))) })).filter((g) => g.owners.length).slice(0, 4);
+        const must = F.mustUniques(greens);
         greenText = greens.length
-          ? greens.map((g) => `<b>${esc(ctx.skillName(g.id))}</b> (+${g.L.toFixed(2)} L · ${esc([...new Set(g.owners.map((u) => u.n))].slice(0, 2).join(", "))})`).join("; ")
+          ? greens.map((g) => `${must.has(String(g.id)) ? '<span class="pill good" title="Must-have: worth 1 L or more and at least 1.5× the next unique on this race">★ must-have</span> ' : ""}<b>${esc(ctx.skillName(g.id))}</b> (+${g.L.toFixed(2)} L · ${esc([...new Set(g.owners.map((u) => u.n))].slice(0, 2).join(", "))})`).join("; ")
+            + (must.size ? `<div class="mini">★ must-have: worth 1 L or more and at least 1.5× the next unique here${must.size > 1 ? "; any one of them does" : ""}. Get it from a parent (or her parents) whose character carries it.</div>` : `<div class="mini">No must-have here: the top uniques are close, so any of them is fine.</div>`)
           : "no inherited unique adds more than 0.10 L here.";
         const whites = w.white.filter((q) => q.L >= 0.05 && (!ctx.outNow || ctx.outNow(q.id)));
         const hasDeck = whites.some((q) => q.deck != null);
@@ -791,6 +793,17 @@
     }
 
     let lastVets = null;
+    // The must-have unique for this race (★ in Sparks to go for): whether her family carries it.
+    function mustLine(r, s) {
+      const w = r.x ? CP.want(r.x) : null, list = w ? (w.green || []).filter((g) => (g.owners || []).some((u) => +u.cid !== +r.t.cid && (!ctx.today || (u.en && u.en <= ctx.today)))) : [];
+      const must = F.mustUniques(list);
+      if (!must.size) return "";
+      const have = (s.green || []).filter((g) => must.has(String(g.id))).sort((a, b) => b.p - a.p)[0];
+      const names = [...must].map((id) => esc(ctx.skillName(id))).join(" or ");
+      if (have) return `<li><b>★ Must-have unique:</b> ${esc(ctx.skillName(have.id))} is in her family (${have.stars}★, about ${Math.round(have.p * 100)}% to fire).</li>`;
+      const owners = list.filter((g) => must.has(String(g.id))).flatMap((g) => g.owners.filter((u) => +u.cid !== +r.t.cid)).map((u) => u.n);
+      return `<li class="warn"><b>★ Must-have unique missing:</b> ${names}. Get it on Parent 2's side: a rental of ${esc([...new Set(owners)].slice(0, 3).join(", "))} (the "Search for an inherited unique" links in step 4).</li>`;
+    }
     // Your veteran as Parent 1 is already made: what her family brings the ace, and what's still
     // to find on Parent 2's side (blues in her stat priority, the pink, the whites).
     function vetAimHTML(r, pick) {
@@ -803,6 +816,7 @@
         <li><b>She brings:</b> ${esc(sparks(pick.v.self) || "no sparks listed")}${whites.length ? `; whites the ace can get from her family: ${whites.join(", ")}` : ""} · worth ${L(s.value)} L for the ace.</li>
         <li><b>Blue still to borrow</b> (her stat priority first): ${plan && plan.picks.length ? esc(plan.text) + (plan.closed ? " (covers her gaps)" : "") : plan && plan.closed ? "none: her gaps are covered" : "build her racing deck in CM &amp; decks for exact gaps"}.</li>
         <li><b>Pink:</b> ${need ? `<b>${esc(need.label)}</b> (${need.grade} → ${need.target})${fp && fp.stars ? `: her family brings ${fp.stars}★, about ${Math.round(fp.p * 100)}% to reach it; a rental with more helps` : ": none in her family yet, so look for it on Parent 2's side"}` : "the ace needs none for this race"}.</li>
+        ${mustLine(r, s)}
         <li><b>Whites still missing</b> (look for them on the rental): ${miss.length ? miss.join(", ") : "none worth much"}.</li>
       </ul></div>`;
     }
@@ -928,7 +942,7 @@
           <label class="field"><span>Whites</span><select data-cmp-rental="sort" ${attr}>${options([["whites", "In the link as preferred (P0/P1/P2), then affinity"], ["affinity", "Not in the link: affinity only"]], l.sort)}</select></label>
         </div>
         <fieldset class="cmp-required"><legend class="mini">Require whites (each one you tick must be ${scope === "training" ? "on her" : "in her line"}; every tick cuts the results)</legend>${l.whites.length ? `<div class="row-wrap"><button type="button" class="btn ghost small" data-cmp-require="all" ${attr}>Require all</button><button type="button" class="btn ghost small" data-cmp-require="none" ${attr}>Clear</button></div>` : ""}<div class="row-wrap">${l.whites.map(w => `<label class="chip-toggle small"><input type="checkbox" data-cmp-rental-white="${w.id}" ${attr}${selected.has(w.id) ? " checked" : ""}>${esc(ctx.skillName(w.id))}</label>`).join("") || '<span class="mini">No race whites missing.</span>'}</div></fieldset>
-        ${l.focused.length ? `<details><summary class="mini">Search for an inherited unique</summary>${l.focused.map(g => `<p><a href="${esc(g.search.url)}" target="_blank" rel="noopener">${esc(ctx.skillName(g.skill.id))} · ${g.skill.owners.map(t => esc(tName(t))).join(" / ")}</a></p><ul class="mini cmp-filters">${CP.searchSummary(g.search, ctx.skillName).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`).join("")}</details>` : ""}
+        ${l.focused.length ? `<details${F.mustUniques(l.green || []).size ? " open" : ""}><summary class="mini">Search for an inherited unique${F.mustUniques(l.green || []).size ? " (★ a must-have)" : ""}</summary>${l.focused.map(g => `<p>${F.mustUniques(l.green || []).has(String(g.skill.id)) ? '<span class="pill good">★ must-have</span> ' : ""}<a href="${esc(g.search.url)}" target="_blank" rel="noopener">${esc(ctx.skillName(g.skill.id))} · ${g.skill.owners.map(t => esc(tName(t))).join(" / ")}</a></p><ul class="mini cmp-filters">${CP.searchSummary(g.search, ctx.skillName).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`).join("")}</details>` : ""}
       </details>`;
     }
 

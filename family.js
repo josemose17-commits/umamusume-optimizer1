@@ -32,6 +32,7 @@
   const PARENT_OF = { g11: "p1", g12: "p1", g21: "p2", g22: "p2" };
   // In length units: 1 L counts like 60 stat points (as in the deck optimizer), and an
   // aptitude raised to A on the race like 1 L (a rough stand-in: no measured value).
+  const MUST_MIN = 1, MUST_GAP = 1.5;
   const STAT_PER_L = 60, APT_L = 1, HINT_L = 0.15, HINT_BY_STARS = [1, 2, 3];
   // Measured values per cup and style (data/stat-values.js, the race simulator): lengths per point
   // of each stat and per aptitude grade. Where a cup has none (stamina showdown, no course data),
@@ -104,6 +105,19 @@
     return [{ i: surf, target: sprint ? "S" : "A" }, dist != null ? { i: dist, target: sprint ? "A" : "S" } : null, STYLE_INDEX[style] != null ? { i: STYLE_INDEX[style], target: "A" } : null].filter(Boolean);
   }
 
+  // The must-have inherited uniques on this race: the top group of a list ranked by L (best
+  // first), when it stands clear of the rest. A unique is in it when it's worth MUST_MIN L or
+  // more and the group's last one is worth MUST_GAP x the next unique down (or there is none).
+  // At most the top 4; none when the values fall off evenly.
+  function mustUniques(list) {
+    const l = (list || []).filter((u) => u && u.L > 0).slice().sort((a, b) => b.L - a.L);
+    for (let k = 0; k < Math.min(4, l.length); k++) {
+      if (!(l[k].L >= MUST_MIN)) break;
+      const next = l[k + 1];
+      if (!next || l[k].L >= MUST_GAP * next.L) return new Set(l.slice(0, k + 1).map((u) => String(u.id)));
+    }
+    return new Set();
+  }
   function create(o) {
     const A = o.A, meta = o.skills; // meta: data/skill-purchases.js skills
     // A skill family (◎/○/gold share one): its white sparks all give the base white's hint.
@@ -267,10 +281,10 @@
     // What a white spark of each relevant family is worth to the ace ({ family: L }, her deck's
     // offers and her own skills counted).
     const worthOf = (x) => prep(x).eff;
-    return { lookFor, score, families, baseWhite, problems, worthOf, family };
+    return { lookFor, score, families, baseWhite, problems, worthOf, family, mustUniques };
   }
 
-  const api = { PAST_TARGET, blueWorth, HINT_BY_STARS, statPoints, aptL, measured, create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
+  const api = { mustUniques, MUST_MIN, MUST_GAP, PAST_TARGET, blueWorth, HINT_BY_STARS, statPoints, aptL, measured, create, twice, once, blueStats, pinkReach, startSteps, aptTargets, slotScale, WHITE, GREEN, PINK, BLUE, START_BLUE, EVENT_BLUE, GRAND, SLOTS, PARENT_OF, APT_LABELS, STAT_LABELS, STAT_PER_L, HINT_L, APT_L };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaFamily = api;
 })(typeof window !== "undefined" ? window : globalThis);
