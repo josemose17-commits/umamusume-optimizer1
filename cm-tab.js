@@ -253,7 +253,10 @@
         const plan = prefs.plan, vet = train.f.parents[0].cid;
         prefs.plan = { tid: train.f.t.id, vet, at: plan && +plan.tid === +train.f.t.id && +plan.vet === +vet && plan.at ? plan.at : new Date().toISOString() };
       }
-      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), fresh: fresh.slice(0, 6), useFresh, train, p1, trained: !!trained, made, userChoice: !!(selected && selected.cid && !selected.planned) };
+      // Your own pick (the family table) when your best veteran beats her by 3% or more.
+      const bestVet = vets[0] || null, userPick = !!(selected && selected.cid && !selected.planned);
+      const beaten = !useFresh && !trained && userPick && p1 && p1.kind === "vet" && bestVet && bestVet !== p1 && bestVet.v.id !== p1.v.id && bestVet.value > p1.value * 1.03 + 1e-9 ? { best: bestVet, by: bestVet.value - p1.value } : null;
+      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), allVets: vets.slice(0, 8), vetsHidden: vets.hidden || [], beaten, useFresh, train, p1, trained: !!trained, made, userChoice: !!(selected && selected.cid && !selected.planned) };
     }
 
     // Her part of the plan, for the new parent f0 and a deck: in the order it depends on, her
@@ -728,6 +731,7 @@
 
     // ② The new parent and her veteran (or your veteran as Parent 1), and the grandparent search.
     function p1HTML(c, a, d, r) {
+      if (r && r.allVets) lastVets = r.allVets;
       const prefs = freshOf(d), v = view(c, a), has = d.cards && d.cards.length;
       const stale = r && ((v && r.sig !== v.sig) || r.inputs !== inputsKey(c));
       const setup = `<div class="row-wrap"><label class="field"><span>Parent 1</span><select data-cmp-setup><option value="B"${prefs.setup === "B" ? " selected" : ""}>Train a new one: my veteran + a borrowed grandparent</option><option value="A"${prefs.setup === "A" ? " selected" : ""}>My veteran is Parent 1</option></select></label>
@@ -764,6 +768,8 @@
           ${gpHTML(r, prefs)}`;
       } else {
         out += `<p><b>${pick.v.id === "manual" ? "Your parent" : "Your veteran"} ${esc(vetName(pick.v))}</b>${pick.v.score ? ` · rating ${fmtN(pick.v.score)}` : ""} · ${sparks(pick.v.self)} · score <b>${fmt(pick.s.value)}</b> · affinity <b>${affText(pick)}</b>.</p>`;
+        if (r.beaten) out += `<p class="warn"><b>${esc(vetName(r.beaten.best.v))} beats your pick by ${fmt(r.beaten.by)}</b> (${fmt(r.beaten.best.value)} vs ${fmt(pick.value)}, ${Math.round(r.beaten.by / Math.max(0.01, pick.value) * 100)}% more for the ace). You chose ${esc(vetName(pick.v))} in the family table, so she stays until you switch. <button type="button" class="linkish" data-cmp-use-vet="${esc(String(r.beaten.best.v.id))}">Use ${esc(vetName(r.beaten.best.v))}</button></p>`;
+        out += p1WhyHTML(r, pick);
       }
       const other = (r.useFresh ? r.fresh : r.vets).filter((x) => x !== pick);
       if (other.length) out += `<details data-cmp-open="p1-other"><summary class="mini">Other choices (${other.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th class="num">For the ace</th><th class="num">Affinity</th><th></th></tr></thead><tbody>${other.map((x) => {
@@ -774,6 +780,19 @@
       return setup + out;
     }
 
+    let lastVets = null;
+    // Why this veteran as Parent 1: your best 8, each split into what her family gives the ace
+    // (her and her parents' sparks, in L), then the veterans left out and why.
+    function p1WhyHTML(r, pick) {
+      const rows = r.allVets || [];
+      if (!rows.length) return "";
+      const L = (v) => (Math.round((v || 0) * 100) / 100).toFixed(2), top = rows[0].value;
+      const pinkL = (s) => (s.pink || []).reduce((n, q) => n + q.p * q.L, 0);
+      const parents = (v) => (v.parents || []).filter(Boolean).map((m) => ctx.charName(m.cid)).join(" + ");
+      return `<details data-cmp-open="p1-vet-why"${opened["p1-vet-why"] ? " open" : ""}><summary class="mini">Why this order (your ${rows.length} best veteran${rows.length === 1 ? "" : "s"} as Parent 1)</summary><div class="table-wrap"><table class="plan"><thead><tr><th>#</th><th>Veteran (and her parents)</th><th class="num">Whites</th><th class="num">Unique</th><th class="num">Pink</th><th class="num">Blue</th><th class="num">Affinity</th><th class="num">For the ace</th><th class="num">Behind #1</th></tr></thead><tbody>${rows.map((o, i) => `<tr${o.v.id === pick.v.id ? ' class="cmp-pick"' : ""}><td class="num">${i + 1}</td><td><b>${esc(vetName(o.v))}</b>${parents(o.v) ? `<div class="mini">+ ${esc(parents(o.v))}</div>` : `<div class="mini warn">no parents recorded</div>`}<div class="mini">${esc(sparks(o.v.self) || "no sparks listed")}</div></td><td class="num">${L(o.s.whiteL)}</td><td class="num">${L(o.s.greenL)}</td><td class="num">${L(pinkL(o.s))}</td><td class="num">${L(o.s.blueL)}</td><td class="num">${o.s.total} ${o.s.symbol || ""}</td><td class="num"><b>${L(o.value)}</b></td><td class="num">${i ? "−" + L(top - o.value) : "–"}</td></tr>`).join("")}</tbody></table></div>
+        <p class="mini">Each part is what her family (she and her two parents) gives the ace on this race, in L: whites by race value × chance to fire (deck-hinted ones only for the extra discount), her family's uniques, pinks toward the aptitudes the ace needs, blues for the stats the ace's predicted line falls short on. Every chance rises with affinity (shown with a stand-in rental until you pick Parent 2). Her rating and her own stats don't count: only sparks are inherited.</p>
+        ${(r.vetsHidden || []).length ? `<p class="mini">Left out: ${r.vetsHidden.map((h) => `${esc(vetName(h.v))} (${esc(h.why)})`).join("; ")}.</p>` : ""}</details>`;
+    }
     // Why this new parent: what each part of her gives the ace (in L, expected), next to the
     // runners-up. Her own running style only counts through her pink (it lands on one of her A/S
     // aptitudes), her unique, and the rating the ace's skills give her (her SS race count).
@@ -1178,6 +1197,12 @@
         if (!ta || !ta.value.trim()) { ctx.flash("Paste the JSON first."); return true; }
         ctx.importVeterans(ta.value);
         afterImport();
+        return true;
+      }
+      const useVet = t.closest("[data-cmp-use-vet]");
+      if (useVet) {
+        const r = lastVets && lastVets.find((o) => String(o.v.id) === useVet.dataset.cmpUseVet);
+        if (r) { ctx.planFamily(r, null, true); ctx.save(); ctx.flash(`Parent 1 is now ${vetName(r.v)}. Press Find again to plan around her.`); ctx.rerender(); }
         return true;
       }
       const anyway = t.closest("[data-cmp-anyway]");
