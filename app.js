@@ -4101,6 +4101,7 @@
       // by default); a meta-uma track (one uma every cup) gets none unless you ask.
       parentStyles: () => parentStyles(),
       parentsPlanned: (p) => { const PV = window.UmaPullValues, g = PV && PV.groupOf(p); return !g || PV.parentGroupsOf(pullKinds()).includes(g); },
+      trackOf: (p) => { const PV = window.UmaPullValues; return (PV && p && PV.groupOf(p)) || null; },
       trackLabel: (p) => { const PV = window.UmaPullValues, g = PV && PV.groupOf(p); return g ? PV.GROUPS[g].label : ""; },
       trainParent: (o, section) => trainParent(o, section),
       // Parents step 3's "Improve this deck": ③'s deck optimizer for her, and how far it is (0-1, or null).
