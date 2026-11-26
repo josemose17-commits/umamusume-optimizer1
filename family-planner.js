@@ -130,6 +130,39 @@
       rows.sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total);
       return Object.assign(rows, { hidden });
     }
+    // Parent 1 and the rental Parent 2 chosen together: your 5 best veterans as Parent 1 (with their
+    // parents), plus the Parent 1 you'll train, each paired with every pasted rental and scored as
+    // one family (their shared G1s for affinity, pink stars added up at the start breakpoints,
+    // blues against her gaps). Best pairs first, with the gain over the family you have now.
+    function rankRentalPairs(f, x) {
+      const list = rentalsList();
+      if (!list.length) return [];
+      const base = Object.assign({}, f, { p2: blank(), g21: blank(), g22: blank() });
+      const cands = rankVets(base, "p1", x).slice(0, 5).map((r) => ({ key: String(r.v.id), fm: withVet(base, "p1", r.v), v: r.v }));
+      if (f.p1.cid && f.p1.vet == null) cands.push({ key: "keep", fm: base, v: null });
+      const rows = [];
+      cands.forEach((c) => list.forEach((r) => {
+        if (+r.parent.cid === +f.ace.cid || +r.parent.cid === +c.fm.p1.cid) return;
+        const sc = fam.score(familyOf(withRental(c.fm, r)), x);
+        if (!sc.problems.length) rows.push({ c, r, s: sc });
+      }));
+      rows.sort((a, b) => b.s.value - a.s.value || b.s.total - a.s.total);
+      return rows.slice(0, 6);
+    }
+    function pairRowsHTML(f, x) {
+      const rows = rankRentalPairs(f, x);
+      if (!rows.length) return "";
+      const now = f.p1.cid && f.p2.cid ? fam.score(familyOf(f), x) : null;
+      const cur = (row) => (row.c.v ? +f.p1.vet === +row.c.v.id : row.c.key === "keep") && f.p2.rental === row.r.friend;
+      return `<p class="mini"><b>Best pairs: Parent 1 and a rental together.</b> Your 5 best veterans${f.p1.cid && f.p1.vet == null ? ` and ${esc(ctx.charName(f.p1.cid))} (the Parent 1 you'll train)` : ""}, each with every pasted rental, scored as one family: shared G1 wins between the two parents add affinity, their pink stars add up at the start (1/4/7/10★), their blues count against her gaps. Sometimes your second-best veteran with the right rental wins.${now && !now.problems.length ? ` Your family now: ${now.value.toFixed(2)}.` : ""}</p>
+        <div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th>Rental Parent 2</th><th>Family</th><th>Affinity</th><th></th></tr></thead><tbody>${rows.map((row) => {
+          const gain = now && !now.problems.length ? row.s.value - now.value : null;
+          return `<tr><td>${row.c.v ? esc(vetName(row.c.v)) + `<div class="mini">your veteran · ${vetText(row.c.v)}</div>` : esc(ctx.charName(f.p1.cid)) + `<div class="mini">the Parent 1 you'll train</div>`}</td>
+            <td>${esc(row.r.names[0])} <span class="mini">+ ${esc(row.r.names[1] || "")} + ${esc(row.r.names[2] || "")}</span><div class="mini">${esc(row.r.trainer)} · ${sparkText(row.r.parent)}</div></td>
+            <td class="num">${row.s.value.toFixed(2)}${gain != null && Math.abs(gain) >= 0.005 ? `<div class="mini">${gain > 0 ? "+" : ""}${gain.toFixed(2)}</div>` : ""}</td><td class="num">${row.s.total} ${row.s.symbol}</td>
+            <td>${cur(row) ? `<span class="mini">in use</span>` : `<button type="button" class="linkish" data-fp-rpair="${row.c.key}|${row.r.friend}">Use pair</button>`}</td></tr>`;
+        }).join("")}</tbody></table></div>`;
+    }
     function rentalsHTML(f, x) {
       if (!RP || !f.rental) return "";
       const list = rentalsList(), rows = list.length ? rankRentals(f, x) : Object.assign([], { hidden: [] });
@@ -144,6 +177,7 @@
             <td>${esc(r.trainer)}<div class="mini">${r.friend.replace(/(\d{3})(?=\d)/g, "$1 ")}</div></td><td class="num">${row.s.value.toFixed(2)}</td><td class="num">${row.s.total} ${row.s.symbol}</td>
             <td><button type="button" class="linkish" data-fp-rent-use="${r.friend}">Use</button> <button type="button" class="linkish" data-fp-rent-del="${r.friend}" aria-label="Remove">✕</button></td></tr>`;
         }).join("")}</tbody></table></div>` : ""}
+        ${pairRowsHTML(f, x)}
         ${rows.hidden.length ? `<p class="mini">Not shown (the game wouldn't allow them in this family): ${rows.hidden.map((h) => `${esc(h.r.trainer)}'s ${esc(h.r.names[0])} (${esc(h.why)})`).join("; ")}.</p>` : ""}`;
     }
     const vetText = (v) => `rating ${(v.score || 0).toLocaleString("en-US")} · ${sparkText(v.self)}`;
@@ -427,6 +461,10 @@
         ctx.flash(`${ctx.charName(f.p1.cid)} sent to the parent builder: ① to ④ below.`);
       } else if ((el = hit("data-fp-build-undo"))) { if (f.builderUndo) ctx.undoBuilder(f.builderUndo); f.builderUndo = null; }
       else if ((el = hit("data-fp-rent-del"))) setRentals(rentalsList().filter((r) => r.friend !== el.dataset.fpRentDel));
+      else if ((el = hit("data-fp-rpair"))) {
+        const [k, friend] = el.dataset.fpRpair.split("|"), r = rentalsList().find((x) => x.friend === friend), v = k === "keep" ? null : byId().get(+k);
+        if (r && (k === "keep" || v)) Object.assign(f, withRental(v ? withVet(f, "p1", v) : f, r));
+      }
       else if ((el = hit("data-fp-rent-use"))) {
         const r = rentalsList().find((x) => x.friend === el.dataset.fpRentUse);
         if (r) {
