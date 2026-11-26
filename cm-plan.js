@@ -122,12 +122,15 @@
       };
     }
     const ACE_TIE = 0.03;
+    // Your veterans as Parent 1, best first; hidden: the ones left out, with why.
     function rankVets(x, vets) {
-      return (vets || []).filter((v) => +v.cid !== +x.ace.cid).map((v) => {
+      const hidden = [];
+      const rows = (vets || []).filter((v) => { if (+v.cid === +x.ace.cid) { hidden.push({ v, why: "same character as the ace" }); return false; } return true; }).map((v) => {
         const { f, rent } = vetFamily(x, v);
         const s = fam.score(familyOf(f), x);
         return { kind: "vet", v, rent, f, s, value: s.value };
-      }).filter((r) => !r.s.problems.length).sort((a, b) => b.value - a.value || b.s.total - a.s.total);
+      }).filter((r) => { if (r.s.problems.length) { hidden.push({ v: r.v, why: r.s.problems[0] }); return false; } return true; }).sort((a, b) => b.value - a.value || b.s.total - a.s.total);
+      return Object.assign(rows, { hidden });
     }
 
     // ---- a fresh Parent 1 ----
