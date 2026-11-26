@@ -257,7 +257,7 @@
       // Your own pick (the family table) when your best veteran beats her by 3% or more.
       const bestVet = vets[0] || null, userPick = !!(selected && selected.cid && !selected.planned);
       const beaten = !useFresh && !trained && userPick && p1 && p1.kind === "vet" && bestVet && bestVet !== p1 && bestVet.v.id !== p1.v.id && bestVet.value > p1.value * 1.03 + 1e-9 ? { best: bestVet, by: bestVet.value - p1.value } : null;
-      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), fresh: fresh.slice(0, 6), allVets: vets.slice(0, 8), vetsHidden: vets.hidden || [], beaten, useFresh, train, p1, trained: !!trained, made, userChoice: !!(selected && selected.cid && !selected.planned) };
+      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), prio: prioOf(d, p), fresh: fresh.slice(0, 6), allVets: vets.slice(0, 8), vetsHidden: vets.hidden || [], beaten, useFresh, train, p1, trained: !!trained, made, userChoice: !!(selected && selected.cid && !selected.planned) };
     }
 
     // Her part of the plan, for the new parent f0 and a deck: in the order it depends on, her
@@ -611,8 +611,8 @@
       if (plan && plan.picks.length) {
         blueText = `<b>Borrow ${esc(plan.text)}</b>${plan.closed ? " (covers her gaps)" : ""}. The parent you train gets a random stat (1 in 5), so aim for <b>600+</b> (55% 2★+) or <b>1100+</b> (80% 2★+, 10% 3★).`;
       } else if (gaps && gaps.some(Boolean)) {
-        const top = gaps.map((g, i) => [g, i]).filter(([g]) => g > 0).sort((a, b) => b[0] - a[0]).map(([g, i]) => `<b>${F.STAT_LABELS[i]}</b> (−${g})`);
-        blueText = `Borrow blues for her gaps: ${top.join(", ")}. On a parent you train, the stat rolls randomly (1 in 5) — push stats to <b>600+</b> / <b>1100+</b> for 2★–3★ odds.`;
+        const ord = prioOf(d, p), top = gaps.map((g, i) => [g, i]).filter(([g]) => g > 0).sort((a, b) => ord.indexOf(a[1]) - ord.indexOf(b[1])).map(([g, i]) => `<b>${F.STAT_LABELS[i]}</b> (−${g})`);
+        blueText = `Borrow blues for her gaps, in her stat priority: ${top.join(", ")}. On a parent you train, the stat rolls randomly (1 in 5) — push stats to <b>600+</b> / <b>1100+</b> for 2★–3★ odds.`;
       } else if (w && w.blue.length) {
         blueText = `<b>${w.blue.map((b) => esc(b.label)).join(" or ")}</b> (her build's key stats${d.predicted ? ", no stat gaps left" : "; build her racing deck in CM & decks for exact gaps"}). A trained parent's blue stat rolls randomly (1 in 5).`;
       } else {
@@ -654,6 +654,9 @@
     // stats). The searches ask for exactly that split. Typical affinity: a parent's 3★ blue adds
     // about 50 over the run, a grandparent's about the same at typical affinity (2★: about 29).
     const ROLL = 20;
+    // Her stat priority (CM & decks), most important first, as stat indexes.
+    const STAT_KEYS = ["speed", "stamina", "power", "guts", "wit"];
+    const prioOf = (d, p) => (ctx.acePriority ? ctx.acePriority(d, p) : STAT_KEYS).map((k) => STAT_KEYS.indexOf(k)).filter((i) => i >= 0);
     function bluePlan(r, left) {
       const after = left.slice(), picks = [];
       if (!r || !r.p1) return { picks, after, text: "", closed: false };
@@ -661,6 +664,7 @@
       if (!stats.length) return { picks, after, text: "", closed: true };
       const val = { p: [0, 0, F.blueStats(2, 100, 1), F.blueStats(3, 100, 1)], g: [0, 0, F.blueStats(2, 50, F.GRAND), F.blueStats(3, 50, F.GRAND)] };
       const pp = r.x ? F.statPoints(r.x) : [1, 1, 1, 1, 1].map(() => 1 / F.STAT_PER_L);
+      const order = r.prio && r.prio.length === 5 ? r.prio : [0, 1, 2, 3, 4];
       const slots = [];
       if (r.useFresh && !(r.train && r.train.f.rental)) slots.push({ key: "gp", who: "Grandparent", scale: "g" });
       slots.push({ key: "p2", who: "Parent 2", scale: "p" }, { key: "p2a", who: "Parent 2's parent", scale: "g" }, { key: "p2b", who: "Parent 2's other parent", scale: "g" });
@@ -679,8 +683,12 @@
           const line = {}; pick.forEach((o, n) => { if (o && slots[n].key.startsWith("p2")) line[o[0]] = (line[o[0]] || 0) + o[1]; });
           if (Object.values(line).some((v) => v > 8)) return;
           // Least short in lengths on her cup (equal per point where nothing's measured).
-          const short = rest.reduce((n, v, i) => n + Math.max(0, v) * pp[i], 0), key = [Math.round(short * 100), starsAsked, used.size];
-          if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && (key[1] < best.key[1] || (key[1] === best.key[1] && key[2] < best.key[2])))) best = { key, pick: pick.slice() };
+          // Her stat priority decides: the highest-priority stat's gap is filled first (to the
+          // nearest 5 points), then the next; then the fewest lengths short, stars asked, stats.
+          const short = rest.reduce((n, v, i) => n + Math.max(0, v) * pp[i], 0);
+          const key = order.map((i) => Math.round(Math.max(0, rest[i]) / 5)).concat([Math.round(short * 100), starsAsked, used.size]);
+          const better = (a, b) => { for (let n = 0; n < a.length; n++) if (a[n] !== b[n]) return a[n] < b[n]; return false; };
+          if (!best || better(key, best.key)) best = { key, pick: pick.slice() };
           return;
         }
         opts.forEach((o) => { pick[k] = o; walk(k + 1); });
@@ -761,6 +769,7 @@
         const top = ranked[0];
         out += `<p><b>Train ${esc(tName(pick.t))}</b> with your veteran <b>${esc(vetName(pick.parents[0]))}</b> (${sparks(pick.parents[0].self) || "no sparks listed"}) and ${pick.rental ? `your borrowed grandparent <b>${esc(pick.rental.names[0])}</b> (${sparks(pick.rental.parent) || "no sparks entered"})` : "a borrowed grandparent"} · for the ace: score <b>${fmt(pick.value)}</b> · affinity <b>${affText(pick)}</b>.</p>
           ${pick.aff && pick.aff.total < MIN_AFFINITY ? `<p class="mini warn">Her family reaches about ${pick.aff.total} affinity, ${MIN_AFFINITY - pick.aff.total} short of ${MIN_AFFINITY}: sparks fire less often. A veteran or rental with more affinity closes it; she's still first for what her sparks give the ace.</p>` : ""}
+          ${r.train ? `<section class="cmp-aim-box">${aimHTML(r)}<p class="mini">Her full plan (deck, races, Training Focus) is in <b>step 3 · Train her</b>.</p></section>` : ""}
           ${whyHTML(r, pick)}
           <label class="field"><span>Her veteran parent</span><select data-cmp-training-vet="${pick.t.id}"><option value="">Best for her${top ? " (" + esc(vetName(top.v)) + ")" : ""}</option>${ranked.map((o, i) => `<option value="${o.v.id}"${String(chosen.veteran) === String(o.v.id) ? " selected" : ""}>${i + 1}. ${esc(vetName(o.v))} · for the ace ${fmt(o.ace != null ? o.ace : o.value)}${o.aff ? " · ~" + o.aff.total + " " + o.aff.symbol : ""} · ${sparks(o.v.self)}</option>`).join("")}${rest.length ? `<optgroup label="Not ranked (a stronger one of the same character is above)">${rest.map((x) => `<option value="${x.id}"${String(chosen.veteran) === String(x.id) ? " selected" : ""}>${esc(vetName(x))} · ${sparks(x.self)}</option>`).join("")}</optgroup>` : ""}</select></label>
           ${vetWhyHTML(ranked)}
@@ -770,7 +779,7 @@
       } else {
         out += `<p><b>${pick.v.id === "manual" ? "Your parent" : "Your veteran"} ${esc(vetName(pick.v))}</b>${pick.v.score ? ` · rating ${fmtN(pick.v.score)}` : ""} · ${sparks(pick.v.self)} · score <b>${fmt(pick.s.value)}</b> · affinity <b>${affText(pick)}</b>.</p>`;
         if (r.beaten) out += `<p class="warn"><b>${esc(vetName(r.beaten.best.v))} beats your pick by ${fmt(r.beaten.by)}</b> (${fmt(r.beaten.best.value)} vs ${fmt(pick.value)}, ${Math.round(r.beaten.by / Math.max(0.01, pick.value) * 100)}% more for the ace). You chose ${esc(vetName(pick.v))} in the family table, so she stays until you switch. <button type="button" class="linkish" data-cmp-use-vet="${esc(String(r.beaten.best.v.id))}">Use ${esc(vetName(r.beaten.best.v))}</button></p>`;
-        out += p1WhyHTML(r, pick);
+        out += `<section class="cmp-aim-box">${vetAimHTML(r, pick)}</section>` + p1WhyHTML(r, pick);
       }
       const other = (r.useFresh ? r.fresh : r.vets).filter((x) => x !== pick);
       if (other.length) out += `<details data-cmp-open="p1-other"><summary class="mini">Other choices (${other.length})</summary><div class="table-wrap"><table class="plan"><thead><tr><th>Parent 1</th><th class="num">For the ace</th><th class="num">Affinity</th><th></th></tr></thead><tbody>${other.map((x) => {
@@ -782,6 +791,21 @@
     }
 
     let lastVets = null;
+    // Your veteran as Parent 1 is already made: what her family brings the ace, and what's still
+    // to find on Parent 2's side (blues in her stat priority, the pink, the whites).
+    function vetAimHTML(r, pick) {
+      const s = pick.s, L = (v) => (Math.round((v || 0) * 100) / 100).toFixed(2);
+      const wl = (s.white || []).filter((w) => ["p1", "g11", "g12"].includes(w.slot) && w.p * w.L >= 0.01).sort((a, b) => b.p * b.L - a.p * a.L);
+      const seen = new Set(), whites = wl.filter((w) => !seen.has(w.id) && seen.add(w.id)).slice(0, 5).map((w) => `${esc(ctx.skillName(w.id))} (${Math.round(w.p * 100)}%)`);
+      const plan = planFor(r), need = CP.pinkFocus(r.x, s), miss = CP.missingWhites(r.x, s).filter((w) => !ctx.outNow || ctx.outNow(w.id)).slice(0, 5).map((w) => esc(ctx.skillName(w.id)));
+      const fp = need && s.pink ? s.pink.find((q) => q.i === need.i) : null;
+      return `<div class="cmp-aim"><h4>What ${esc(vetName(pick.v))} brings, and what's left to find</h4><ul class="mini">
+        <li><b>She brings:</b> ${esc(sparks(pick.v.self) || "no sparks listed")}${whites.length ? `; whites the ace can get from her family: ${whites.join(", ")}` : ""} · worth ${L(s.value)} L for the ace.</li>
+        <li><b>Blue still to borrow</b> (her stat priority first): ${plan && plan.picks.length ? esc(plan.text) + (plan.closed ? " (covers her gaps)" : "") : plan && plan.closed ? "none: her gaps are covered" : "build her racing deck in CM &amp; decks for exact gaps"}.</li>
+        <li><b>Pink:</b> ${need ? `<b>${esc(need.label)}</b> (${need.grade} → ${need.target})${fp && fp.stars ? `: her family brings ${fp.stars}★, about ${Math.round(fp.p * 100)}% to reach it; a rental with more helps` : ": none in her family yet, so look for it on Parent 2's side"}` : "the ace needs none for this race"}.</li>
+        <li><b>Whites still missing</b> (look for them on the rental): ${miss.length ? miss.join(", ") : "none worth much"}.</li>
+      </ul></div>`;
+    }
     // Why this veteran as Parent 1: your best 8, each split into what her family gives the ace
     // (her and her parents' sparks, in L), then the veterans left out and why.
     function p1WhyHTML(r, pick) {

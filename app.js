@@ -4024,6 +4024,7 @@
       deck: (p, style, tid, races, s) => planDeck(p, style, tid, races, s),
       deckSetup: (p, style, tid, races, s) => planSetup(p, style, tid, races, s),
       skillPlan: () => {const c=cm("cm"),plan=currentSkillPlan(c);return plan && plan.mode==="plan"?plan:null;},
+      acePriority: (d, p) => acePriority(d || {}, p),
       refreshAceSkills: async () => {const plan=await runRaceSkills(false,true);if(!plan)throw new Error(deckJob("cm").raceError || "Compare the ace's skills first.");return plan;},
       parentLearning: (p,t,deck,n,f,prediction,weights) => parentLearning(p,t,deck,n,f,prediction,weights),
       deckOffers: (opts, cards) => T.deckOffers(opts, cards),
