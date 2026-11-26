@@ -615,3 +615,12 @@ test("a new parent's veteran parent: ranked by what she gives the ace; training 
   // Within 3%: the one that also helps training more comes first.
   assert.deepStrictEqual(sorted([{ id: "a", ace: 1.00, train: 0 }, { id: "b", ace: 0.99, train: 0.5 }]), ["b", "a"]);
 });
+
+test("a new parent's white spark chance follows the skill's kind until veterans tell", () => {
+  const C = require("../cm-plan.js"), d = require("../data/skill-purchases.js").skills;
+  const ids = Object.keys(d);
+  const gold = ids.find((i) => d[i][3] === 2), dbl = ids.find((i) => d[i][3] === 1 && d[i][2] && d[d[i][2]] && d[d[i][2]][3] === 1), white = ids.find((i) => d[i][3] === 1 && !d[i][2]);
+  assert.equal(C.kindSpark(gold), 0.4);
+  assert.equal(C.kindSpark(dbl), 0.25);
+  assert.equal(C.kindSpark(white), 0.2);
+});
