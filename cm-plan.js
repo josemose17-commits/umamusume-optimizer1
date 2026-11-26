@@ -26,6 +26,15 @@
   // Each parent or grandparent carrying the same white spark multiplies a learned skill's spark
   // chance by LINEAGE (JP table, Pochi 2022: base × 1.1^n, so 20% → 35.4% and gold 40% → 70.9% at 6).
   const SS_STARS = [0.2, 0.7, 0.1], LINEAGE = 1.1;
+  // Until your veterans tell, a learned skill's spark chance by its kind (GameTora): 20% for ○ and
+  // other whites, 25% for ◎ (a white with a white before it), 40% for gold.
+  const SKILLS = (root.UmaSkillPurchases || (typeof require !== "undefined" ? require("./data/skill-purchases.js") : {})).skills || {};
+  function kindSpark(id) {
+    const m = SKILLS[id];
+    if (!m) return 0.2;
+    if (m[3] === 2) return 0.4;
+    return m[2] && SKILLS[m[2]] && SKILLS[m[2]][3] === 1 ? 0.25 : 0.2;
+  }
   const SPARK_P = 0.3, STARS = [0.32, 0.6, 0.08], LEARN_MAX = 12, LEARN_SHARE = 0.75, MIN_VETS = 10, SPARK_RANGE = [0.15, 0.45];
   // Races and SS: your veterans in the scenario with BASE_EXTRA extra races or fewer (BASE_MIN
   // of them at least) give the ratings you reach; the simulation gives what each race costs.
@@ -137,7 +146,7 @@
       const spark = enough ? Math.max(SPARK_RANGE[0], Math.min(SPARK_RANGE[1], whites / learned)) : SPARK_P;
       // You always train a parent to SS, where white and green sparks come out 1★/2★/3★ 20/70/10%
       // (uma.guide), whatever ranks your veterans reached.
-      return { spark, stars: SS_STARS.slice(), learn: enough ? Math.round(counts[counts.length >> 1] * LEARN_SHARE) : LEARN_MAX, vets: enough ? with_.length : 0 };
+      return { spark, measured: enough, stars: SS_STARS.slice(), learn: enough ? Math.round(counts[counts.length >> 1] * LEARN_SHARE) : LEARN_MAX, vets: enough ? with_.length : 0 };
     }
     // Her white sparks in expectation: she learns the relevant whites her parent deck offers
     // (offers: { id: chance }), the most valuable first, up to r.learn of them; each becomes a
@@ -149,7 +158,10 @@
     function freshWhites(x, offers, aff, r, copies, cover, learning) {
       const fams = fam.families(x.rel), eff = fam.worthOf(x), cv = (f) => (cover && cover[f]) || 0;
       const fire = r.stars.reduce((n, d, k) => n + d * F.twice(F.WHITE, k + 1, aff), 0);
-      const got = Object.keys(fams).map((f) => ({ f, p: learning ? (learning.families[f] || {}).learn || 0 : Math.min(1, Math.max(0, ...fams[f].ids.map((id) => (offers && offers[id]) || 0))) }))
+      // The skill of the family she'd most likely buy (the one most offered): its kind sets the
+      // spark chance until your veterans give a measured rate.
+      const top = (f) => fams[f].ids.reduce((b, id) => ((offers && offers[id]) || 0) > ((offers && offers[b]) || 0) ? id : b, fams[f].ids[0]);
+      const got = Object.keys(fams).map((f) => ({ f, top: top(f), p: learning ? (learning.families[f] || {}).learn || 0 : Math.min(1, Math.max(0, ...fams[f].ids.map((id) => (offers && offers[id]) || 0))) }))
         .filter((a) => a.p > 0).sort((a, b) => eff[b.f] * (1 - cv(b.f)) - eff[a.f] * (1 - cv(a.f)) || b.p - a.p);
       let room = r.learn, value = 0;
       const list = [];
@@ -157,7 +169,7 @@
         const p = learning ? a.p : Math.min(a.p, room);
         if (p <= 0) return;
         room -= p;
-        const mult = Math.pow(LINEAGE, (copies && copies[a.f]) || 0), chance = Math.min(1, r.spark * mult);
+        const mult = Math.pow(LINEAGE, (copies && copies[a.f]) || 0), chance = Math.min(1, (r.measured === false ? kindSpark(a.top) : r.spark) * mult);
         // row.spark already mixes white (20%), ◎ (25%) and gold (40%) purchases; lineage copies
         // multiply each the same way.
         const row = learning && learning.families[a.f];
@@ -677,7 +689,7 @@
     return { aceFirst, context, outlook, trainedParent, itSkills, familyCover, pinkFocus, rankVets, rankFresh, freshWins, racePlan, upTo, popular, rates, freshWhites, extraOf, baseline, ssLimit, missingWhites, umaMoe, rentalSearch, searchSummary, trainingRentalSearch, rankTrainingRentals, trainingFamily, trainingStart, atRaceCount, raceWins, saddlesOf, rankRentals, want, rentalFor, fam, inherited, trainee };
   }
 
-  const api = { create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };
+  const api = { kindSpark, create, MARGIN, FRESH_STARS, SS_SHARE, SPARK_P, STARS, LEARN_MAX, BASE_EXTRA, BASE_MIN, BLUE_IDS, PINK_IDS, UMA_MOE };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaCmPlan = api;
 })(typeof window !== "undefined" ? window : globalThis);
