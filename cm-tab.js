@@ -146,7 +146,8 @@
       ctx.rerender();
       try { await fn(); } catch (err) { ctx.flash(err.message || String(err)); }
       job = null;
-      ctx.rerender();
+      // A drawing error must never leave the page on its last step.
+      try { ctx.rerender(); } catch (err) { ctx.flash("Couldn't show the result: " + (err.message || String(err))); }
     }
 
     // Her racing deck as CM & decks left it, described (the race skills it offers), or null.
@@ -256,7 +257,7 @@
       // Your own pick (the family table) when your best veteran beats her by 3% or more.
       const bestVet = vets[0] || null, userPick = !!(selected && selected.cid && !selected.planned);
       const beaten = !useFresh && !trained && userPick && p1 && p1.kind === "vet" && bestVet && bestVet !== p1 && bestVet.v.id !== p1.v.id && bestVet.value > p1.value * 1.03 + 1e-9 ? { best: bestVet, by: bestVet.value - p1.value } : null;
-      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), allVets: vets.slice(0, 8), vetsHidden: vets.hidden || [], beaten, useFresh, train, p1, trained: !!trained, made, userChoice: !!(selected && selected.cid && !selected.planned) };
+      return { a, style, t, x, gaps: x.gaps, setup: prefs.setup, vets: vets.slice(0, 6), fresh: fresh.slice(0, 6), allVets: vets.slice(0, 8), vetsHidden: vets.hidden || [], beaten, useFresh, train, p1, trained: !!trained, made, userChoice: !!(selected && selected.cid && !selected.planned) };
     }
 
     // Her part of the plan, for the new parent f0 and a deck: in the order it depends on, her
@@ -802,7 +803,7 @@
         const green = (y.s.green || []).filter((g) => g.slot === "p1").reduce((n, g) => n + g.p * g.L, 0);
         return { white: y.extra.whites.value, green, pink: y.extra.pink, blue: y.extra.blue, family: y.s.value - green };
       };
-      const list = [pick].concat(r.fresh.filter((y) => y !== pick).sort((a, b) => b.value - a.value).slice(0, 3));
+      const list = [pick].concat((r.fresh || []).filter((y) => y !== pick).sort((a, b) => b.value - a.value).slice(0, 3));
       const tops = (t) => F.APT_LABELS.filter((_, k) => ["S", "A"].includes(apt(t)[k]));
       const rows = list.map((y) => {
         const q = parts(y), g = apt(y.t)[i] || "?";
