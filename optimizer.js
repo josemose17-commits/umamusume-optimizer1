@@ -110,7 +110,8 @@
     const boost = sc.id === "grandlive" || (sc.id === "grandmasters" && GMs && opts.gmModel !== false) ? 1 : E.scenarioBoost({ fcal: [] }, sc);
     const t = opts.trainee ? D.trainee(opts.trainee) : null;
     return {
-      sc, w: b.w, target, caps, turns, camp, boost, calendar,
+      // The ace's stat priority (CM & decks), most important first, replaces the build's weights.
+      sc, w: Array.isArray(opts.priority) && opts.priority.length === 5 && E.statWeights ? E.statWeights({ priority: opts.priority }) : b.w, target, caps, turns, camp, boost, calendar,
       growth: t ? t.g : [0, 0, 0, 0, 0],
       start: t && t.b ? t.b.slice(0, 5) : [100, 100, 100, 100, 100],
       // Her parents' blue sparks (inheritFrom): start stats, and per inspiration each spark's
