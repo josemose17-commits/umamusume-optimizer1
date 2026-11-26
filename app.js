@@ -928,6 +928,11 @@
         if (v > 0) state.contest[e.target.dataset.cmContest] = v; else delete state.contest[e.target.dataset.cmContest];
         skillLimit = 60; save(); renderCM(); return;
       }
+      if (e.target.dataset.cmPrio != null) {
+        const c = cm("cm"), order = acePriority(c, presetById(c.preset)), i = +e.target.dataset.cmPrio, v = e.target.value, from = order.indexOf(v);
+        if (from !== i) { order.splice(from, 1); order.splice(i, 0, v); }
+        c.priority = order; save(); renderTab(); return;
+      }
       if (e.target.dataset.cm != null) { cmInput(e.target); return; }
       if (e.target.dataset.tier != null) { tierInput(e.target); return; }
       if (e.target.dataset.eu != null) { euInput(e.target); return; }
@@ -3023,7 +3028,7 @@
   // over: values to use instead of the saved ones (keepDeckResult compares with the result's races).
   function optKey(host = deckHost(), over, skillReady = true) {
     const c = Object.assign({}, cm(host), over || {});
-    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.useOwnScenarioCard !== false, c.makeupMode, careerScoreOf(c), JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [contestShare(c.preset), c.goal + (c.general ? "+general" + JSON.stringify((state.cmp.training || {}).hints || null) : ""), c.globalSkills, scenFor(host).id + ":" + euScen(host), JSON.stringify(state.caps), JSON.stringify(state.sparks), JSON.stringify(pasted[c.preset] && pasted[c.preset][c.style] || null), c.statsW, c.goal !== "race" && c.reachSS, c.rankGoal, JSON.stringify([c.staminaDebuffs || null, c.staminaGoal || null]), JSON.stringify(c.staminaLink || null), JSON.stringify(c.raceSkills ? Object.assign({},c.raceSkills,{open:undefined}) : null), c.preset, c.style, euScen(), JSON.stringify(euOver()), deckTrainee(host), c.ownedOnly, c.borrow, c.useOwnScenarioCard !== false, c.makeupMode, careerScoreOf(c), JSON.stringify(host === "cm" && c.goal === "race" ? acePriority(c, presetById(c.preset)) : null), JSON.stringify(deckInherit(host)), c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.itRaces, c.itManual, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), skillReady && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer(host = deckHost()) {
@@ -3053,7 +3058,7 @@
       if (!est) {
         try {
           const sv = skillMap(p.id, c.style);
-          const ctx = OPT.buildCtx({ scenario: hsc, build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, trainee: tid, caps: deckCaps(host, hsc), inherit: deckInherit(host), raceShare, runs: 16, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
+          const ctx = OPT.buildCtx({ scenario: hsc, build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, priority: host === "cm" && c.goal === "race" ? acePriority(c, p) : undefined, trainee: tid, caps: deckCaps(host, hsc), inherit: deckInherit(host), raceShare, runs: 16, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
@@ -3107,7 +3112,7 @@
         const specPurchase = host === "cm" && c.goal === "race" ? deckSpecPurchase(p, c) : null;
         // The heals need a value to be tracked in the deck's offers: a token one where they have none.
         if (healNeeds) { opts.skills = Object.assign({}, opts.skills); Object.keys(healNeeds).forEach((id) => { if (!(opts.skills[id] > 0)) opts.skills[id] = 0.001; }); }
-        const sim = { healNeeds, healExtra, specPurchase, scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
+        const sim = { healNeeds, healExtra, specPurchase, scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, priority: host === "cm" && c.goal === "race" ? acePriority(c, p) : undefined, raceValues: rv, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: tid, target: tg, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         // Compare every deck makeup: Euophrys' pick in each makeup your cards can fill, the full
         // search for the best few, then the best makeup (optimizer.js makeupSweep).
         // Your guide's makeups: the scenario the cup trains in, her distance (or the guide's nearest),
@@ -3399,7 +3404,7 @@
     if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
     const p = presetById(r.preset), sv = skillMap(p.id, c.style);
     const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-    const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+    const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, priority: host === "cm" && c.goal === "race" ? acePriority(c, p) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
     const job = OPT.sensitivity(sim, candidates);
     j.sensitivityJob = job; renderCM();
     const tick = () => {
@@ -3445,7 +3450,7 @@
       });
       const sv = skillMap(p.id, c.style);
       const stamina = host === "cm" && c.goal === "race" ? staminaEntry(p, c).result : null;
-      const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
+      const sim = { scenario: scenFor(host), build: p.build, buildTarget: c.goal === "race" ? raceBuildTarget(p, stamina, c.style) : undefined, priority: host === "cm" && c.goal === "race" ? acePriority(c, p) : undefined, raceValues: c.goal === "race" ? raceValues(p, c.style, stamina) : null, goldsFirst: c.goal === "race" && goldsFirstFor(p.id, c.style), trainee: deckTrainee(host), target: cmTargets(c) || undefined, caps: deckCaps(host, scenFor(host)), inherit: deckInherit(host), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: itShare(c) };
       const token = {}; j.wishJob = token; j.wish = null; renderCM();
       const out = []; let at = 0;
       const tick = () => {
@@ -3509,7 +3514,7 @@
         <span class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + esc(p.course.layout) + ")" : ""} · ${p.course.dist}${courseBonusText(p)}</span>
         <span>${esc(p.conditions)}</span>
         <span>Global <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP ${fmtDate(p.jp.start)}</span>
-        ${c ? (state.build === p.build ? `<span>Turn coach build: ${esc(b.label)}</span>` : `<button type="button" class="linkish" data-cm-build="${p.build}">Set the turn coach to ${esc(b.label)}</button>`) : ""}
+        ${c ? (state.build === p.build && (c.goal !== "race" || JSON.stringify(state.priority || null) === JSON.stringify(acePriority(c, p))) ? `<span>Turn coach build: ${esc(b.label)}</span>` : `<button type="button" class="linkish" data-cm-build="${p.build}">Set the turn coach to ${esc(b.label)}${c.goal === "race" ? " and her stat priority" : ""}</button>`) : ""}
       </div>
       <div class="cm-bar-row cm-bar-team">
         ${t.chips}
@@ -3608,6 +3613,19 @@
   }
   // How CM & decks scores a deck's careers: "p85" (her 85th-percentile career: CM, where you train
   // several and race your best) or "mean" (LoH: steady); auto follows the cup.
+  // The ace's stat priority, most important first: yours (CM & decks, per cup and ace), else
+  // game8's for Medium and Long (Stamina > Speed > Power > Wit > Guts) and Speed first for Sprint,
+  // Mile and Dirt. Each stat still counts much less once it reaches its target.
+  const ACE_PRIORITY = { long: ["stamina", "speed", "power", "wit", "guts"], short: ["speed", "power", "wit", "stamina", "guts"] };
+  const aceDefaultPriority = (p) => (p && (p.build === "medium" || p.build === "long") ? ACE_PRIORITY.long : ACE_PRIORITY.short).slice();
+  const validPrio = (x) => Array.isArray(x) && x.length === 5 && E.STATS.every((s) => x.includes(s));
+  const acePriority = (c, p) => (validPrio(c.priority) ? c.priority.slice() : aceDefaultPriority(p));
+  function acePrioHTML(c, p) {
+    const mine = validPrio(c.priority), order = acePriority(c, p), labels = ["1st", "2nd", "3rd", "4th", "5th"];
+    return `<div class="field-block"><span class="mini"><b>Her stat priority</b>, most important first${mine ? "" : ` (the default for ${p.build === "medium" || p.build === "long" ? "Medium and Long: game8's" : "Sprint, Mile and Dirt"})`}. The career sim and the deck search fill her stats in this order, each up to its target.</span>
+      <div class="prio-row">${order.map((st, i) => `${i ? '<span class="prio-gt" aria-hidden="true">›</span>' : ""}<label class="prio-f"><span class="sr-only">${labels[i]}</span><select data-cm-prio="${i}" aria-label="${labels[i]} priority">${E.STATS.map((x) => `<option value="${x}"${x === st ? " selected" : ""}>${E.STAT_LABELS[x]}</option>`).join("")}</select></label>`).join("")}
+      ${mine ? '<button type="button" class="btn ghost small" data-cm-prio-reset>Reset</button>' : ""}</div></div>`;
+  }
   function careerScoreOf(c) {
     if (c.careerScore === "p85" || c.careerScore === "mean") return c.careerScore;
     const p = presetById(c.preset);
@@ -3740,6 +3758,7 @@
       </section>
       <section class="panel deck-card" data-deck-card="targets">
       <h3>Targets &amp; stamina</h3>
+      ${host === "cm" && goal === "race" ? acePrioHTML(c, p) : ""}
       ${targetsHTML(p, c, host)}
       ${host === "cm" ? raceSkillsHTML(c) : ""}
       </section>
@@ -5201,8 +5220,14 @@
       if (ace) ace.style = c.style;
       skillLimit = 60; save(); renderCM(); return true;
     }
+    if (hit("[data-cm-prio-reset]")) { delete cm("cm").priority; save(); renderTab(); return true; }
     const build = hit("[data-cm-build]");
-    if (build) { state.build = build.dataset.cmBuild; commit(true); flash("Turn coach build set to " + E.BUILDS[state.build].label); return true; }
+    if (build) {
+      // The coach takes her build and her stat priority from CM & decks.
+      const c = cm("cm"), pr = c.goal === "race" ? acePriority(c, presetById(c.preset)) : null;
+      state.build = build.dataset.cmBuild; if (pr) state.priority = pr; commit(true);
+      flash("Turn coach build set to " + E.BUILDS[state.build].label + (pr ? ", stat priority " + pr.map((x) => E.STAT_LABELS[x]).join(" > ") : "")); return true;
+    }
     const goalBtn = hit("[data-cm-goal]");
     if (goalBtn) { c.goal = goalBtn.dataset.cmGoal; save(); renderCM(); return true; }
     if (hit("#compClear")) { c.comp = {}; save(); renderCM(); return true; }
