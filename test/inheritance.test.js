@@ -27,3 +27,13 @@ test("the career sim adds inheritance: more of the sparked stats, same seeds oth
   assert.ok(withInh.stats[1] > base.stats[1] + 30, "stamina: " + base.stats[1] + " -> " + withInh.stats[1]);
   assert.ok(withInh.stats[2] > base.stats[2], "power up too");
 });
+
+test("must-have inherited uniques: the top group when it stands clear of the rest", () => {
+  const F = require("../family.js");
+  const ids = (l) => [...F.mustUniques(l.map((L, i) => ({ id: i, L })))].map(Number);
+  assert.deepEqual(ids([6.01, 5.58, 2.39, 2.39]), [0, 1]); // two clear picks
+  assert.deepEqual(ids([4, 1, 0.9]), [0]);
+  assert.deepEqual(ids([2, 1.9, 1.85, 1.8, 1.7]), []); // falls off evenly: none
+  assert.deepEqual(ids([0.8, 0.2]), []); // under 1 L: none
+  assert.deepEqual(ids([3]), [0]);
+});
