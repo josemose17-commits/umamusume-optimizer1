@@ -3567,6 +3567,11 @@
     // A target past the scenario's cap (with her blue sparks' uncaps) can't be reached by anyone:
     // it's clipped to the cap and flagged.
     const raw = E.STATS.map((s) => (r.fit ? r.fit.target[s] : mine[s] != null ? mine[s] : bt[s]));
+    // A heal she gets in 60%+ of careers lowers her stamina need (the deck search scored with it):
+    // the Stamina target shown, her gaps and Parents' blue plan use the lowered one too.
+    const heal = r.fit && r.fit.after && r.fit.after.heal && r.fit.after.heal.cut > 0 ? r.fit.after.heal : null;
+    const staminaBefore = heal ? Math.round(raw[1]) : null;
+    if (heal) raw[1] = Math.max(0, Math.round(raw[1] - heal.cut));
     const target = raw.map((t, i) => Math.min(caps[E.STATS[i]] != null ? caps[E.STATS[i]] : Infinity, t));
     const overCap = raw.map((t, i) => (t > target[i] ? { asked: Math.round(t), cap: target[i] } : null));
     const exp = r.inherit ? inheritExpected(r.inherit.inherit) : null;
@@ -3578,7 +3583,7 @@
     const finals = (r.est.finals || []).map((f) => f.stats);
     const pct = (xs, q) => { const a = xs.slice().sort((x, y) => x - y), at = (a.length - 1) * q, lo = Math.floor(at); return Math.round(a[lo] + (a[Math.ceil(at)] - a[lo]) * (at - lo)); };
     const best = finals.length > 3 ? E.STATS.map((_, i) => k(pct(finals.map((f) => f[i]), 0.85), i)) : null;
-    return { ratio, scenarioName: sc.name, target, stats, withInh: exp ? withInh : null, exp, best, overCap, caps: E.STATS.map((s) => caps[s]), short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
+    return { heal, staminaBefore, ratio, scenarioName: sc.name, target, stats, withInh: exp ? withInh : null, exp, best, overCap, caps: E.STATS.map((s) => caps[s]), short: stats.map((v, i) => Math.max(0, target[i] - v)), mine: E.STATS.map((s) => mine[s] != null) };
   }
   // Inheritance in CM & decks' careers: the family planned in Parents for this ace (its members'
   // blue sparks and own affinity), else the blue sparks typed in the coach (affinity unknown:
@@ -4621,7 +4626,7 @@
       const gapTable = `<div class="predicted">
       <b>Predicted stats and her gaps</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers${g.ratio ? `, scaled to your ${esc(g.scenarioName)} runs (${E.STATS.map((s, i) => `${E.STAT_LABELS[s]} ×${g.ratio[i].toFixed(2)}`).join(", ")})` : ""}, ${g.withInh ? `with inheritance from ${esc(r.inherit.source)}` : "before inheritance: plan her family in Parents, or type her blue sparks in the coach, to count it"})</span>
       <div class="table-wrap"><table class="pred cm-gaps"><thead><tr><th></th>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
-        <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${g.overCap[i] ? `<div class="mini warn" title="Asked ${g.overCap[i].asked}: past this scenario's cap, so no run reaches it">cap (asked ${g.overCap[i].asked})</div>` : g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
+        <tbody><tr><th>Target</th>${g.target.map((t, i) => `<td class="num">${t}${i === 1 && g.heal ? `<div class="mini" title="Lowered by ${esc(debuffOrSkillName(g.heal.id))}: she gets it in about ${Math.round(g.heal.p * 100)}% of careers">heal: was ${g.staminaBefore}</div>` : ""}${g.overCap[i] ? `<div class="mini warn" title="Asked ${g.overCap[i].asked}: past this scenario's cap, so no run reaches it">cap (asked ${g.overCap[i].asked})</div>` : g.mine[i] ? "" : '<div class="mini">build</div>'}</td>`).join("")}</tr>
         ${g.withInh ? `<tr><th>Predicted</th>${g.withInh.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr><tr><th>Before inheritance</th>${g.stats.map((v) => `<td class="num">${v}</td>`).join("")}</tr>` : `<tr><th>Predicted</th>${g.stats.map((v) => `<td class="num"><b>${v}</b></td>`).join("")}</tr>`}
         ${g.best ? `<tr><th title="Each stat's 85th percentile over the simulated careers: what a good run reaches">Best runs (85%)</th>${g.best.map((v) => `<td class="num">${v}</td>`).join("")}</tr>` : ""}
         <tr><th>Short</th>${g.short.map((v, i) => `<td class="num ${v > 0 ? "short" : "over"}">${v > 0 ? "−" + v : "+" + (g.stats[i] - g.target[i])}</td>`).join("")}</tr></tbody></table></div>
